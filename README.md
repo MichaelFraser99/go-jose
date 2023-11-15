@@ -16,10 +16,19 @@ Currently, the module will support the following signing algorithms:
 - ES512
 
 ## Signers
-Each algorithm packages a NewSigner() method. This returns a crypto.Signer implementation for the given algorithm complete with generated key pair. The below example shows how to generate a signer for ES256:
+Each algorithm packages a NewSigner() method. This returns a `crypto.Signer` implementation for the given algorithm complete with generated key pair. The below example shows how to generate a signer for ES256:
 ```go
 signer, err := es256.NewSigner()
 ```
+
+## SignerOpts
+This package includes a SignerOpts implementation as shown below:
+```go
+type SignerOpts struct {
+	Hash crypto.Hash
+}
+```
+This is provided for simplicity and usage is in line with that specified by the `crypto.Signer` interface. If a hash isn't specified, no hashing is assumed as having occured and the signing algorithms will perform their own hashing.
 
 ## Validators
 In addition to the packaged signers, a validator type is also included for each algorithm. This can be constructed in one of two ways:

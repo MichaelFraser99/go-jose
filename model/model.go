@@ -1,5 +1,7 @@
 package model
 
+import "crypto"
+
 type Algorithm int
 
 const (
@@ -19,4 +21,12 @@ func (a Algorithm) String() string {
 	default:
 		return ""
 	}
+}
+
+type SignerOpts struct {
+	Hash crypto.Hash
+}
+
+func (s SignerOpts) HashFunc() crypto.Hash {
+	return s.Hash
 }
