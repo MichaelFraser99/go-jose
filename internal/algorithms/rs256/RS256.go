@@ -1,10 +1,9 @@
-package es256
+package rs256
 
 import (
 	"crypto"
-	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"fmt"
 	e "github.com/MichaelFraser99/go-jose/error"
@@ -13,41 +12,41 @@ import (
 	"io"
 )
 
-const keySize = 64
-
 type Signer struct {
 	alg        model.Algorithm
-	privateKey *ecdsa.PrivateKey
+	privateKey *rsa.PrivateKey
 }
 
 type Validator struct {
-	publicKey *ecdsa.PublicKey
+	publicKey *rsa.PublicKey
 }
 
-func NewSigner() (*Signer, error) {
-	curve := elliptic.P256()
-	pk, err := ecdsa.GenerateKey(curve, rand.Reader)
+func NewSigner(size int) (*Signer, error) {
+	if size < 2048 {
+		return nil, fmt.Errorf("specified key bit size should be at least 2048")
+	}
+	pk, err := rsa.GenerateKey(rand.Reader, size)
 	if err != nil {
 		return nil, &e.SigningError{Message: fmt.Sprintf("failed to generate key: %s", err.Error())}
 	}
 	return &Signer{
-		alg:        model.ES256,
+		alg:        model.RS256,
 		privateKey: pk,
 	}, nil
 }
 
 func NewValidator(publicKey crypto.PublicKey) (*Validator, error) {
-	ecdsaPublicKey, ok := publicKey.(*ecdsa.PublicKey)
+	rsaPublicKey, ok := publicKey.(*rsa.PublicKey)
 	if !ok {
-		return nil, &e.InvalidPublicKey{Message: "invalid key provided for ES256"}
+		return nil, &e.InvalidPublicKey{Message: "invalid key provided for RS256"}
 	}
 	return &Validator{
-		publicKey: ecdsaPublicKey,
+		publicKey: rsaPublicKey,
 	}, nil
 }
 
 func NewValidatorFromJwk(publicKeyJson []byte) (*Validator, error) {
-	publicKey, err := common.NewECDSAPublicKeyFromJson(publicKeyJson, elliptic.P256())
+	publicKey, err := common.NewRSAPublicKeyFromJson(publicKeyJson)
 	if err != nil {
 		return nil, err
 	}
@@ -67,12 +66,16 @@ func (signer *Signer) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts
 		return nil, &e.SigningError{Message: "invalid hash function provided for specified signer"}
 	}
 
+	var hashedDigest []byte
 	if opts == nil || opts.HashFunc() == 0 {
-		hashedDigest := sha256.Sum256(digest)
-		digest = hashedDigest[:]
+		hash := sha256.Sum256(digest)
+		hashedDigest = hash[:]
+	} else {
+		hashedDigest = make([]byte, len(digest))
+		copy(hashedDigest, digest)
 	}
 
-	signature, err = common.EllipticCurveSign(rand, *signer.privateKey, digest[:], keySize)
+	signature, err = common.RsaPkcs1Sign(rand, *signer.privateKey, hashedDigest[:], crypto.SHA256)
 	if err != nil {
 		return nil, err
 	}
@@ -81,12 +84,13 @@ func (signer *Signer) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts
 }
 
 func (validator *Validator) ValidateSignature(digest, signature []byte) (bool, error) {
-	bodyHash := sha256.Sum256(digest)
+	hashedDigest := sha256.Sum256(digest)
 
-	r, s, err := common.ExtractRSFromSignature(signature, keySize)
+	err := rsa.VerifyPKCS1v15(validator.publicKey, crypto.SHA256, hashedDigest[:], signature)
+
 	if err != nil {
-		return false, &e.InvalidSignature{Message: "invalid signature"}
+		return false, &e.InvalidSignature{Message: fmt.Sprintf("invalid signature: %s", err.Error())}
 	}
 
-	return ecdsa.Verify(validator.publicKey, bodyHash[:], r, s), nil
+	return true, nil
 }

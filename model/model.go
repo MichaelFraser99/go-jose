@@ -8,6 +8,7 @@ const (
 	ES256 Algorithm = iota
 	ES384
 	ES512
+	RS256
 )
 
 func (a Algorithm) String() string {

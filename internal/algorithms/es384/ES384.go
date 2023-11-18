@@ -47,7 +47,7 @@ func NewValidator(publicKey crypto.PublicKey) (*Validator, error) {
 }
 
 func NewValidatorFromJwk(publicKeyJson []byte) (*Validator, error) {
-	publicKey, err := common.NewPublicKeyFromJson(publicKeyJson, elliptic.P384())
+	publicKey, err := common.NewECDSAPublicKeyFromJson(publicKeyJson, elliptic.P384())
 	if err != nil {
 		return nil, err
 	}
@@ -72,12 +72,12 @@ func (signer *Signer) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts
 		digest = hashedDigest[:]
 	}
 
-	signedToken, err := common.Sign(rand, *signer.privateKey, digest[:], keySize)
+	signature, err = common.EllipticCurveSign(rand, *signer.privateKey, digest[:], keySize)
 	if err != nil {
 		return nil, err
 	}
 
-	return signedToken, nil
+	return signature, nil
 }
 
 func (validator *Validator) ValidateSignature(digest, signature []byte) (bool, error) {
@@ -85,7 +85,7 @@ func (validator *Validator) ValidateSignature(digest, signature []byte) (bool, e
 
 	r, s, err := common.ExtractRSFromSignature(signature, keySize)
 	if err != nil {
-		return false, err
+		return false, &e.InvalidSignature{Message: "invalid signature"}
 	}
 
 	return ecdsa.Verify(validator.publicKey, bodyHash[:], r, s), nil
