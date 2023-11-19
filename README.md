@@ -14,6 +14,9 @@ Currently, the module will support the following signing algorithms:
 - ES256
 - ES384
 - ES512
+- RS256
+- RS384
+- RS512
 
 ## Signers
 Each algorithm packages a NewSigner() method. This returns a `crypto.Signer` implementation for the given algorithm complete with generated key pair. The below example shows how to generate a signer for ES256:
