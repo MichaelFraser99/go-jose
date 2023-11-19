@@ -10,7 +10,7 @@ go get github.com/MichaelFraser99/go-jose
 ```
 
 ## Algorithms Supported
-Currently, the module will support the following signing algorithms:
+Currently, the module supports the following signing algorithms:
 - ES256
 - ES384
 - ES512
