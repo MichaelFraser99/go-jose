@@ -15,6 +15,7 @@ import (
 type Signer struct {
 	alg        model.Algorithm
 	privateKey *rsa.PrivateKey
+	validator  *Validator
 }
 
 type Validator struct {
@@ -29,9 +30,14 @@ func NewSigner(size int) (*Signer, error) {
 	if err != nil {
 		return nil, &e.SigningError{Message: fmt.Sprintf("failed to generate key: %s", err.Error())}
 	}
+	validator, err := NewValidator(pk.Public())
+	if err != nil {
+		return nil, fmt.Errorf("error reading generated public key")
+	}
 	return &Signer{
 		alg:        model.RS256,
 		privateKey: pk,
+		validator:  validator,
 	}, nil
 }
 
@@ -59,6 +65,10 @@ func (signer *Signer) Alg() model.Algorithm {
 
 func (signer *Signer) Public() crypto.PublicKey {
 	return signer.privateKey.Public()
+}
+
+func (signer *Signer) Validator() *Validator {
+	return signer.validator
 }
 
 func (signer *Signer) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error) {
@@ -93,4 +103,8 @@ func (validator *Validator) ValidateSignature(digest, signature []byte) (bool, e
 	}
 
 	return true, nil
+}
+
+func (validator *Validator) Jwk() map[string]string {
+	return common.JwkFromRSAPublicKey(validator.publicKey)
 }

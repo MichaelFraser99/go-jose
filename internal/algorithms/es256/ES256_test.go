@@ -87,7 +87,48 @@ func TestES256_Sign(t *testing.T) {
 		t.FailNow()
 	}
 
+	jwk := validator.Jwk()
+	jwkBytes, err := json.Marshal(jwk)
+	if err != nil {
+		t.Errorf("failed to marshal JWK as map: %s", err.Error())
+		t.FailNow()
+	}
+	val, ok := jwk["kty"]
+	if !ok || val != "EC" {
+		t.Errorf("kty key is missing or wrong")
+	}
+	_, ok = jwk["x"]
+	if !ok {
+		t.Errorf("n key is missing")
+	}
+	_, ok = jwk["y"]
+	if !ok {
+		t.Errorf("e key is missing")
+	}
+	crv, ok := jwk["crv"]
+	if !ok && crv != "P-256" {
+		t.Errorf("crv key is missing or wrong")
+	}
+
+	t.Log(digest)
+	t.Log(base64.RawURLEncoding.EncodeToString(signature))
+	t.Log(string(jwkBytes))
+
 	valid, err := validator.ValidateSignature([]byte(digest), signature)
+	if err != nil {
+		t.Error("no error should be thrown:", err)
+	}
+	if !valid {
+		t.Error("signature is not valid")
+	}
+
+	val2, err := NewValidatorFromJwk(jwkBytes)
+	if err != nil {
+		t.Errorf("failed to create validator from public key jwk: %s", err.Error())
+		t.FailNow()
+	}
+
+	valid, err = val2.ValidateSignature([]byte(digest), signature)
 	if err != nil {
 		t.Error("no error should be thrown:", err)
 	}

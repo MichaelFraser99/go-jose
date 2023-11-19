@@ -86,13 +86,44 @@ func TestRS256_Sign(t *testing.T) {
 		t.FailNow()
 	}
 
+	jwk := validator.Jwk()
+	jwkBytes, err := json.Marshal(jwk)
+	if err != nil {
+		t.Errorf("failed to marshal JWK as map: %s", err.Error())
+		t.FailNow()
+	}
+	val, ok := jwk["kty"]
+	if !ok || val != "RSA" {
+		t.Errorf("kty key is missing or wrong")
+	}
+	_, ok = jwk["n"]
+	if !ok {
+		t.Errorf("n key is missing")
+	}
+	_, ok = jwk["e"]
+	if !ok {
+		t.Errorf("e key is missing")
+	}
+
 	t.Log(digest)
 	t.Log(base64.RawURLEncoding.EncodeToString(signature))
-
-	jPub, err := json.Marshal(rs256.Public())
-	t.Log(string(jPub))
+	t.Log(string(jwkBytes))
 
 	valid, err := validator.ValidateSignature([]byte(digest), signature)
+	if err != nil {
+		t.Error("no error should be thrown:", err)
+	}
+	if !valid {
+		t.Error("signature is not valid")
+	}
+
+	val2, err := NewValidatorFromJwk(jwkBytes)
+	if err != nil {
+		t.Errorf("failed to create validator from public key jwk: %s", err.Error())
+		t.FailNow()
+	}
+
+	valid, err = val2.ValidateSignature([]byte(digest), signature)
 	if err != nil {
 		t.Error("no error should be thrown:", err)
 	}

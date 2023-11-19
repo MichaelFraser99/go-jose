@@ -64,6 +64,36 @@ func NewECDSAPublicKeyFromJson(publicKeyJson []byte, curve elliptic.Curve) (*ecd
 	return pk, nil
 }
 
+func JwkFromECDSAPublicKey(publicKey *ecdsa.PublicKey) map[string]string {
+	jwk := map[string]string{}
+
+	curveBits := publicKey.Curve.Params().BitSize
+	curveBytes := curveBits / 8
+	if curveBits%8 > 0 {
+		curveBytes++
+	}
+
+	xBytes := publicKey.X.Bytes()
+	yBytes := publicKey.Y.Bytes()
+
+	if len(xBytes) < curveBytes {
+		padding := make([]byte, curveBytes-len(xBytes))
+		xBytes = append(padding, xBytes...)
+	}
+	if len(yBytes) < curveBytes {
+		padding := make([]byte, curveBytes-len(yBytes))
+		yBytes = append(padding, yBytes...)
+	}
+
+	b64X := base64.RawURLEncoding.EncodeToString(xBytes)
+	b64Y := base64.RawURLEncoding.EncodeToString(yBytes)
+
+	jwk["x"] = b64X
+	jwk["y"] = b64Y
+	jwk["kty"] = "EC"
+	return jwk
+}
+
 func NewRSAPublicKeyFromJson(publicKeyJson []byte) (*rsa.PublicKey, error) {
 	var publicKey RSAPublicKey
 	err := json.Unmarshal(publicKeyJson, &publicKey)
@@ -96,6 +126,24 @@ func NewRSAPublicKeyFromJson(publicKeyJson []byte) (*rsa.PublicKey, error) {
 	pk.E = int(e.Int64())
 
 	return pk, nil
+}
+
+func JwkFromRSAPublicKey(publicKey *rsa.PublicKey) map[string]string {
+	jwk := map[string]string{}
+
+	nBytes := publicKey.N.Bytes()
+	eBytes := big.NewInt(int64(publicKey.E)).Bytes()
+
+	b64N := make([]byte, base64.RawURLEncoding.EncodedLen(len(nBytes)))
+	base64.RawURLEncoding.Encode(b64N, nBytes)
+
+	b64E := make([]byte, base64.RawURLEncoding.EncodedLen(len(eBytes)))
+	base64.RawURLEncoding.Encode(b64E, eBytes)
+
+	jwk["n"] = string(b64N)
+	jwk["e"] = string(b64E)
+	jwk["kty"] = "RSA"
+	return jwk
 }
 
 func ExtractRSFromSignature(signature []byte, keySize int) (*big.Int, *big.Int, error) {

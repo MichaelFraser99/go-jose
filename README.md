@@ -21,6 +21,12 @@ Each algorithm packages a NewSigner() method. This returns a `crypto.Signer` imp
 signer, err := es256.NewSigner()
 ```
 
+In addition to the methods specified by the `crypto.Signer` interface, the signer object also packages a Validator (see more below) bound to matching public key. This can be accessed through the `Validator()` method
+```go
+signer, err := es256.NewSigner()
+validator := signer.Validator()
+```
+
 ## SignerOpts
 This package includes a SignerOpts implementation as shown below:
 ```go
@@ -49,12 +55,18 @@ The NewValidatorFromJwk method takes in the bytes of a jwk format public key and
 validator, err := es256.NewValidatorFromJwk(publicKeyBytes)
 ```
 
-Validators have a single method `ValidateSignature` which takes in the bytes of the digest and signature and returns a boolean indicating whether the signature is valid. The below example shows how to validate a signature:
+The validator object has a method `ValidateSignature` which takes in the bytes of the digest and signature and returns a boolean indicating whether the signature is valid. The below example shows how to validate a signature:
 ```go
 // Validate a signature
 validator, err := es256.NewValidator(publicKey)
 
 valid, err := validator.ValidateSignature(digest, signature)
+```
+
+In addition, the validator object also has a method `Jwk()` which returns a `map[string]string` representation of the public key in jwk format
+```go
+validator, err := es256.NewValidator(publicKey)
+jwk := validator.Jwk()
 ```
 
 ### Errors

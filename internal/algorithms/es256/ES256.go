@@ -18,6 +18,7 @@ const keySize = 64
 type Signer struct {
 	alg        model.Algorithm
 	privateKey *ecdsa.PrivateKey
+	validator  *Validator
 }
 
 type Validator struct {
@@ -30,9 +31,14 @@ func NewSigner() (*Signer, error) {
 	if err != nil {
 		return nil, &e.SigningError{Message: fmt.Sprintf("failed to generate key: %s", err.Error())}
 	}
+	validator, err := NewValidator(pk.Public())
+	if err != nil {
+		return nil, fmt.Errorf("error reading generated public key")
+	}
 	return &Signer{
 		alg:        model.ES256,
 		privateKey: pk,
+		validator:  validator,
 	}, nil
 }
 
@@ -62,6 +68,10 @@ func (signer *Signer) Public() crypto.PublicKey {
 	return signer.privateKey.Public()
 }
 
+func (signer *Signer) Validator() *Validator {
+	return signer.validator
+}
+
 func (signer *Signer) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error) {
 	if opts != nil && opts.HashFunc() > 0 && opts.HashFunc() != crypto.SHA256 {
 		return nil, &e.SigningError{Message: "invalid hash function provided for specified signer"}
@@ -89,4 +99,10 @@ func (validator *Validator) ValidateSignature(digest, signature []byte) (bool, e
 	}
 
 	return ecdsa.Verify(validator.publicKey, bodyHash[:], r, s), nil
+}
+
+func (validator *Validator) Jwk() map[string]string {
+	jwk := common.JwkFromECDSAPublicKey(validator.publicKey)
+	jwk["crv"] = "P-256"
+	return jwk
 }
