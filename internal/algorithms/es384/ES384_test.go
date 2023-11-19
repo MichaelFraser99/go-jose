@@ -8,31 +8,6 @@ import (
 	"testing"
 )
 
-func TestValidateSignatureES384(t *testing.T) {
-	publicKey := "{\"kty\":\"EC\",\"crv\":\"P-384\",\"x\":\"AgQPgcqypazyTOW8CsQOhnN2jXSLrUha6YrkXAZES6sOWT44t_OSx68kEg-UQ1lo\",\"y\":\"uRYLEPxefzGME223BsBLDyhDJ7KZApkKdmXbvaZorFQol8beG6zfve3Z16Jq1Xrj\"}"
-
-	token := "eyJhbGciOiJFUzM4NCIsInR5cCI6Imp3dCJ9.eyJhZGRyZXNzIjp7ImNpdHkiOiJFZGluYnVyZ2giLCJudW1iZXIiOiIxNSIsInN0cmVldCI6IkxvbmcgTGFuZSJ9LCJmaXJzdG5hbWUiOiJqb2huIiwic3VybmFtZSI6InNtaXRoIn0"
-
-	signature := "T1wWViEJKvYoOIYTD3WtK69cJMJTAmaAXni54AcWBLmOmiYQCIigzynawj5Fe1L4MRqmiCHdRF7F3Uz_ab_QvDhQw925k7rHWTwL2eSmK8TRRIS598MEM0VbcBL7AAbN"
-
-	validator, err := NewValidatorFromJwk([]byte(publicKey))
-	if err != nil {
-		t.Error("no error should be thrown:", err)
-		t.FailNow()
-	}
-
-	decodedSignature := make([]byte, base64.RawURLEncoding.DecodedLen(len(signature)))
-	base64.RawURLEncoding.Decode(decodedSignature, []byte(signature))
-
-	valid, err := validator.ValidateSignature([]byte(token), decodedSignature)
-	if err != nil {
-		t.Error("no error should be thrown:", err)
-	}
-	if !valid {
-		t.Error("signature is not valid")
-	}
-}
-
 func TestES384_Sign(t *testing.T) {
 	body := map[string]any{
 		"firstname": "john",

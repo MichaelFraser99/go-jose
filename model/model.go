@@ -9,6 +9,8 @@ const (
 	ES384
 	ES512
 	RS256
+	RS384
+	RS512
 )
 
 func (a Algorithm) String() string {

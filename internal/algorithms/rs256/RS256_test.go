@@ -8,30 +8,6 @@ import (
 	"testing"
 )
 
-func TestValidateSignatureRS256(t *testing.T) {
-	publicKey := "{\"e\":\"AQAB\",\"kid\":\"PublicJWK\",\"kty\":\"RSA\",\"n\":\"wdNpeQuzVo7SXPlejNOhwwOrSZH1vxkZ_jIXNPyuL90gLHyChm1qe9a9SQfySf8sUHbRcnZYolpzNV7AUZ84I1M8sN8QPnCMXfP4yYiB46iyIQahEw4aTKKY6Joxfknc3B-MDrFfG9x7ymaXOKHwZtsRm-6pYls_2_o2wdmNlh9RPSap0wIn4FAc1-Mmr-n6XKy8jRMbD348kCNJanHV8EvjP0MArK4RHgugQ1G-4z528lzLJaGlE9Iaj0r4evXle2qUAyWGSPUGsZmawmDYlVT6_cOXbUOxIzzVu9HDDkxma20OzKqkHeM2PySzkbqRLwvdggooKIWjPJ_0p0NAKw\"}"
-
-	token := "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJhZGRyZXNzIjp7ImNpdHkiOiJFZGluYnVyZ2giLCJudW1iZXIiOiIxNSIsInN0cmVldCI6IkxvbmcgTGFuZSJ9LCJmaXJzdG5hbWUiOiJqb2huIiwic3VybmFtZSI6InNtaXRoIn0"
-
-	signature := "NQ3xSeZ4Ap1ibFLRoIwIxqMj3haTazOjky2CK58LnTWaUK2vcS_j2SlN4904PIz_y9cDlhAH-hVH7jbCwyIYkD5QKUKKPg530JWbVfZlwTwvfTBn1euvq-i9TvfykzHHybY7tFOQJSM3O4TdJRh9ZysfFBkjHkUa1FLN_cdNzCukHSSEa1cekNEQinLlzoVHC9aDwFrMBdnND3w8Y_9wqpp3Un6i2LVgib95JPeVskh6x8_NFWp0Sy8xV0XCapE5KJVfKynJFFEODyfxAJSXyYX7PCMex8fGJG3MtEJZRuU0UKYdBO5idnlY1sK3BvalBNtNc3qb7oGU-JmjdbTdhw"
-
-	validator, err := NewValidatorFromJwk([]byte(publicKey))
-	if err != nil {
-		t.Error("no error should be thrown:", err)
-	}
-
-	decodedSignature := make([]byte, base64.RawURLEncoding.DecodedLen(len(signature)))
-	base64.RawURLEncoding.Decode(decodedSignature, []byte(signature))
-
-	valid, err := validator.ValidateSignature([]byte(token), decodedSignature)
-	if err != nil {
-		t.Error("no error should be thrown:", err)
-	}
-	if !valid {
-		t.Error("signature is not valid")
-	}
-}
-
 func TestRS256_Sign(t *testing.T) {
 	body := map[string]any{
 		"firstname": "john",

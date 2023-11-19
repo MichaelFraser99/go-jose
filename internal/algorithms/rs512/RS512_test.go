@@ -1,4 +1,4 @@
-package es512
+package rs512
 
 import (
 	"crypto/rand"
@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestES512_Sign(t *testing.T) {
+func TestRS512_Sign(t *testing.T) {
 	body := map[string]any{
 		"firstname": "john",
 		"surname":   "smith",
@@ -21,7 +21,7 @@ func TestES512_Sign(t *testing.T) {
 
 	headerKeys := map[string]string{
 		"typ": "jwt",
-		"alg": "ES512",
+		"alg": "RS512",
 	}
 
 	bBody, err := json.Marshal(body)
@@ -40,23 +40,23 @@ func TestES512_Sign(t *testing.T) {
 
 	digest := fmt.Sprintf("%s.%s", b64Header, b64Body)
 
-	es512, err := NewSigner()
+	rs512, err := NewSigner(2048)
 	if err != nil {
 		t.Error("no error should be thrown:", err)
 		t.FailNow()
 	}
 
-	signature, err := es512.Sign(rand.Reader, []byte(digest), nil)
+	signature, err := rs512.Sign(rand.Reader, []byte(digest), nil)
 	if err != nil {
 		t.Error("no error should be thrown:", err)
 		t.FailNow()
 	}
-	if es512.Public() == nil {
+	if rs512.Public() == nil {
 		t.Error("public key should not be nil")
 		t.FailNow()
 	}
 
-	validator, err := NewValidator(es512.Public())
+	validator, err := NewValidator(rs512.Public())
 	if err != nil {
 		t.Error("no error should be thrown:", err)
 		t.FailNow()
@@ -69,20 +69,16 @@ func TestES512_Sign(t *testing.T) {
 		t.FailNow()
 	}
 	val, ok := jwk["kty"]
-	if !ok || val != "EC" {
+	if !ok || val != "RSA" {
 		t.Errorf("kty key is missing or wrong")
 	}
-	_, ok = jwk["x"]
+	_, ok = jwk["n"]
 	if !ok {
 		t.Errorf("n key is missing")
 	}
-	_, ok = jwk["y"]
+	_, ok = jwk["e"]
 	if !ok {
 		t.Errorf("e key is missing")
-	}
-	crv, ok := jwk["crv"]
-	if !ok && crv != "P-521" {
-		t.Errorf("crv key is missing or wrong")
 	}
 
 	t.Log(digest)
