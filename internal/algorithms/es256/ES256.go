@@ -122,3 +122,7 @@ func (validator *Validator) Jwk() map[string]string {
 	jwk["crv"] = "P-256"
 	return jwk
 }
+
+func (validator *Validator) Public() crypto.PublicKey {
+	return validator.publicKey
+}

@@ -14,6 +14,7 @@ type Signer interface {
 
 type Validator interface {
 	ValidateSignature(digest, signature []byte) (bool, error)
+	Public() crypto.PublicKey
 	Jwk() map[string]string
 }
 

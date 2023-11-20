@@ -80,6 +80,12 @@ validator, err := jose.GetValidator(model.ES256, publicKey)
 jwk := validator.Jwk()
 ```
 
+Finally, validators expose their PublicKey with the `Public()` method
+```go
+validator, err :- jose.GetValidator(model.ES256, publicKey)
+pk := validator.Public()
+```
+
 ### Errors
 This package defines the following errors:
 - InvalidSignature - The provided signature does not match the digest
