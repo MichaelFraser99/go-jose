@@ -24,6 +24,14 @@ func (e *InvalidPublicKey) Error() string {
 	return e.Message
 }
 
+type InvalidPrivateKey struct {
+	Message string
+}
+
+func (e *InvalidPrivateKey) Error() string {
+	return e.Message
+}
+
 type SigningError struct {
 	Message string
 }

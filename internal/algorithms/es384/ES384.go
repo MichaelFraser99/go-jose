@@ -42,10 +42,26 @@ func NewSigner() (*Signer, error) {
 	}, nil
 }
 
+func NewSignerFromPrivateKey(privateKey crypto.PrivateKey) (*Signer, error) {
+	ecdsaPrivateKey, ok := privateKey.(*ecdsa.PrivateKey)
+	if !ok {
+		return nil, &e.InvalidPrivateKey{Message: "invalid key provided for .S... should be instance of `*ecdsa.Privatekey`"}
+	}
+	validator, err := NewValidator(ecdsaPrivateKey.Public())
+	if err != nil {
+		return nil, fmt.Errorf("error reading public key from provided private key: %w", err)
+	}
+	return &Signer{
+		alg:        model.ES384,
+		privateKey: ecdsaPrivateKey,
+		validator:  validator,
+	}, nil
+}
+
 func NewValidator(publicKey crypto.PublicKey) (*Validator, error) {
 	ecdsaPublicKey, ok := publicKey.(*ecdsa.PublicKey)
 	if !ok {
-		return nil, &e.InvalidPublicKey{Message: "invalid key provided for ES256"}
+		return nil, &e.InvalidPublicKey{Message: "invalid key provided for .S... should be instance of `*ecdsa.PublicKey`"}
 	}
 	return &Validator{
 		publicKey: ecdsaPublicKey,
@@ -68,7 +84,7 @@ func (signer *Signer) Public() crypto.PublicKey {
 	return signer.privateKey.Public()
 }
 
-func (signer *Signer) Validator() *Validator {
+func (signer *Signer) Validator() model.Validator {
 	return signer.validator
 }
 
