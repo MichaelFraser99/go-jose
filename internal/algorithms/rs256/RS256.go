@@ -41,10 +41,26 @@ func NewSigner(size int) (*Signer, error) {
 	}, nil
 }
 
+func NewSignerFromPrivateKey(privateKey crypto.PrivateKey) (*Signer, error) {
+	rsaPrivateKey, ok := privateKey.(*rsa.PrivateKey)
+	if !ok {
+		return nil, &e.InvalidPrivateKey{Message: "invalid key provided for .S... should be instance of `*rsa.Privatekey`"}
+	}
+	validator, err := NewValidator(rsaPrivateKey.Public())
+	if err != nil {
+		return nil, fmt.Errorf("error reading public key from provided private key: %w", err)
+	}
+	return &Signer{
+		alg:        model.RS256,
+		privateKey: rsaPrivateKey,
+		validator:  validator,
+	}, nil
+}
+
 func NewValidator(publicKey crypto.PublicKey) (*Validator, error) {
 	rsaPublicKey, ok := publicKey.(*rsa.PublicKey)
 	if !ok {
-		return nil, &e.InvalidPublicKey{Message: "invalid key provided for RS256"}
+		return nil, &e.InvalidPublicKey{Message: "invalid key provided for .S... should be instance of `*rsa.PublicKey`"}
 	}
 	return &Validator{
 		publicKey: rsaPublicKey,
@@ -67,7 +83,7 @@ func (signer *Signer) Public() crypto.PublicKey {
 	return signer.privateKey.Public()
 }
 
-func (signer *Signer) Validator() *Validator {
+func (signer *Signer) Validator() model.Validator {
 	return signer.validator
 }
 

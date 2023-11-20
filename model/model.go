@@ -1,6 +1,21 @@
 package model
 
-import "crypto"
+import (
+	"crypto"
+	"io"
+)
+
+type Signer interface {
+	Alg() Algorithm
+	Public() crypto.PublicKey
+	Validator() Validator
+	Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error)
+}
+
+type Validator interface {
+	ValidateSignature(digest, signature []byte) (bool, error)
+	Jwk() map[string]string
+}
 
 type Algorithm int
 

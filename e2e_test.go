@@ -3,14 +3,15 @@ package jose_test
 import (
 	"crypto"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
-	"github.com/MichaelFraser99/go-jose/internal/algorithms/es256"
+	"github.com/MichaelFraser99/go-jose"
 	"github.com/MichaelFraser99/go-jose/model"
 	"testing"
 )
 
 func Test_Sign(t *testing.T) {
-	signer, err := es256.NewSigner()
+	signer, err := jose.GetSigner(model.ES256, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,7 +23,7 @@ func Test_Sign(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	validator, err := es256.NewValidator(signer.Public())
+	validator, err := jose.GetValidator(signer.Alg(), signer.Public())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +39,7 @@ func Test_Sign(t *testing.T) {
 }
 
 func Test_SignPreHashed(t *testing.T) {
-	signer, err := es256.NewSigner()
+	signer, err := jose.GetSigner(model.ES256, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +53,7 @@ func Test_SignPreHashed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	validator, err := es256.NewValidator(signer.Public())
+	validator, err := jose.GetValidator(signer.Alg(), signer.Public())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +76,7 @@ func Test_SignPreHashed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	validator, err = es256.NewValidator(signer.Public())
+	validator, err = jose.GetValidator(signer.Alg(), signer.Public())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,4 +90,52 @@ func Test_SignPreHashed(t *testing.T) {
 		t.Fatal("signature should be valid")
 	}
 
+}
+
+func TestGetSignerFromPrivateKey(t *testing.T) {
+	pk, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	signer, err := jose.GetSignerFromPrivateKey(model.RS256, pk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if signer.Alg() != model.RS256 {
+		t.Errorf("returned signer should be of algorithm RS256 and is: %s", signer.Alg().String())
+	}
+	if signer.Public() == nil {
+		t.Error("no public key available")
+	}
+
+	signer, err = jose.GetSignerFromPrivateKey(model.RS384, pk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if signer.Alg() != model.RS384 {
+		t.Errorf("returned signer should be of algorithm RS384 and is: %s", signer.Alg().String())
+	}
+	if signer.Public() == nil {
+		t.Error("no public key available")
+	}
+
+	signer, err = jose.GetSignerFromPrivateKey(model.RS512, pk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if signer.Alg() != model.RS512 {
+		t.Errorf("returned signer should be of algorithm RS512 and is: %s", signer.Alg().String())
+	}
+	if signer.Public() == nil {
+		t.Error("no public key available")
+	}
+
+	_, err = jose.GetSignerFromPrivateKey(model.ES256, pk)
+	if err == nil {
+		t.Fatal("error should be thrown when wrong key provided")
+	}
+	if err.Error() != "invalid key provided for .S... should be instance of `*ecdsa.Privatekey`" {
+		t.Errorf("wrong error returned: %s", err.Error())
+	}
 }

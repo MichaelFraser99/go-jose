@@ -19,14 +19,19 @@ Currently, the module supports the following signing algorithms:
 - RS512
 
 ## Signers
-Each algorithm packages a NewSigner() method. This returns a `crypto.Signer` implementation for the given algorithm complete with generated key pair. The below example shows how to generate a signer for ES256:
+To create a Signer object use the `GetSigner` method. This takes in an algorithm and an optional bit-size (used for RS keys) and returns a `crypto.Signer` implementation complete with generated key pair. The below example shows how to generate a signer for ES256:
 ```go
-signer, err := es256.NewSigner()
+signer, err := jose.GetSigner(model.ES256, nil)
+```
+
+The `GetSignerFromPrivateKey` method can also be used. This takes in an algorithm and a pointer to a `crypto.PrivateKey` implementation. The below example shows how to generate a signer for ES256:
+```go
+signer, err := jose.GetSignerFromPrivateKey(model.ES256, privateKey)
 ```
 
 In addition to the methods specified by the `crypto.Signer` interface, the signer object also packages a Validator (see more below) bound to matching public key. This can be accessed through the `Validator()` method
 ```go
-signer, err := es256.NewSigner()
+signer, err := jose.GetSigner(model.ES256, nil)
 validator := signer.Validator()
 ```
 
@@ -42,33 +47,33 @@ This is provided for simplicity and usage is in line with that specified by the 
 ## Validators
 In addition to the packaged signers, a validator type is also included for each algorithm. This can be constructed in one of two ways:
 
-The NewValidator method takes in a crypto.PublicKey implementation and returns a validator instance. The below example shows how to generate a validator for ES256:
+The `GetValidator` method takes in a crypto.PublicKey implementation and returns a validator instance. The below example shows how to generate a validator for ES256:
 ```go
 // Construct a validator from a public key
-validator, err := es256.NewValidator(publicKey)
+validator, err := jose.GetValidator(model.ES256, publicKey)
 
 // Construct a validator from a signer instance
-signer, err := es256.NewSigner()
-validator, err := es256.NewValidator(signer.Public())
+signer, err := jose.GetSigner(model.ES256, nil)
+validator, err := jose.GetValidator(signer.Alg(), signer.Public())
 ```
 
-The NewValidatorFromJwk method takes in the bytes of a jwk format public key and returns a validator instance. The below example shows how to generate a validator for ES256:
+The `GetValidatorFromJwk` method takes in the bytes of a jwk format public key and returns a validator instance. The below example shows how to generate a validator for ES256:
 ```go
 // Construct a validator from a jwk public key
-validator, err := es256.NewValidatorFromJwk(publicKeyBytes)
+validator, err := jose.GetValidatorFromJwk(model.ES256, publicKeyBytes)
 ```
 
 The validator object has a method `ValidateSignature` which takes in the bytes of the digest and signature and returns a boolean indicating whether the signature is valid. The below example shows how to validate a signature:
 ```go
 // Validate a signature
-validator, err := es256.NewValidator(publicKey)
+validator, err := jose.GetValidator(model.ES256, publicKey)
 
 valid, err := validator.ValidateSignature(digest, signature)
 ```
 
 In addition, the validator object also has a method `Jwk()` which returns a `map[string]string` representation of the public key in jwk format
 ```go
-validator, err := es256.NewValidator(publicKey)
+validator, err := jose.GetValidator(model.ES256, publicKey)
 jwk := validator.Jwk()
 ```
 
