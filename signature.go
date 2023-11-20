@@ -7,6 +7,9 @@ import (
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es256"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es384"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es512"
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/ps256"
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/ps384"
+	ps512 "github.com/MichaelFraser99/go-jose/internal/algorithms/ps521"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs256"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs384"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs512"
@@ -43,6 +46,12 @@ func GetSigner(alg model.Algorithm, bitSize *int) (model.Signer, error) {
 		s, err = rs384.NewSigner(*bitSize)
 	case model.RS512:
 		s, err = rs512.NewSigner(*bitSize)
+	case model.PS256:
+		s, err = ps256.NewSigner(*bitSize)
+	case model.PS384:
+		s, err = ps384.NewSigner(*bitSize)
+	case model.PS512:
+		s, err = ps512.NewSigner(*bitSize)
 
 	default:
 		return nil, &e.UnsupportedAlgorithm{Message: fmt.Sprintf("unsupported algorithm: '%s'", alg)}
@@ -75,6 +84,12 @@ func GetSignerFromPrivateKey(alg model.Algorithm, privateKey crypto.PrivateKey) 
 		s, err = rs384.NewSignerFromPrivateKey(privateKey)
 	case model.RS512:
 		s, err = rs512.NewSignerFromPrivateKey(privateKey)
+	case model.PS256:
+		s, err = ps256.NewSignerFromPrivateKey(privateKey)
+	case model.PS384:
+		s, err = ps384.NewSignerFromPrivateKey(privateKey)
+	case model.PS512:
+		s, err = ps512.NewSignerFromPrivateKey(privateKey)
 
 	default:
 		return nil, &e.UnsupportedAlgorithm{Message: fmt.Sprintf("unsupported algorithm: '%s'", alg)}

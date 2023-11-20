@@ -131,6 +131,39 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 		t.Error("no public key available")
 	}
 
+	signer, err = jose.GetSignerFromPrivateKey(model.PS256, pk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if signer.Alg() != model.PS256 {
+		t.Errorf("returned signer should be of algorithm PS256 and is: %s", signer.Alg().String())
+	}
+	if signer.Public() == nil {
+		t.Error("no public key available")
+	}
+
+	signer, err = jose.GetSignerFromPrivateKey(model.PS384, pk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if signer.Alg() != model.PS384 {
+		t.Errorf("returned signer should be of algorithm PS384 and is: %s", signer.Alg().String())
+	}
+	if signer.Public() == nil {
+		t.Error("no public key available")
+	}
+
+	signer, err = jose.GetSignerFromPrivateKey(model.PS512, pk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if signer.Alg() != model.PS512 {
+		t.Errorf("returned signer should be of algorithm PS512 and is: %s", signer.Alg().String())
+	}
+	if signer.Public() == nil {
+		t.Error("no public key available")
+	}
+
 	_, err = jose.GetSignerFromPrivateKey(model.ES256, pk)
 	if err == nil {
 		t.Fatal("error should be thrown when wrong key provided")

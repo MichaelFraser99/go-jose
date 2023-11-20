@@ -182,3 +182,17 @@ func RsaPkcs1Sign(rand io.Reader, pk rsa.PrivateKey, digest []byte, hash crypto.
 	}
 	return s, nil
 }
+
+func RsaPSSSign(rand io.Reader, pk rsa.PrivateKey, digest []byte, hash crypto.Hash, saltLength int) ([]byte, error) {
+	opts := &rsa.PSSOptions{
+		SaltLength: saltLength,
+		Hash:       hash,
+	}
+	s, err := rsa.SignPSS(rand, &pk, hash, digest, opts)
+	if err != nil {
+		return nil, &e.SigningError{
+			Message: fmt.Sprintf("failed to sign token: %s", err.Error()),
+		}
+	}
+	return s, nil
+}
