@@ -17,6 +17,9 @@ Currently, the module supports the following signing algorithms:
 - RS256
 - RS384
 - RS512
+- PS256
+- PS384
+- PS512
 
 ## Signers
 To create a Signer object use the `GetSigner` method. This takes in an algorithm and an optional bit-size (used for RS keys) and returns a `crypto.Signer` implementation complete with generated key pair. The below example shows how to generate a signer for ES256:
