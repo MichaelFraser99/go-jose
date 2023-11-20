@@ -128,3 +128,7 @@ func (validator *Validator) ValidateSignature(digest, signature []byte) (bool, e
 func (validator *Validator) Jwk() map[string]string {
 	return common.JwkFromRSAPublicKey(validator.publicKey)
 }
+
+func (validator *Validator) Public() crypto.PublicKey {
+	return validator.publicKey
+}
