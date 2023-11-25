@@ -45,6 +45,10 @@ func (a Algorithm) String() string {
 	}
 }
 
+type Opts struct {
+	BitSize int
+}
+
 type SignerOpts struct {
 	Hash crypto.Hash
 }

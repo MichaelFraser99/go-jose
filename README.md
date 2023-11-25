@@ -22,7 +22,7 @@ Currently, the module supports the following signing algorithms:
 - PS512
 
 ## Signers
-To create a Signer object use the `GetSigner` method. This takes in an algorithm and an optional bit-size (used for RS keys) and returns a `crypto.Signer` implementation complete with generated key pair. The below example shows how to generate a signer for ES256:
+To create a Signer object use the `GetSigner` method. This takes in an algorithm and an optional `Opts` object (defines a bit size used for RSA keys) and returns a `crypto.Signer` implementation complete with generated key pair. The below example shows how to generate a signer for ES256:
 ```go
 signer, err := jose.GetSigner(model.ES256, nil)
 ```

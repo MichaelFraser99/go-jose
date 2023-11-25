@@ -23,14 +23,18 @@ import (
 //
 // alg - Determines which signer type gets returned
 //
-// bitSize - determines the size of key to be returned. Ignored for elliptic curve algorithms. If none specified, defaults to 2048
-func GetSigner(alg model.Algorithm, bitSize *int) (model.Signer, error) {
+// opts - Extra options object to control additional algorithm specific behaviour. Currently only determines the size of key to be returned for RSA keys. If none specified, defaults to 2048
+func GetSigner(alg model.Algorithm, opts *model.Opts) (model.Signer, error) {
 	var s model.Signer
 	var err error
 
-	if slices.Contains([]model.Algorithm{model.RS256, model.RS384, model.RS512}, alg) && bitSize == nil {
-		size := 2048
-		bitSize = &size
+	var size int
+	if slices.Contains([]model.Algorithm{model.RS256, model.RS384, model.RS512}, alg) {
+		if opts == nil || opts.BitSize == 0 {
+			size = 2048
+		} else {
+			size = opts.BitSize
+		}
 	}
 
 	switch alg {
@@ -41,17 +45,17 @@ func GetSigner(alg model.Algorithm, bitSize *int) (model.Signer, error) {
 	case model.ES512:
 		s, err = es512.NewSigner()
 	case model.RS256:
-		s, err = rs256.NewSigner(*bitSize)
+		s, err = rs256.NewSigner(size)
 	case model.RS384:
-		s, err = rs384.NewSigner(*bitSize)
+		s, err = rs384.NewSigner(size)
 	case model.RS512:
-		s, err = rs512.NewSigner(*bitSize)
+		s, err = rs512.NewSigner(size)
 	case model.PS256:
-		s, err = ps256.NewSigner(*bitSize)
+		s, err = ps256.NewSigner(size)
 	case model.PS384:
-		s, err = ps384.NewSigner(*bitSize)
+		s, err = ps384.NewSigner(size)
 	case model.PS512:
-		s, err = ps512.NewSigner(*bitSize)
+		s, err = ps512.NewSigner(size)
 
 	default:
 		return nil, &e.UnsupportedAlgorithm{Message: fmt.Sprintf("unsupported algorithm: '%s'", alg)}
