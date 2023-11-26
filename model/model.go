@@ -8,7 +8,6 @@ import (
 type Signer interface {
 	Alg() Algorithm
 	Public() crypto.PublicKey
-	Validator() Validator
 	Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error)
 }
 
@@ -40,6 +39,18 @@ func (a Algorithm) String() string {
 		return "ES384"
 	case ES512:
 		return "ES512"
+	case RS256:
+		return "RS256"
+	case RS384:
+		return "ES384"
+	case RS512:
+		return "RS512"
+	case PS256:
+		return "PS256"
+	case PS384:
+		return "PS384"
+	case PS512:
+		return "PS512"
 	default:
 		return ""
 	}

@@ -18,7 +18,6 @@ const keySize = 96
 type Signer struct {
 	alg        model.Algorithm
 	privateKey *ecdsa.PrivateKey
-	validator  *Validator
 }
 
 type Validator struct {
@@ -31,14 +30,9 @@ func NewSigner() (*Signer, error) {
 	if err != nil {
 		return nil, &e.SigningError{Message: fmt.Sprintf("failed to generate key: %s", err.Error())}
 	}
-	validator, err := NewValidator(pk.Public())
-	if err != nil {
-		return nil, fmt.Errorf("error reading generated public key")
-	}
 	return &Signer{
 		alg:        model.ES384,
 		privateKey: pk,
-		validator:  validator,
 	}, nil
 }
 
@@ -47,14 +41,9 @@ func NewSignerFromPrivateKey(privateKey crypto.PrivateKey) (*Signer, error) {
 	if !ok {
 		return nil, &e.InvalidPrivateKey{Message: "invalid key provided for .S... should be instance of `*ecdsa.Privatekey`"}
 	}
-	validator, err := NewValidator(ecdsaPrivateKey.Public())
-	if err != nil {
-		return nil, fmt.Errorf("error reading public key from provided private key: %w", err)
-	}
 	return &Signer{
 		alg:        model.ES384,
 		privateKey: ecdsaPrivateKey,
-		validator:  validator,
 	}, nil
 }
 
@@ -82,10 +71,6 @@ func (signer *Signer) Alg() model.Algorithm {
 
 func (signer *Signer) Public() crypto.PublicKey {
 	return signer.privateKey.Public()
-}
-
-func (signer *Signer) Validator() model.Validator {
-	return signer.validator
 }
 
 func (signer *Signer) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error) {
