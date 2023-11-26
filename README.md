@@ -32,12 +32,6 @@ The `GetSignerFromPrivateKey` method can also be used. This takes in an algorith
 signer, err := jose.GetSignerFromPrivateKey(model.ES256, privateKey)
 ```
 
-In addition to the methods specified by the `crypto.Signer` interface, the signer object also packages a Validator (see more below) bound to matching public key. This can be accessed through the `Validator()` method
-```go
-signer, err := jose.GetSigner(model.ES256, nil)
-validator := signer.Validator()
-```
-
 ## SignerOpts
 This package includes a SignerOpts implementation as shown below:
 ```go
