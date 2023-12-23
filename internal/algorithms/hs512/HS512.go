@@ -1,11 +1,11 @@
-package hs256
+package hs512
 
 import (
 	"bytes"
 	"crypto"
 	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
+	"crypto/sha512"
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/model"
 	"hash"
@@ -34,7 +34,7 @@ func NewSigner(secretKey *[]byte) (*Signer, error) {
 	if secretKey != nil {
 		secret = *secretKey
 	} else {
-		secret = make([]byte, 256)
+		secret = make([]byte, 512)
 		_, err := rand.Read(secret)
 		if err != nil {
 			return nil, fmt.Errorf("error generating secret key value: %w", err)
@@ -42,11 +42,11 @@ func NewSigner(secretKey *[]byte) (*Signer, error) {
 	}
 
 	h := hmac.New(func() hash.Hash {
-		return sha256.New()
+		return sha512.New()
 	}, secret)
 
 	return &Signer{
-		alg:    model.HS256,
+		alg:    model.HS512,
 		secret: secret,
 		hasher: h,
 	}, nil
