@@ -168,7 +168,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 	if err == nil {
 		t.Fatal("error should be thrown when wrong key provided")
 	}
-	if err.Error() != "invalid key provided for .S... should be instance of `*ecdsa.Privatekey`" {
+	if err.Error() != "invalid key provided - should be instance of `*ecdsa.Privatekey`" {
 		t.Errorf("wrong error returned: %s", err.Error())
 	}
 }
