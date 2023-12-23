@@ -1,4 +1,4 @@
-package es256
+package hs256
 
 import (
 	"crypto/rand"
@@ -40,23 +40,23 @@ func TestES256_Sign(t *testing.T) {
 
 	digest := fmt.Sprintf("%s.%s", b64Header, b64Body)
 
-	es256, err := NewSigner()
+	hs256, err := NewSigner()
 	if err != nil {
 		t.Error("no error should be thrown:", err)
 		t.FailNow()
 	}
 
-	signature, err := es256.Sign(rand.Reader, []byte(digest), nil)
+	signature, err := hs256.Sign(rand.Reader, []byte(digest), nil)
 	if err != nil {
 		t.Error("no error should be thrown:", err)
 		t.FailNow()
 	}
-	if es256.Public() == nil {
+	if hs256.Public() == nil {
 		t.Error("public key should not be nil")
 		t.FailNow()
 	}
 
-	validator, err := NewValidator(es256.Public())
+	validator, err := NewValidator(hs256.Public())
 	if err != nil {
 		t.Error("no error should be thrown:", err)
 		t.FailNow()
