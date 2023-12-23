@@ -10,7 +10,7 @@ go get github.com/MichaelFraser99/go-jose
 ```
 
 ## Algorithms Supported
-Currently, the module supports the following signing algorithms:
+Currently, the module supports the following asymmetric algorithms:
 - ES256
 - ES384
 - ES512
@@ -20,6 +20,25 @@ Currently, the module supports the following signing algorithms:
 - PS256
 - PS384
 - PS512
+
+Also supported are the following HMAC with SHA2 symmetric algorithms:
+- HS256
+- HS384
+- HS512
+
+Please note `Validator` objects cannot be created for HMAC algorithms. When creating a new Signer an optional secret key can be passed as `[]byte`. If none provided, a random key is instead generated and can be retrieved with the `Public` method. This returns an object of type `SecretKey` defined as so:
+```go
+type SecretKey []byte
+
+func (s *SecretKey) Equal(x crypto.PublicKey) bool {
+	secretKey, ok := x.(*SecretKey)
+	if !ok {
+		return false
+	}
+
+	return bytes.Equal(*s, *secretKey)
+}
+```
 
 ## Signers
 To create a Signer object use the `GetSigner` method. This takes in an algorithm and an optional `Opts` object (defines a bit size used for RSA keys) and returns a `crypto.Signer` implementation complete with generated key pair. The below example shows how to generate a signer for ES256:
