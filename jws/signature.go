@@ -9,7 +9,7 @@ import (
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es512"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/ps256"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/ps384"
-	ps512 "github.com/MichaelFraser99/go-jose/internal/algorithms/ps521"
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/ps512"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs256"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs384"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs512"
@@ -58,7 +58,7 @@ func GetSigner(alg model.Algorithm, opts *model.Opts) (model.Signer, error) {
 		s, err = ps512.NewSigner(size)
 
 	default:
-		return nil, &e.UnsupportedAlgorithm{Message: fmt.Sprintf("unsupported algorithm: '%s'", alg)}
+		return nil, fmt.Errorf("%wunsupported algorithm: '%s'", e.UnsupportedAlgorithm, alg)
 	}
 
 	return s, err
@@ -96,7 +96,7 @@ func GetSignerFromPrivateKey(alg model.Algorithm, privateKey crypto.PrivateKey) 
 		s, err = ps512.NewSignerFromPrivateKey(privateKey)
 
 	default:
-		return nil, &e.UnsupportedAlgorithm{Message: fmt.Sprintf("unsupported algorithm: '%s'", alg)}
+		return nil, fmt.Errorf("%wunsupported algorithm: '%s'", e.UnsupportedAlgorithm, alg)
 	}
 
 	return s, err

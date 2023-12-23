@@ -27,7 +27,7 @@ func NewSigner(size int) (*Signer, error) {
 	}
 	pk, err := rsa.GenerateKey(rand.Reader, size)
 	if err != nil {
-		return nil, &e.SigningError{Message: fmt.Sprintf("failed to generate key: %s", err.Error())}
+		return nil, fmt.Errorf("%wfailed to generate key: %s", e.SigningError, err.Error())
 	}
 	return &Signer{
 		alg:        model.RS512,
@@ -38,7 +38,7 @@ func NewSigner(size int) (*Signer, error) {
 func NewSignerFromPrivateKey(privateKey crypto.PrivateKey) (*Signer, error) {
 	rsaPrivateKey, ok := privateKey.(*rsa.PrivateKey)
 	if !ok {
-		return nil, fmt.Errorf("%winvalid key provided for .S... should be instance of `*rsa.Privatekey`", e.InvalidPrivateKey)
+		return nil, fmt.Errorf("%winvalid key provided - should be instance of `*rsa.Privatekey`", e.InvalidPrivateKey)
 	}
 	return &Signer{
 		alg:        model.RS512,
@@ -49,7 +49,7 @@ func NewSignerFromPrivateKey(privateKey crypto.PrivateKey) (*Signer, error) {
 func NewValidator(publicKey crypto.PublicKey) (*Validator, error) {
 	rsaPublicKey, ok := publicKey.(*rsa.PublicKey)
 	if !ok {
-		return nil, fmt.Errorf("%winvalid key provided for .S... should be instance of `*rsa.PublicKey`", e.InvalidPublicKey)
+		return nil, fmt.Errorf("%winvalid key provided - should be instance of `*rsa.PublicKey`", e.InvalidPublicKey)
 	}
 	return &Validator{
 		publicKey: rsaPublicKey,
@@ -74,7 +74,7 @@ func (signer *Signer) Public() crypto.PublicKey {
 
 func (signer *Signer) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error) {
 	if opts != nil && opts.HashFunc() > 0 && opts.HashFunc() != crypto.SHA512 {
-		return nil, &e.SigningError{Message: "invalid hash function provided for specified signer"}
+		return nil, fmt.Errorf("%winvalid hash function provided for specified signer", e.SigningError)
 	}
 
 	var hashedDigest []byte
@@ -100,7 +100,7 @@ func (validator *Validator) ValidateSignature(digest, signature []byte) (bool, e
 	err := rsa.VerifyPKCS1v15(validator.publicKey, crypto.SHA512, hashedDigest[:], signature)
 
 	if err != nil {
-		return false, &e.InvalidSignature{Message: fmt.Sprintf("invalid signature: %s", err.Error())}
+		return false, fmt.Errorf("%winvalid signature: %s", e.InvalidSignature, err.Error())
 	}
 
 	return true, nil
