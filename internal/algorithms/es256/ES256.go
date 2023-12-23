@@ -39,7 +39,7 @@ func NewSigner() (*Signer, error) {
 func NewSignerFromPrivateKey(privateKey crypto.PrivateKey) (*Signer, error) {
 	ecdsaPrivateKey, ok := privateKey.(*ecdsa.PrivateKey)
 	if !ok {
-		return nil, &e.InvalidPrivateKey{Message: "invalid key provided for .S... should be instance of `*ecdsa.Privatekey`"}
+		return nil, fmt.Errorf("%winvalid key provided for .S... should be instance of `*ecdsa.Privatekey`", e.InvalidPrivateKey)
 	}
 	return &Signer{
 		alg:        model.ES256,
@@ -50,7 +50,7 @@ func NewSignerFromPrivateKey(privateKey crypto.PrivateKey) (*Signer, error) {
 func NewValidator(publicKey crypto.PublicKey) (*Validator, error) {
 	ecdsaPublicKey, ok := publicKey.(*ecdsa.PublicKey)
 	if !ok {
-		return nil, &e.InvalidPublicKey{Message: "invalid key provided for .S... should be instance of `*ecdsa.PublicKey`"}
+		return nil, fmt.Errorf("%winvalid key provided for .S... should be instance of `*ecdsa.PublicKey`", e.InvalidPublicKey)
 	}
 	return &Validator{
 		publicKey: ecdsaPublicKey,
@@ -100,12 +100,6 @@ func (validator *Validator) ValidateSignature(digest, signature []byte) (bool, e
 	}
 
 	return ecdsa.Verify(validator.publicKey, bodyHash[:], r, s), nil
-}
-
-func (validator *Validator) Jwk() map[string]string {
-	jwk := common.JwkFromECDSAPublicKey(validator.publicKey)
-	jwk["crv"] = "P-256"
-	return jwk
 }
 
 func (validator *Validator) Public() crypto.PublicKey {

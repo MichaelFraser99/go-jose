@@ -1,4 +1,4 @@
-package jose
+package jws
 
 import (
 	"crypto"
@@ -27,8 +27,8 @@ import (
 func GetSigner(alg model.Algorithm, opts *model.Opts) (model.Signer, error) {
 	var s model.Signer
 	var err error
-
 	var size int
+
 	if slices.Contains([]model.Algorithm{model.RS256, model.RS384, model.RS512}, alg) {
 		if opts == nil || opts.BitSize == 0 {
 			size = 2048

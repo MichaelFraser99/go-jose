@@ -5,13 +5,13 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
-	"github.com/MichaelFraser99/go-jose"
+	"github.com/MichaelFraser99/go-jose/jws"
 	"github.com/MichaelFraser99/go-jose/model"
 	"testing"
 )
 
 func Test_Sign(t *testing.T) {
-	signer, err := jose.GetSigner(model.ES256, nil)
+	signer, err := jws.GetSigner(model.ES256, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,7 +23,7 @@ func Test_Sign(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	validator, err := jose.GetValidator(signer.Alg(), signer.Public())
+	validator, err := jws.GetValidator(signer.Alg(), signer.Public())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func Test_Sign(t *testing.T) {
 }
 
 func Test_SignPreHashed(t *testing.T) {
-	signer, err := jose.GetSigner(model.ES256, nil)
+	signer, err := jws.GetSigner(model.ES256, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func Test_SignPreHashed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	validator, err := jose.GetValidator(signer.Alg(), signer.Public())
+	validator, err := jws.GetValidator(signer.Alg(), signer.Public())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func Test_SignPreHashed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	validator, err = jose.GetValidator(signer.Alg(), signer.Public())
+	validator, err = jws.GetValidator(signer.Alg(), signer.Public())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	signer, err := jose.GetSignerFromPrivateKey(model.RS256, pk)
+	signer, err := jws.GetSignerFromPrivateKey(model.RS256, pk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 		t.Error("no public key available")
 	}
 
-	signer, err = jose.GetSignerFromPrivateKey(model.RS384, pk)
+	signer, err = jws.GetSignerFromPrivateKey(model.RS384, pk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 		t.Error("no public key available")
 	}
 
-	signer, err = jose.GetSignerFromPrivateKey(model.RS512, pk)
+	signer, err = jws.GetSignerFromPrivateKey(model.RS512, pk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 		t.Error("no public key available")
 	}
 
-	signer, err = jose.GetSignerFromPrivateKey(model.PS256, pk)
+	signer, err = jws.GetSignerFromPrivateKey(model.PS256, pk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 		t.Error("no public key available")
 	}
 
-	signer, err = jose.GetSignerFromPrivateKey(model.PS384, pk)
+	signer, err = jws.GetSignerFromPrivateKey(model.PS384, pk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 		t.Error("no public key available")
 	}
 
-	signer, err = jose.GetSignerFromPrivateKey(model.PS512, pk)
+	signer, err = jws.GetSignerFromPrivateKey(model.PS512, pk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 		t.Error("no public key available")
 	}
 
-	_, err = jose.GetSignerFromPrivateKey(model.ES256, pk)
+	_, err = jws.GetSignerFromPrivateKey(model.ES256, pk)
 	if err == nil {
 		t.Fatal("error should be thrown when wrong key provided")
 	}

@@ -1,5 +1,7 @@
 package error
 
+import "errors"
+
 type InvalidSignature struct {
 	Message string
 }
@@ -16,21 +18,8 @@ func (e *UnsupportedAlgorithm) Error() string {
 	return e.Message
 }
 
-type InvalidPublicKey struct {
-	Message string
-}
-
-func (e *InvalidPublicKey) Error() string {
-	return e.Message
-}
-
-type InvalidPrivateKey struct {
-	Message string
-}
-
-func (e *InvalidPrivateKey) Error() string {
-	return e.Message
-}
+var InvalidPublicKey = errors.New("")
+var InvalidPrivateKey = errors.New("")
 
 type SigningError struct {
 	Message string

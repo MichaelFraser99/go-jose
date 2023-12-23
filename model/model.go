@@ -14,7 +14,6 @@ type Signer interface {
 type Validator interface {
 	ValidateSignature(digest, signature []byte) (bool, error)
 	Public() crypto.PublicKey
-	Jwk() map[string]string
 }
 
 type Algorithm int
@@ -29,6 +28,9 @@ const (
 	PS256
 	PS384
 	PS512
+	HS256
+	HS384
+	HS512
 )
 
 func (a Algorithm) String() string {
@@ -51,6 +53,12 @@ func (a Algorithm) String() string {
 		return "PS384"
 	case PS512:
 		return "PS512"
+	case HS256:
+		return "HS256"
+	case HS384:
+		return "HS384"
+	case HS512:
+		return "HS512"
 	default:
 		return ""
 	}

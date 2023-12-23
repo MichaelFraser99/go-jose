@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/MichaelFraser99/go-jose/jwk"
 	"testing"
 )
 
@@ -62,21 +63,24 @@ func TestRS512_Sign(t *testing.T) {
 		t.FailNow()
 	}
 
-	jwk := validator.Jwk()
-	jwkBytes, err := json.Marshal(jwk)
+	key, err := jwk.PublicJwk(validator.Public())
+	if err != nil {
+		t.Errorf("failed to extract jwk from public key: %s", err.Error())
+	}
+	jwkBytes, err := json.Marshal(key)
 	if err != nil {
 		t.Errorf("failed to marshal JWK as map: %s", err.Error())
 		t.FailNow()
 	}
-	val, ok := jwk["kty"]
+	val, ok := (*key)["kty"]
 	if !ok || val != "RSA" {
 		t.Errorf("kty key is missing or wrong")
 	}
-	_, ok = jwk["n"]
+	_, ok = (*key)["n"]
 	if !ok {
 		t.Errorf("n key is missing")
 	}
-	_, ok = jwk["e"]
+	_, ok = (*key)["e"]
 	if !ok {
 		t.Errorf("e key is missing")
 	}

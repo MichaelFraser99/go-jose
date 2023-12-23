@@ -1,10 +1,11 @@
-package ps512
+package es256
 
 import (
 	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/rsa"
-	"crypto/sha512"
+	"crypto/sha256"
 	"fmt"
 	e "github.com/MichaelFraser99/go-jose/error"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
@@ -12,52 +13,52 @@ import (
 	"io"
 )
 
+const keySize = 64
+
 type Signer struct {
 	alg        model.Algorithm
-	privateKey *rsa.PrivateKey
+	privateKey *ecdsa.PrivateKey
 }
 
 type Validator struct {
-	publicKey *rsa.PublicKey
+	publicKey *ecdsa.PublicKey
 }
 
-func NewSigner(size int) (*Signer, error) {
-	if size < 2048 {
-		return nil, fmt.Errorf("specified key bit size should be at least 2048")
-	}
-	pk, err := rsa.GenerateKey(rand.Reader, size)
+func NewSigner() (*Signer, error) {
+	curve := elliptic.P256()
+	pk, err := ecdsa.GenerateKey(curve, rand.Reader)
 	if err != nil {
 		return nil, &e.SigningError{Message: fmt.Sprintf("failed to generate key: %s", err.Error())}
 	}
 	return &Signer{
-		alg:        model.PS512,
+		alg:        model.ES256,
 		privateKey: pk,
 	}, nil
 }
 
 func NewSignerFromPrivateKey(privateKey crypto.PrivateKey) (*Signer, error) {
-	rsaPrivateKey, ok := privateKey.(*rsa.PrivateKey)
+	ecdsaPrivateKey, ok := privateKey.(*ecdsa.PrivateKey)
 	if !ok {
-		return nil, fmt.Errorf("%winvalid key provided for .S... should be instance of `*rsa.Privatekey`", e.InvalidPrivateKey)
+		return nil, &e.InvalidPrivateKey{Message: "invalid key provided for .S... should be instance of `*ecdsa.Privatekey`"}
 	}
 	return &Signer{
-		alg:        model.PS512,
-		privateKey: rsaPrivateKey,
+		alg:        model.ES256,
+		privateKey: ecdsaPrivateKey,
 	}, nil
 }
 
 func NewValidator(publicKey crypto.PublicKey) (*Validator, error) {
-	rsaPublicKey, ok := publicKey.(*rsa.PublicKey)
+	ecdsaPublicKey, ok := publicKey.(*ecdsa.PublicKey)
 	if !ok {
-		return nil, fmt.Errorf("%winvalid key provided for .S... should be instance of `*rsa.PublicKey`", e.InvalidPublicKey)
+		return nil, &e.InvalidPublicKey{Message: "invalid key provided for .S... should be instance of `*ecdsa.PublicKey`"}
 	}
 	return &Validator{
-		publicKey: rsaPublicKey,
+		publicKey: ecdsaPublicKey,
 	}, nil
 }
 
 func NewValidatorFromJwk(publicKeyJson []byte) (*Validator, error) {
-	publicKey, err := common.NewRSAPublicKeyFromJson(publicKeyJson)
+	publicKey, err := common.NewECDSAPublicKeyFromJson(publicKeyJson, elliptic.P256())
 	if err != nil {
 		return nil, err
 	}
@@ -73,20 +74,16 @@ func (signer *Signer) Public() crypto.PublicKey {
 }
 
 func (signer *Signer) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error) {
-	if opts != nil && opts.HashFunc() > 0 && opts.HashFunc() != crypto.SHA512 {
+	if opts != nil && opts.HashFunc() > 0 && opts.HashFunc() != crypto.SHA256 {
 		return nil, &e.SigningError{Message: "invalid hash function provided for specified signer"}
 	}
 
-	var hashedDigest []byte
 	if opts == nil || opts.HashFunc() == 0 {
-		hash := sha512.Sum512(digest)
-		hashedDigest = hash[:]
-	} else {
-		hashedDigest = make([]byte, len(digest))
-		copy(hashedDigest, digest)
+		hashedDigest := sha256.Sum256(digest)
+		digest = hashedDigest[:]
 	}
 
-	signature, err = common.RsaPSSSign(rand, *signer.privateKey, hashedDigest[:], crypto.SHA512, len(hashedDigest))
+	signature, err = common.EllipticCurveSign(rand, *signer.privateKey, digest[:], keySize)
 	if err != nil {
 		return nil, err
 	}
@@ -95,19 +92,20 @@ func (signer *Signer) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts
 }
 
 func (validator *Validator) ValidateSignature(digest, signature []byte) (bool, error) {
-	hashedDigest := sha512.Sum512(digest)
+	bodyHash := sha256.Sum256(digest)
 
-	opts := &rsa.PSSOptions{
-		SaltLength: len(hashedDigest),
-		Hash:       crypto.SHA512,
-	}
-	err := rsa.VerifyPSS(validator.publicKey, crypto.SHA512, hashedDigest[:], signature, opts)
-
+	r, s, err := common.ExtractRSFromSignature(signature, keySize)
 	if err != nil {
-		return false, &e.InvalidSignature{Message: fmt.Sprintf("invalid signature: %s", err.Error())}
+		return false, &e.InvalidSignature{Message: "invalid signature"}
 	}
 
-	return true, nil
+	return ecdsa.Verify(validator.publicKey, bodyHash[:], r, s), nil
+}
+
+func (validator *Validator) Jwk() map[string]string {
+	jwk := common.JwkFromECDSAPublicKey(validator.publicKey)
+	jwk["crv"] = "P-256"
+	return jwk
 }
 
 func (validator *Validator) Public() crypto.PublicKey {

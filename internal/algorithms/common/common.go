@@ -43,17 +43,17 @@ func NewECDSAPublicKeyFromJson(publicKeyJson []byte, curve elliptic.Curve) (*ecd
 	var publicKey ECDSAPublicKey
 	err := json.Unmarshal(publicKeyJson, &publicKey)
 	if err != nil {
-		return nil, &e.InvalidPublicKey{Message: fmt.Sprintf("provided public key json isn't a valid ecdsa public key: %s", err.Error())}
+		return nil, fmt.Errorf("%wprovided public key json isn't a valid ecdsa public key: %s", e.InvalidPublicKey, err.Error())
 	}
 
 	xBytes, err := base64.RawURLEncoding.DecodeString(publicKey.X)
 	if err != nil {
-		return nil, &e.InvalidPublicKey{Message: fmt.Sprintf("error decoding provided public key: %s", err.Error())}
+		return nil, fmt.Errorf("%werror decoding provided public key: %s", e.InvalidPublicKey, err.Error())
 	}
 
 	yBytes, err := base64.RawURLEncoding.DecodeString(publicKey.Y)
 	if err != nil {
-		return nil, &e.InvalidPublicKey{Message: fmt.Sprintf("error decoding provided public key: %s", err.Error())}
+		return nil, fmt.Errorf("%werror decoding provided public key: %s", e.InvalidPublicKey, err.Error())
 	}
 
 	pk := &ecdsa.PublicKey{
@@ -64,8 +64,8 @@ func NewECDSAPublicKeyFromJson(publicKeyJson []byte, curve elliptic.Curve) (*ecd
 	return pk, nil
 }
 
-func JwkFromECDSAPublicKey(publicKey *ecdsa.PublicKey) map[string]string {
-	jwk := map[string]string{}
+func JwkFromECDSAPublicKey(publicKey *ecdsa.PublicKey) map[string]any {
+	jwk := map[string]any{}
 
 	curveBits := publicKey.Curve.Params().BitSize
 	curveBytes := curveBits / 8
@@ -85,12 +85,55 @@ func JwkFromECDSAPublicKey(publicKey *ecdsa.PublicKey) map[string]string {
 		yBytes = append(padding, yBytes...)
 	}
 
-	b64X := base64.RawURLEncoding.EncodeToString(xBytes)
-	b64Y := base64.RawURLEncoding.EncodeToString(yBytes)
+	b64X := make([]byte, base64.RawURLEncoding.EncodedLen(len(xBytes)))
+	base64.RawURLEncoding.Encode(b64X, xBytes)
 
-	jwk["x"] = b64X
-	jwk["y"] = b64Y
+	b64Y := make([]byte, base64.RawURLEncoding.EncodedLen(len(yBytes)))
+	base64.RawURLEncoding.Encode(b64Y, yBytes)
+
+	jwk["x"] = string(b64X)
+	jwk["y"] = string(b64Y)
 	jwk["kty"] = "EC"
+	jwk["crv"] = publicKey.Curve.Params().Name
+	return jwk
+}
+
+func JwkFromECDSAPrivateKey(privateKey *ecdsa.PrivateKey) map[string]any {
+	jwk := map[string]any{}
+
+	curveBits := privateKey.Curve.Params().BitSize
+	curveBytes := curveBits / 8
+	if curveBits%8 > 0 {
+		curveBytes++
+	}
+
+	xBytes := privateKey.X.Bytes()
+	yBytes := privateKey.Y.Bytes()
+	dBytes := privateKey.D.Bytes()
+
+	if len(xBytes) < curveBytes {
+		padding := make([]byte, curveBytes-len(xBytes))
+		xBytes = append(padding, xBytes...)
+	}
+	if len(yBytes) < curveBytes {
+		padding := make([]byte, curveBytes-len(yBytes))
+		yBytes = append(padding, yBytes...)
+	}
+
+	b64X := make([]byte, base64.RawURLEncoding.EncodedLen(len(xBytes)))
+	base64.RawURLEncoding.Encode(b64X, xBytes)
+
+	b64Y := make([]byte, base64.RawURLEncoding.EncodedLen(len(yBytes)))
+	base64.RawURLEncoding.Encode(b64Y, yBytes)
+
+	b64D := make([]byte, base64.RawURLEncoding.EncodedLen(len(dBytes)))
+	base64.RawURLEncoding.Encode(b64D, dBytes)
+
+	jwk["x"] = string(b64X)
+	jwk["y"] = string(b64Y)
+	jwk["d"] = string(b64D)
+	jwk["kty"] = "EC"
+	jwk["crv"] = privateKey.Curve.Params().Name
 	return jwk
 }
 
@@ -98,17 +141,17 @@ func NewRSAPublicKeyFromJson(publicKeyJson []byte) (*rsa.PublicKey, error) {
 	var publicKey RSAPublicKey
 	err := json.Unmarshal(publicKeyJson, &publicKey)
 	if err != nil {
-		return nil, &e.InvalidPublicKey{Message: fmt.Sprintf("provided public key json isn't a valid rsa public key: %s", err.Error())}
+		return nil, fmt.Errorf("%wprovided public key json isn't a valid rsa public key: %s", e.InvalidPublicKey, err.Error())
 	}
 
 	nBytes, err := base64.RawURLEncoding.DecodeString(publicKey.N)
 	if err != nil {
-		return nil, &e.InvalidPublicKey{Message: fmt.Sprintf("error decoding provided public key: %s", err.Error())}
+		return nil, fmt.Errorf("%werror decoding provided public key: %s", e.InvalidPublicKey, err.Error())
 	}
 
 	eBytes, err := base64.RawURLEncoding.DecodeString(publicKey.E)
 	if err != nil {
-		return nil, &e.InvalidPublicKey{Message: fmt.Sprintf("error decoding provided public key: %s", err.Error())}
+		return nil, fmt.Errorf("%werror decoding provided public key: %s", e.InvalidPublicKey, err.Error())
 	}
 
 	pk := &rsa.PublicKey{
@@ -128,8 +171,8 @@ func NewRSAPublicKeyFromJson(publicKeyJson []byte) (*rsa.PublicKey, error) {
 	return pk, nil
 }
 
-func JwkFromRSAPublicKey(publicKey *rsa.PublicKey) map[string]string {
-	jwk := map[string]string{}
+func JwkFromRSAPublicKey(publicKey *rsa.PublicKey) map[string]any {
+	jwk := map[string]any{}
 
 	nBytes := publicKey.N.Bytes()
 	eBytes := big.NewInt(int64(publicKey.E)).Bytes()
@@ -142,6 +185,79 @@ func JwkFromRSAPublicKey(publicKey *rsa.PublicKey) map[string]string {
 
 	jwk["n"] = string(b64N)
 	jwk["e"] = string(b64E)
+	jwk["kty"] = "RSA"
+	return jwk
+}
+
+func JwkFromRSAPrivateKey(privateKey *rsa.PrivateKey) map[string]any {
+	jwk := map[string]any{}
+
+	nBytes := privateKey.N.Bytes()
+	eBytes := big.NewInt(int64(privateKey.E)).Bytes()
+	dBytes := privateKey.D.Bytes()
+	dpBytes := privateKey.Precomputed.Dp.Bytes()
+	dqBytes := privateKey.Precomputed.Dq.Bytes()
+	qiBytes := privateKey.Precomputed.Qinv.Bytes()
+
+	b64N := make([]byte, base64.RawURLEncoding.EncodedLen(len(nBytes)))
+	base64.RawURLEncoding.Encode(b64N, nBytes)
+
+	b64E := make([]byte, base64.RawURLEncoding.EncodedLen(len(eBytes)))
+	base64.RawURLEncoding.Encode(b64E, eBytes)
+
+	b64D := make([]byte, base64.RawURLEncoding.EncodedLen(len(dBytes)))
+	base64.RawURLEncoding.Encode(b64D, dBytes)
+
+	b64Dp := make([]byte, base64.RawURLEncoding.EncodedLen(len(dpBytes)))
+	base64.RawURLEncoding.Encode(b64Dp, dpBytes)
+
+	b64Dq := make([]byte, base64.RawURLEncoding.EncodedLen(len(dqBytes)))
+	base64.RawURLEncoding.Encode(b64Dq, dqBytes)
+
+	b64Qi := make([]byte, base64.RawURLEncoding.EncodedLen(len(qiBytes)))
+	base64.RawURLEncoding.Encode(b64Qi, qiBytes)
+
+	//retrieve primes
+	b64Primes := make([][]byte, len(privateKey.Primes))
+	for i, b := range privateKey.Primes {
+		b64Primes[i] = make([]byte, base64.RawURLEncoding.EncodedLen(len(b.Bytes())))
+		base64.RawURLEncoding.Encode(b64Primes[i], b.Bytes())
+	}
+
+	// This is deprecated but until the spec formally eliminates them, this must stay
+	if len(privateKey.Precomputed.CRTValues) > 0 {
+		var oth []map[string]string
+		for _, prime := range privateKey.Precomputed.CRTValues {
+			rBytes := prime.R.Bytes()
+			expBytes := prime.Exp.Bytes()
+			coeffBytes := prime.Coeff.Bytes()
+
+			b64r := make([]byte, base64.RawURLEncoding.EncodedLen(len(rBytes)))
+			base64.RawURLEncoding.Encode(b64r, rBytes)
+
+			b64exp := make([]byte, base64.RawURLEncoding.EncodedLen(len(expBytes)))
+			base64.RawURLEncoding.Encode(b64exp, expBytes)
+
+			b64coeff := make([]byte, base64.RawURLEncoding.EncodedLen(len(coeffBytes)))
+			base64.RawURLEncoding.Encode(b64coeff, coeffBytes)
+
+			oth = append(oth, map[string]string{
+				"r": string(rBytes),
+				"d": string(b64exp),
+				"t": string(b64coeff),
+			})
+		}
+		jwk["oth"] = oth
+	}
+
+	jwk["n"] = string(b64N)
+	jwk["e"] = string(b64E)
+	jwk["d"] = string(b64D)
+	jwk["dp"] = string(b64Dp)
+	jwk["dq"] = string(b64Dq)
+	jwk["qi"] = string(b64Qi)
+	jwk["p"] = string(b64Primes[0])
+	jwk["q"] = string(b64Primes[1])
 	jwk["kty"] = "RSA"
 	return jwk
 }
