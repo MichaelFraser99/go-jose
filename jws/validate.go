@@ -9,7 +9,7 @@ import (
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es512"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/ps256"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/ps384"
-	ps512 "github.com/MichaelFraser99/go-jose/internal/algorithms/ps521"
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/ps512"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs256"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs384"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs512"
@@ -46,7 +46,7 @@ func GetValidator(alg model.Algorithm, publicKey crypto.PublicKey) (model.Valida
 	case model.PS512:
 		v, err = ps512.NewValidator(publicKey)
 	default:
-		return nil, &e.UnsupportedAlgorithm{Message: fmt.Sprintf("unsupported algorithm: '%s'", alg.String())}
+		return nil, fmt.Errorf("%wunsupported algorithm: '%s'", e.UnsupportedAlgorithm, alg.String())
 	}
 	return v, err
 }
@@ -81,7 +81,7 @@ func GetValidatorFromJwk(alg model.Algorithm, jwk []byte) (model.Validator, erro
 	case model.PS512:
 		v, err = ps512.NewValidatorFromJwk(jwk)
 	default:
-		return nil, &e.UnsupportedAlgorithm{Message: fmt.Sprintf("unsupported algorithm: '%s'", alg.String())}
+		return nil, fmt.Errorf("%wunsupported algorithm: '%s'", e.UnsupportedAlgorithm, alg.String())
 	}
 	return v, err
 }

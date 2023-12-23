@@ -28,7 +28,7 @@ func NewSigner() (*Signer, error) {
 	curve := elliptic.P384()
 	pk, err := ecdsa.GenerateKey(curve, rand.Reader)
 	if err != nil {
-		return nil, &e.SigningError{Message: fmt.Sprintf("failed to generate key: %s", err.Error())}
+		return nil, fmt.Errorf("%wfailed to generate key: %s", e.SigningError, err.Error())
 	}
 	return &Signer{
 		alg:        model.ES384,
@@ -39,7 +39,7 @@ func NewSigner() (*Signer, error) {
 func NewSignerFromPrivateKey(privateKey crypto.PrivateKey) (*Signer, error) {
 	ecdsaPrivateKey, ok := privateKey.(*ecdsa.PrivateKey)
 	if !ok {
-		return nil, fmt.Errorf("%winvalid key provided for .S... should be instance of `*ecdsa.Privatekey`", e.InvalidPrivateKey)
+		return nil, fmt.Errorf("%winvalid key provided - should be instance of `*ecdsa.Privatekey`", e.InvalidPrivateKey)
 	}
 	return &Signer{
 		alg:        model.ES384,
@@ -50,7 +50,7 @@ func NewSignerFromPrivateKey(privateKey crypto.PrivateKey) (*Signer, error) {
 func NewValidator(publicKey crypto.PublicKey) (*Validator, error) {
 	ecdsaPublicKey, ok := publicKey.(*ecdsa.PublicKey)
 	if !ok {
-		return nil, fmt.Errorf("%winvalid key provided for .S... should be instance of `*ecdsa.PublicKey`", e.InvalidPublicKey)
+		return nil, fmt.Errorf("%winvalid key provided - should be instance of `*ecdsa.PublicKey`", e.InvalidPublicKey)
 	}
 	return &Validator{
 		publicKey: ecdsaPublicKey,
@@ -75,7 +75,7 @@ func (signer *Signer) Public() crypto.PublicKey {
 
 func (signer *Signer) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error) {
 	if opts != nil && opts.HashFunc() > 0 && opts.HashFunc() != crypto.SHA384 {
-		return nil, &e.SigningError{Message: "invalid hash function provided for specified signer"}
+		return nil, fmt.Errorf("%winvalid hash function provided for specified signer", e.SigningError)
 	}
 
 	if opts == nil || opts.HashFunc() == 0 {
@@ -96,7 +96,7 @@ func (validator *Validator) ValidateSignature(digest, signature []byte) (bool, e
 
 	r, s, err := common.ExtractRSFromSignature(signature, keySize)
 	if err != nil {
-		return false, &e.InvalidSignature{Message: "invalid signature"}
+		return false, fmt.Errorf("%winvalid signature", e.InvalidSignature)
 	}
 
 	return ecdsa.Verify(validator.publicKey, bodyHash[:], r, s), nil

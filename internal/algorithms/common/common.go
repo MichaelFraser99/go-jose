@@ -264,7 +264,7 @@ func JwkFromRSAPrivateKey(privateKey *rsa.PrivateKey) map[string]any {
 
 func ExtractRSFromSignature(signature []byte, keySize int) (*big.Int, *big.Int, error) {
 	if len(signature) != keySize {
-		return nil, nil, &e.InvalidSignature{Message: fmt.Sprintf("signature should be %d bytes for given algorithm", keySize)}
+		return nil, nil, fmt.Errorf("%wsignature should be %d bytes for given algorithm", e.InvalidSignature, keySize)
 	}
 	rb := signature[:keySize/2]
 	sb := signature[keySize/2:]
@@ -278,7 +278,7 @@ func ExtractRSFromSignature(signature []byte, keySize int) (*big.Int, *big.Int, 
 func EllipticCurveSign(rand io.Reader, pk ecdsa.PrivateKey, digest []byte, keySize int) ([]byte, error) {
 	r, s, err := ecdsa.Sign(rand, &pk, digest)
 	if err != nil {
-		return nil, &e.SigningError{Message: fmt.Sprintf("failed to sign token: %s", err.Error())}
+		return nil, fmt.Errorf("%wfailed to sign token: %s", e.SigningError, err.Error())
 	}
 
 	sigBytes := make([]byte, keySize)
@@ -292,9 +292,7 @@ func EllipticCurveSign(rand io.Reader, pk ecdsa.PrivateKey, digest []byte, keySi
 func RsaPkcs1Sign(rand io.Reader, pk rsa.PrivateKey, digest []byte, hash crypto.Hash) ([]byte, error) {
 	s, err := rsa.SignPKCS1v15(rand, &pk, hash, digest)
 	if err != nil {
-		return nil, &e.SigningError{
-			Message: fmt.Sprintf("failed to sign token: %s", err.Error()),
-		}
+		return nil, fmt.Errorf("%wfailed to sign token: %s", e.SigningError, err.Error())
 	}
 	return s, nil
 }
@@ -306,9 +304,7 @@ func RsaPSSSign(rand io.Reader, pk rsa.PrivateKey, digest []byte, hash crypto.Ha
 	}
 	s, err := rsa.SignPSS(rand, &pk, hash, digest, opts)
 	if err != nil {
-		return nil, &e.SigningError{
-			Message: fmt.Sprintf("failed to sign token: %s", err.Error()),
-		}
+		return nil, fmt.Errorf("%wfailed to sign token: %s", e.SigningError, err.Error())
 	}
 	return s, nil
 }

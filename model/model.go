@@ -44,7 +44,7 @@ func (a Algorithm) String() string {
 	case RS256:
 		return "RS256"
 	case RS384:
-		return "ES384"
+		return "RS384"
 	case RS512:
 		return "RS512"
 	case PS256:
