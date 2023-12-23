@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/MichaelFraser99/go-jose/jwk"
 	"testing"
 )
 
@@ -62,26 +63,29 @@ func TestES384_Sign(t *testing.T) {
 		t.FailNow()
 	}
 
-	jwk := validator.Jwk()
-	jwkBytes, err := json.Marshal(jwk)
+	key, err := jwk.PublicJwk(validator.Public())
+	if err != nil {
+		t.Errorf("failed to extract jwk from public key: %s", err.Error())
+	}
+	jwkBytes, err := json.Marshal(key)
 	if err != nil {
 		t.Errorf("failed to marshal JWK as map: %s", err.Error())
 		t.FailNow()
 	}
-	val, ok := jwk["kty"]
+	val, ok := (*key)["kty"]
 	if !ok || val != "EC" {
 		t.Errorf("kty key is missing or wrong")
 	}
-	_, ok = jwk["x"]
+	_, ok = (*key)["x"]
 	if !ok {
 		t.Errorf("n key is missing")
 	}
-	_, ok = jwk["y"]
+	_, ok = (*key)["y"]
 	if !ok {
 		t.Errorf("e key is missing")
 	}
-	crv, ok := jwk["crv"]
-	if !ok && crv != "P-384" {
+	crv, ok := (*key)["crv"]
+	if !ok && crv != "P-256" {
 		t.Errorf("crv key is missing or wrong")
 	}
 

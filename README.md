@@ -68,16 +68,24 @@ validator, err := jose.GetValidator(model.ES256, publicKey)
 valid, err := validator.ValidateSignature(digest, signature)
 ```
 
-In addition, the validator object also has a method `Jwk()` which returns a `map[string]string` representation of the public key in jwk format
-```go
-validator, err := jose.GetValidator(model.ES256, publicKey)
-jwk := validator.Jwk()
-```
-
 Finally, validators expose their PublicKey with the `Public()` method
 ```go
 validator, err :- jose.GetValidator(model.ES256, publicKey)
 pk := validator.Public()
+```
+
+## Jwks
+This library includes two methods for converting keys into JWK format
+
+PublicJwk takes in a pointer to a public key and returns a `map[string]string` containing the jwk representation of the provided public key
+```go
+// Direct from a public key
+jwkMap, err := PublicJwk(publicKey)
+
+// From a Signer
+signer, err := jose.GetSigner(model.ES256, nil)
+publicKey := signer.Public
+jwkMap, err := PublicJwk(&publicKey)
 ```
 
 ### Errors

@@ -38,7 +38,7 @@ func NewSigner(size int) (*Signer, error) {
 func NewSignerFromPrivateKey(privateKey crypto.PrivateKey) (*Signer, error) {
 	rsaPrivateKey, ok := privateKey.(*rsa.PrivateKey)
 	if !ok {
-		return nil, &e.InvalidPrivateKey{Message: "invalid key provided for .S... should be instance of `*rsa.Privatekey`"}
+		return nil, fmt.Errorf("%winvalid key provided for .S... should be instance of `*rsa.Privatekey`", e.InvalidPrivateKey)
 	}
 	return &Signer{
 		alg:        model.RS384,
@@ -49,7 +49,7 @@ func NewSignerFromPrivateKey(privateKey crypto.PrivateKey) (*Signer, error) {
 func NewValidator(publicKey crypto.PublicKey) (*Validator, error) {
 	rsaPublicKey, ok := publicKey.(*rsa.PublicKey)
 	if !ok {
-		return nil, &e.InvalidPublicKey{Message: "invalid key provided for .S... should be instance of `*rsa.PublicKey`"}
+		return nil, fmt.Errorf("%winvalid key provided for .S... should be instance of `*rsa.PublicKey`", e.InvalidPublicKey)
 	}
 	return &Validator{
 		publicKey: rsaPublicKey,
@@ -104,10 +104,6 @@ func (validator *Validator) ValidateSignature(digest, signature []byte) (bool, e
 	}
 
 	return true, nil
-}
-
-func (validator *Validator) Jwk() map[string]string {
-	return common.JwkFromRSAPublicKey(validator.publicKey)
 }
 
 func (validator *Validator) Public() crypto.PublicKey {

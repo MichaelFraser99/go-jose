@@ -1,4 +1,4 @@
-package jose
+package jws
 
 import (
 	"crypto"
