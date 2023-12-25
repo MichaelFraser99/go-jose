@@ -27,13 +27,11 @@ func TestPS512_Sign(t *testing.T) {
 
 	bBody, err := json.Marshal(body)
 	if err != nil {
-		t.Error("no error should be thrown:", err)
-		t.FailNow()
+		t.Fatal("no error should be thrown:", err)
 	}
 	bHeader, err := json.Marshal(headerKeys)
 	if err != nil {
-		t.Error("no error should be thrown:", err)
-		t.FailNow()
+		t.Fatal("no error should be thrown:", err)
 	}
 
 	b64Header := base64.RawURLEncoding.EncodeToString(bHeader)
@@ -43,24 +41,20 @@ func TestPS512_Sign(t *testing.T) {
 
 	ps512, err := NewSigner(2048)
 	if err != nil {
-		t.Error("no error should be thrown:", err)
-		t.FailNow()
+		t.Fatal("no error should be thrown:", err)
 	}
 
 	signature, err := ps512.Sign(rand.Reader, []byte(digest), nil)
 	if err != nil {
-		t.Error("no error should be thrown:", err)
-		t.FailNow()
+		t.Fatal("no error should be thrown:", err)
 	}
 	if ps512.Public() == nil {
-		t.Error("public key should not be nil")
-		t.FailNow()
+		t.Fatal("public key should not be nil")
 	}
 
 	validator, err := NewValidator(ps512.Public())
 	if err != nil {
-		t.Error("no error should be thrown:", err)
-		t.FailNow()
+		t.Fatal("no error should be thrown:", err)
 	}
 
 	key, err := jwk.PublicJwk(validator.Public())
@@ -69,8 +63,7 @@ func TestPS512_Sign(t *testing.T) {
 	}
 	jwkBytes, err := json.Marshal(key)
 	if err != nil {
-		t.Errorf("failed to marshal JWK as map: %s", err.Error())
-		t.FailNow()
+		t.Fatalf("failed to marshal JWK as map: %s", err.Error())
 	}
 	val, ok := (*key)["kty"]
 	if !ok || val != "RSA" {
@@ -99,8 +92,7 @@ func TestPS512_Sign(t *testing.T) {
 
 	val2, err := NewValidatorFromJwk(jwkBytes)
 	if err != nil {
-		t.Errorf("failed to create validator from public key jwk: %s", err.Error())
-		t.FailNow()
+		t.Fatalf("failed to create validator from public key jwk: %s", err.Error())
 	}
 
 	valid, err = val2.ValidateSignature([]byte(digest), signature)

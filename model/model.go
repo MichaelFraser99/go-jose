@@ -65,7 +65,8 @@ func (a Algorithm) String() string {
 }
 
 type Opts struct {
-	BitSize int
+	BitSize   int
+	SecretKey *[]byte
 }
 
 type SignerOpts struct {
