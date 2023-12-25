@@ -225,8 +225,10 @@ func JwkFromRSAPrivateKey(privateKey *rsa.PrivateKey) map[string]any {
 	}
 
 	// This is deprecated but until the spec formally eliminates them, this must stay
+	// nolint:staticcheck
 	if len(privateKey.Precomputed.CRTValues) > 0 {
 		var oth []map[string]string
+		// nolint:staticcheck
 		for _, prime := range privateKey.Precomputed.CRTValues {
 			rBytes := prime.R.Bytes()
 			expBytes := prime.Exp.Bytes()

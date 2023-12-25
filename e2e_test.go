@@ -96,8 +96,17 @@ func Test_SignPreHashed(t *testing.T) {
 
 func TestGetSignerFromPrivateKey(t *testing.T) {
 	rsaPk, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ec256Pk, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ec384Pk, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ec521Pk, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)

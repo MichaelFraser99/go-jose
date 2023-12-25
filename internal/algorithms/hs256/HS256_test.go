@@ -23,13 +23,11 @@ func TestES256_Sign(t *testing.T) {
 
 	bBody, err := json.Marshal(body)
 	if err != nil {
-		t.Error("no error should be thrown:", err)
-		t.FailNow()
+		t.Fatal("no error should be thrown:", err)
 	}
 	bHeader, err := json.Marshal(headerKeys)
 	if err != nil {
-		t.Error("no error should be thrown:", err)
-		t.FailNow()
+		t.Fatal("no error should be thrown:", err)
 	}
 
 	b64Header := base64.RawURLEncoding.EncodeToString(bHeader)
@@ -40,22 +38,19 @@ func TestES256_Sign(t *testing.T) {
 	secretKey := []byte("your-256-bit-secret")
 	hs256, err := NewSigner(&secretKey)
 	if err != nil {
-		t.Error("no error should be thrown:", err)
-		t.FailNow()
+		t.Fatal("no error should be thrown:", err)
 	}
 
 	signature, err := hs256.Sign(rand.Reader, []byte(digest), nil)
 	if err != nil {
-		t.Error("no error should be thrown:", err)
-		t.FailNow()
+		t.Fatal("no error should be thrown:", err)
 	}
 	if hs256.Public() == nil {
-		t.Error("public key should not be nil")
-		t.FailNow()
+		t.Fatal("public key should not be nil")
 	}
 
 	stringSignature := base64.RawURLEncoding.EncodeToString(signature)
-	t.Log(fmt.Sprintf("%s.%s", digest, stringSignature))
+	t.Logf("%s.%s", digest, stringSignature)
 
 	if stringSignature != "fdOPQ05ZfRhkST2-rIWgUpbqUsVhkkNVNcuG7Ki0s-8" {
 		t.Errorf("unexpected signature produced: %s", stringSignature)
@@ -76,13 +71,11 @@ func TestES256_SignGeneratedSecret(t *testing.T) {
 
 	bBody, err := json.Marshal(body)
 	if err != nil {
-		t.Error("no error should be thrown:", err)
-		t.FailNow()
+		t.Fatal("no error should be thrown:", err)
 	}
 	bHeader, err := json.Marshal(headerKeys)
 	if err != nil {
-		t.Error("no error should be thrown:", err)
-		t.FailNow()
+		t.Fatal("no error should be thrown:", err)
 	}
 
 	b64Header := base64.RawURLEncoding.EncodeToString(bHeader)
@@ -92,22 +85,19 @@ func TestES256_SignGeneratedSecret(t *testing.T) {
 
 	hs256, err := NewSigner(nil)
 	if err != nil {
-		t.Error("no error should be thrown:", err)
-		t.FailNow()
+		t.Fatal("no error should be thrown:", err)
 	}
 
 	signature, err := hs256.Sign(rand.Reader, []byte(digest), nil)
 	if err != nil {
-		t.Error("no error should be thrown:", err)
-		t.FailNow()
+		t.Fatal("no error should be thrown:", err)
 	}
 	if hs256.Public() == nil {
-		t.Error("public key should not be nil")
-		t.FailNow()
+		t.Fatal("public key should not be nil")
 	}
 
 	stringSignature := base64.RawURLEncoding.EncodeToString(signature)
-	t.Log(fmt.Sprintf("%s.%s", digest, stringSignature))
+	t.Logf("%s.%s", digest, stringSignature)
 
 	secretKey := hs256.Public().(SecretKey)
 
@@ -118,16 +108,14 @@ func TestES256_SignGeneratedSecret(t *testing.T) {
 
 	signature2, err := hs2562.Sign(rand.Reader, []byte(digest), nil)
 	if err != nil {
-		t.Error("no error should be thrown:", err)
-		t.FailNow()
+		t.Fatal("no error should be thrown:", err)
 	}
 	if hs256.Public() == nil {
-		t.Error("public key should not be nil")
-		t.FailNow()
+		t.Fatal("public key should not be nil")
 	}
 
 	stringSignature = base64.RawURLEncoding.EncodeToString(signature2)
-	t.Log(fmt.Sprintf("%s.%s", digest, stringSignature))
+	t.Logf("%s.%s", digest, stringSignature)
 
 	if !bytes.Equal(signature, signature2) {
 		t.Error("two signatures should match")
