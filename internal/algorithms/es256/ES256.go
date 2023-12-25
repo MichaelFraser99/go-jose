@@ -14,6 +14,7 @@ import (
 )
 
 const keySize = 64
+const curveName = "P-256"
 
 type Signer struct {
 	alg        model.Algorithm
@@ -40,6 +41,9 @@ func NewSignerFromPrivateKey(privateKey crypto.PrivateKey) (*Signer, error) {
 	ecdsaPrivateKey, ok := privateKey.(*ecdsa.PrivateKey)
 	if !ok {
 		return nil, fmt.Errorf("%winvalid key provided - should be instance of `*ecdsa.Privatekey`", e.InvalidPrivateKey)
+	}
+	if ecdsaPrivateKey.Curve.Params().Name != curveName {
+		return nil, fmt.Errorf("%winvalid key provided - curve should be %s, was %s", e.InvalidPrivateKey, curveName, ecdsaPrivateKey.Curve.Params().Name)
 	}
 	return &Signer{
 		alg:        model.ES256,
