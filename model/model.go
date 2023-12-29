@@ -3,6 +3,7 @@ package model
 import (
 	"crypto"
 	"io"
+	"strings"
 )
 
 type Signer interface {
@@ -62,6 +63,43 @@ func (a Algorithm) String() string {
 	default:
 		return ""
 	}
+}
+
+// GetAlgorithm takes in a string representation of an Algorithm ("ES256" or "HS384")
+// If the provided string does not match a defined algorithm, nil is returned
+func GetAlgorithm(alg string) *Algorithm {
+	switch strings.ToUpper(alg) {
+	case "ES256":
+		return algorithm(ES256)
+	case "ES384":
+		return algorithm(ES384)
+	case "ES512":
+		return algorithm(ES512)
+	case "RS256":
+		return algorithm(RS256)
+	case "RS384":
+		return algorithm(RS384)
+	case "RS512":
+		return algorithm(RS512)
+	case "PS256":
+		return algorithm(PS256)
+	case "PS384":
+		return algorithm(PS384)
+	case "PS512":
+		return algorithm(PS512)
+	case "HS256":
+		return algorithm(HS256)
+	case "HS384":
+		return algorithm(HS384)
+	case "HS512":
+		return algorithm(HS512)
+	default:
+		return nil
+	}
+}
+
+func algorithm(a Algorithm) *Algorithm {
+	return &a
 }
 
 type Opts struct {
