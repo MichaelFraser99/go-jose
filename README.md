@@ -40,6 +40,23 @@ func (s *SecretKey) Equal(x crypto.PublicKey) bool {
 }
 ```
 
+Algorithms are represented inside this module with the following type:
+```go
+type Algorithm int
+```
+
+with the following methods defined
+
+```go
+func (a Algorithm) String() string
+```
+String returns the string representation of that algorithm (i.e. "RS256" or "HS384")
+
+```go
+func GetAlgorithm(alg string) *Algorithm
+```
+GetAlgorithm takes in a string and returns a pointer to the relevant algorithm type or nil if an invalid string provided
+
 ## Signers
 To create a Signer object use the `GetSigner` method. This takes in an algorithm and an optional `Opts` object (defines a bit size used for RSA keys) and returns a `crypto.Signer` implementation complete with generated key pair. The below example shows how to generate a signer for ES256:
 ```go
