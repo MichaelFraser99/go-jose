@@ -17,7 +17,6 @@ import (
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs384"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs512"
 	"github.com/MichaelFraser99/go-jose/model"
-	"slices"
 )
 
 // GetSigner
@@ -32,12 +31,10 @@ func GetSigner(alg model.Algorithm, opts *model.Opts) (model.Signer, error) {
 	var err error
 	var size int
 
-	if slices.Contains([]model.Algorithm{model.RS256, model.RS384, model.RS512}, alg) {
-		if opts == nil || opts.BitSize == 0 {
-			size = 2048
-		} else {
-			size = opts.BitSize
-		}
+	if opts == nil || opts.BitSize == 0 {
+		size = 2048
+	} else {
+		size = opts.BitSize
 	}
 
 	switch alg {
@@ -60,10 +57,19 @@ func GetSigner(alg model.Algorithm, opts *model.Opts) (model.Signer, error) {
 	case model.PS512:
 		s, err = ps512.NewSigner(size)
 	case model.HS256:
+		if opts == nil || opts.SecretKey == nil {
+			return nil, fmt.Errorf("secret key must be specified for HS algorithms")
+		}
 		s, err = hs256.NewSigner(opts.SecretKey)
 	case model.HS384:
+		if opts == nil || opts.SecretKey == nil {
+			return nil, fmt.Errorf("secret key must be specified for HS algorithms")
+		}
 		s, err = hs384.NewSigner(opts.SecretKey)
 	case model.HS512:
+		if opts == nil || opts.SecretKey == nil {
+			return nil, fmt.Errorf("secret key must be specified for HS algorithms")
+		}
 		s, err = hs512.NewSigner(opts.SecretKey)
 
 	default:
