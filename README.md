@@ -113,6 +113,8 @@ pk := validator.Public()
 ## Jwks
 This library includes two methods for converting keys into JWK format
 
+All JWK methods include in the returned map a KID suggestion based on the public key component
+
 PublicJwk takes in a pointer to a public key and returns a `map[string]string` containing the jwk representation of the provided public key
 ```go
 // Direct from a public key
