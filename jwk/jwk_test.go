@@ -313,6 +313,76 @@ func TestPrivateJwk(t *testing.T) {
 	}
 }
 
+func TestJwkKidValues(t *testing.T) {
+	rsaPk, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ec256Pk, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rsaPrivateJwk, err := PrivateJwk(rsaPk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rsaPublicJwk, err := PublicJwk(rsaPk.Public())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ecPrivateJwk, err := PrivateJwk(ec256Pk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ecPublicJwk, err := PublicJwk(ec256Pk.Public())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if rsaPrivateJwk == nil {
+		t.Fatal("rsa private jwk should not be nil")
+	}
+
+	if rsaPublicJwk == nil {
+		t.Fatal("rsa public jwk should not be nil")
+	}
+
+	if ecPrivateJwk == nil {
+		t.Fatal("ec private jwk should not be nil")
+	}
+
+	if ecPublicJwk == nil {
+		t.Fatal("ec public jwk should not be nil")
+	}
+
+	var found bool
+	var rsaPrivateKid any
+	if rsaPrivateKid, found = (*rsaPrivateJwk)["kid"]; !found {
+		t.Fatal("no rsa private kid found")
+	}
+	var rsaPublicKid any
+	if rsaPublicKid, found = (*rsaPublicJwk)["kid"]; !found {
+		t.Fatal("no rsa public kid found")
+	}
+	if rsaPrivateKid.(string) != rsaPublicKid.(string) {
+		t.Errorf("rsa key IDs should match - public: %s, private: %s", rsaPublicKid.(string), rsaPrivateKid.(string))
+	}
+
+	var ecPrivateKid any
+	if ecPrivateKid, found = (*ecPrivateJwk)["kid"]; !found {
+		t.Fatal("no rsa private kid found")
+	}
+	var ecPublicKid any
+	if ecPublicKid, found = (*ecPublicJwk)["kid"]; !found {
+		t.Fatal("no rsa public kid found")
+	}
+	if ecPrivateKid.(string) != ecPublicKid.(string) {
+		t.Errorf("ec key IDs should match - public: %s, private: %s", ecPublicKid.(string), ecPrivateKid.(string))
+	}
+}
+
 func CheckPresenceAndValue(t *testing.T, input map[string]any, key string, value string) any {
 	v, ok := input[key]
 	_, file, line, _ := runtime.Caller(1)
