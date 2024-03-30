@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rsa"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -91,10 +92,13 @@ func JwkFromECDSAPublicKey(publicKey *ecdsa.PublicKey) map[string]any {
 	b64Y := make([]byte, base64.RawURLEncoding.EncodedLen(len(yBytes)))
 	base64.RawURLEncoding.Encode(b64Y, yBytes)
 
+	h := sha256.New()
+	h.Write(append(b64X, b64Y...))
 	jwk["x"] = string(b64X)
 	jwk["y"] = string(b64Y)
 	jwk["kty"] = "EC"
 	jwk["crv"] = publicKey.Curve.Params().Name
+	jwk["kid"] = base64.RawURLEncoding.EncodeToString(h.Sum(nil))
 	return jwk
 }
 
@@ -129,11 +133,14 @@ func JwkFromECDSAPrivateKey(privateKey *ecdsa.PrivateKey) map[string]any {
 	b64D := make([]byte, base64.RawURLEncoding.EncodedLen(len(dBytes)))
 	base64.RawURLEncoding.Encode(b64D, dBytes)
 
+	h := sha256.New()
+	h.Write(append(b64X, b64Y...))
 	jwk["x"] = string(b64X)
 	jwk["y"] = string(b64Y)
 	jwk["d"] = string(b64D)
 	jwk["kty"] = "EC"
 	jwk["crv"] = privateKey.Curve.Params().Name
+	jwk["kid"] = base64.RawURLEncoding.EncodeToString(h.Sum(nil))
 	return jwk
 }
 
@@ -183,9 +190,12 @@ func JwkFromRSAPublicKey(publicKey *rsa.PublicKey) map[string]any {
 	b64E := make([]byte, base64.RawURLEncoding.EncodedLen(len(eBytes)))
 	base64.RawURLEncoding.Encode(b64E, eBytes)
 
+	h := sha256.New()
+	h.Write(append(b64N, b64E...))
 	jwk["n"] = string(b64N)
 	jwk["e"] = string(b64E)
 	jwk["kty"] = "RSA"
+	jwk["kid"] = base64.RawURLEncoding.EncodeToString(h.Sum(nil))
 	return jwk
 }
 
@@ -251,7 +261,8 @@ func JwkFromRSAPrivateKey(privateKey *rsa.PrivateKey) map[string]any {
 		}
 		jwk["oth"] = oth
 	}
-
+	h := sha256.New()
+	h.Write(append(b64N, b64E...))
 	jwk["n"] = string(b64N)
 	jwk["e"] = string(b64E)
 	jwk["d"] = string(b64D)
@@ -261,6 +272,7 @@ func JwkFromRSAPrivateKey(privateKey *rsa.PrivateKey) map[string]any {
 	jwk["p"] = string(b64Primes[0])
 	jwk["q"] = string(b64Primes[1])
 	jwk["kty"] = "RSA"
+	jwk["kid"] = base64.RawURLEncoding.EncodeToString(h.Sum(nil))
 	return jwk
 }
 
