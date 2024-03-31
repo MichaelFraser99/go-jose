@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"log"
+	"reflect"
 	"runtime"
 	"testing"
 )
@@ -173,6 +174,13 @@ func TestPublicJwk(t *testing.T) {
 				t.Fatalf("no error should be thrown: %s", err.Error())
 			}
 			tt.validate(t, *output)
+			newPk, err := PublicFromJwk(*output)
+			if err != nil {
+				t.Errorf("no error should be thrown: %s", err.Error())
+			}
+			if !reflect.DeepEqual(pk, newPk) {
+				t.Errorf("the values should match")
+			}
 		})
 	}
 }

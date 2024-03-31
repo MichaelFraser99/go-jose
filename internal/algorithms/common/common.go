@@ -10,7 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	e "github.com/MichaelFraser99/go-jose/error"
+	jose_errors "github.com/MichaelFraser99/go-jose/error"
 	"io"
 	"math/big"
 )
@@ -56,17 +56,17 @@ func NewECDSAPublicKeyFromJson(publicKeyJson []byte, curve elliptic.Curve) (*ecd
 	var publicKey ECDSAPublicKey
 	err := json.Unmarshal(publicKeyJson, &publicKey)
 	if err != nil {
-		return nil, fmt.Errorf("%wprovided public key json isn't a valid ecdsa public key: %s", e.InvalidPublicKey, err.Error())
+		return nil, fmt.Errorf("%wprovided public key json isn't a valid ecdsa public key: %s", jose_errors.InvalidPublicKey, err.Error())
 	}
 
 	xBytes, err := base64.RawURLEncoding.DecodeString(publicKey.X)
 	if err != nil {
-		return nil, fmt.Errorf("%werror decoding provided public key: %s", e.InvalidPublicKey, err.Error())
+		return nil, fmt.Errorf("%werror decoding provided public key: %s", jose_errors.InvalidPublicKey, err.Error())
 	}
 
 	yBytes, err := base64.RawURLEncoding.DecodeString(publicKey.Y)
 	if err != nil {
-		return nil, fmt.Errorf("%werror decoding provided public key: %s", e.InvalidPublicKey, err.Error())
+		return nil, fmt.Errorf("%werror decoding provided public key: %s", jose_errors.InvalidPublicKey, err.Error())
 	}
 
 	pk := &ecdsa.PublicKey{
@@ -75,6 +75,58 @@ func NewECDSAPublicKeyFromJson(publicKeyJson []byte, curve elliptic.Curve) (*ecd
 		Y:     big.NewInt(0).SetBytes(yBytes),
 	}
 	return pk, nil
+}
+
+func ECDSAPublicKeyFromJwk(jwk map[string]any) (*ecdsa.PublicKey, error) {
+	curveName := jwk["crv"].(string)
+	var curve elliptic.Curve
+	switch curveName {
+	case "P-256":
+		curve = elliptic.P256()
+	case "P-384":
+		curve = elliptic.P384()
+	case "P-521":
+		curve = elliptic.P521()
+	default:
+		return nil, fmt.Errorf("unsupported elliptic curve: %s", curveName)
+	}
+
+	var xBytes, yBytes []byte
+	var err error
+	if x, present := jwk["x"]; present {
+		if xString, ok := x.(string); ok {
+			xBytes, err = base64.RawURLEncoding.DecodeString(xString)
+			if err != nil {
+				return nil, fmt.Errorf("invalid base64url in 'x' claim")
+			}
+		} else {
+			return nil, fmt.Errorf("provided 'x' claim cannot be parsed as a string")
+		}
+	} else {
+		return nil, fmt.Errorf("no 'x' claim present in jwk")
+	}
+
+	if y, present := jwk["y"]; present {
+		if yString, ok := y.(string); ok {
+			yBytes, err = base64.RawURLEncoding.DecodeString(yString)
+			if err != nil {
+				return nil, fmt.Errorf("invalid base64url in 'y' claim")
+			}
+		} else {
+			return nil, fmt.Errorf("provided 'y' claim cannot be parsed as a string")
+		}
+	} else {
+		return nil, fmt.Errorf("no 'y' claim present in jwk")
+	}
+
+	x := new(big.Int).SetBytes(xBytes)
+	y := new(big.Int).SetBytes(yBytes)
+	publicKey := &ecdsa.PublicKey{
+		Curve: curve,
+		X:     x,
+		Y:     y,
+	}
+	return publicKey, nil
 }
 
 func JwkFromECDSAPublicKey(publicKey *ecdsa.PublicKey) map[string]any {
@@ -160,17 +212,17 @@ func NewRSAPublicKeyFromJson(publicKeyJson []byte) (*rsa.PublicKey, error) {
 	var publicKey RSAPublicKey
 	err := json.Unmarshal(publicKeyJson, &publicKey)
 	if err != nil {
-		return nil, fmt.Errorf("%wprovided public key json isn't a valid rsa public key: %s", e.InvalidPublicKey, err.Error())
+		return nil, fmt.Errorf("%wprovided public key json isn't a valid rsa public key: %s", jose_errors.InvalidPublicKey, err.Error())
 	}
 
 	nBytes, err := base64.RawURLEncoding.DecodeString(publicKey.N)
 	if err != nil {
-		return nil, fmt.Errorf("%werror decoding provided public key: %s", e.InvalidPublicKey, err.Error())
+		return nil, fmt.Errorf("%werror decoding provided public key: %s", jose_errors.InvalidPublicKey, err.Error())
 	}
 
 	eBytes, err := base64.RawURLEncoding.DecodeString(publicKey.E)
 	if err != nil {
-		return nil, fmt.Errorf("%werror decoding provided public key: %s", e.InvalidPublicKey, err.Error())
+		return nil, fmt.Errorf("%werror decoding provided public key: %s", jose_errors.InvalidPublicKey, err.Error())
 	}
 
 	pk := &rsa.PublicKey{
@@ -188,6 +240,41 @@ func NewRSAPublicKeyFromJson(publicKeyJson []byte) (*rsa.PublicKey, error) {
 	pk.E = int(e.Int64())
 
 	return pk, nil
+}
+
+func RSAPublicKeyFromJwk(jwk map[string]any) (*rsa.PublicKey, error) {
+	var nBytes, eBytes []byte
+	var err error
+	if n, present := jwk["n"]; present {
+		if nString, ok := n.(string); ok {
+			nBytes, err = base64.RawURLEncoding.DecodeString(nString)
+			if err != nil {
+				return nil, fmt.Errorf("invalid base64url in 'n' claim")
+			}
+		} else {
+			return nil, fmt.Errorf("provided 'n' claim cannot be parsed as a string")
+		}
+	} else {
+		return nil, fmt.Errorf("no 'n' claim present in jwk")
+	}
+
+	if e, present := jwk["e"]; present {
+		if eString, ok := e.(string); ok {
+			eBytes, err = base64.RawURLEncoding.DecodeString(eString)
+			if err != nil {
+				return nil, fmt.Errorf("invalid base64url in 'e' claim")
+			}
+		} else {
+			return nil, fmt.Errorf("provided 'e' claim cannot be parsed as a string")
+		}
+	} else {
+		return nil, fmt.Errorf("no 'e' claim present in jwk")
+	}
+
+	return &rsa.PublicKey{
+		N: new(big.Int).SetBytes(nBytes),
+		E: int(new(big.Int).SetBytes(eBytes).Int64()),
+	}, nil
 }
 
 func JwkFromRSAPublicKey(publicKey *rsa.PublicKey) map[string]any {
@@ -290,7 +377,7 @@ func JwkFromRSAPrivateKey(privateKey *rsa.PrivateKey) map[string]any {
 
 func ExtractRSFromSignature(signature []byte, keySize int) (*big.Int, *big.Int, error) {
 	if len(signature) != keySize {
-		return nil, nil, fmt.Errorf("%wsignature should be %d bytes for given algorithm", e.InvalidSignature, keySize)
+		return nil, nil, fmt.Errorf("%wsignature should be %d bytes for given algorithm", jose_errors.InvalidSignature, keySize)
 	}
 	rb := signature[:keySize/2]
 	sb := signature[keySize/2:]
@@ -304,7 +391,7 @@ func ExtractRSFromSignature(signature []byte, keySize int) (*big.Int, *big.Int, 
 func EllipticCurveSign(rand io.Reader, pk ecdsa.PrivateKey, digest []byte, keySize int) ([]byte, error) {
 	r, s, err := ecdsa.Sign(rand, &pk, digest)
 	if err != nil {
-		return nil, fmt.Errorf("%wfailed to sign token: %s", e.SigningError, err.Error())
+		return nil, fmt.Errorf("%wfailed to sign token: %s", jose_errors.SigningError, err.Error())
 	}
 
 	sigBytes := make([]byte, keySize)
@@ -318,7 +405,7 @@ func EllipticCurveSign(rand io.Reader, pk ecdsa.PrivateKey, digest []byte, keySi
 func RsaPkcs1Sign(rand io.Reader, pk rsa.PrivateKey, digest []byte, hash crypto.Hash) ([]byte, error) {
 	s, err := rsa.SignPKCS1v15(rand, &pk, hash, digest)
 	if err != nil {
-		return nil, fmt.Errorf("%wfailed to sign token: %s", e.SigningError, err.Error())
+		return nil, fmt.Errorf("%wfailed to sign token: %s", jose_errors.SigningError, err.Error())
 	}
 	return s, nil
 }
@@ -330,7 +417,7 @@ func RsaPSSSign(rand io.Reader, pk rsa.PrivateKey, digest []byte, hash crypto.Ha
 	}
 	s, err := rsa.SignPSS(rand, &pk, hash, digest, opts)
 	if err != nil {
-		return nil, fmt.Errorf("%wfailed to sign token: %s", e.SigningError, err.Error())
+		return nil, fmt.Errorf("%wfailed to sign token: %s", jose_errors.SigningError, err.Error())
 	}
 	return s, nil
 }
