@@ -126,6 +126,14 @@ publicKey := signer.Public
 jwkMap, err := PublicJwk(&publicKey)
 ```
 
+Also included is a method to convert an existing public key JWK back into it's respective public key
+
+The value returned is a pointer to the respective public key `*ecdsa.PublicKey` or `*rsa.PublicKey`
+
+```go
+PublicFromJwk(jwk map[string]any) (crypto.PublicKey, error)
+```
+
 ## JWTs
 This library includes two methods for jwt handling
 
