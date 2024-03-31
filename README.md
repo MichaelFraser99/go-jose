@@ -126,6 +126,27 @@ publicKey := signer.Public
 jwkMap, err := PublicJwk(&publicKey)
 ```
 
+## JWTs
+This library includes two methods for jwt handling
+
+The first is for signing a jwt from provided signer implementation, head map, and body map
+
+If the head does not include the `typ` claim, the method will insert a value of "JWT"
+
+Additionally, if the `crypto.Signer` implementation provided is one of the implementations defined in this module, the `alg` claim is also added (if not already present)
+
+```go
+New(signer crypto.Signer, head, body map[string]any) (*string, error) {
+```
+
+The second provides basic jwt validation and returns the decoded head and body values as instances of `map[string]any`
+
+If present, the `iat`, `nbf`, and `exp` claims will also be validated
+
+```go
+Validate(publicKey crypto.PublicKey, jwt string) (head, body map[string]any, err error)
+```
+
 ### Errors
 This package defines the following errors:
 - InvalidSignature - The provided signature does not match the digest
