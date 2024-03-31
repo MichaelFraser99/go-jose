@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es256"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es384"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es512"
@@ -19,9 +20,11 @@ import (
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs384"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs512"
 	"github.com/MichaelFraser99/go-jose/model"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNew(t *testing.T) {
@@ -578,6 +581,890 @@ func TestNew(t *testing.T) {
 			jwt, err := New(signer, tt.head, tt.body)
 			validator := tt.validator(t, signer.Public())
 			tt.validate(t, validator, jwt, err)
+		})
+	}
+}
+
+func TestValidate(t *testing.T) {
+	tests := []struct {
+		name      string
+		signer    func(t *testing.T) model.Signer
+		publicKey func(t *testing.T, signer model.Signer) crypto.PublicKey
+		jwt       func(t *testing.T, signer crypto.Signer) string
+		validate  func(t *testing.T, head, body map[string]any, err error)
+	}{
+		{
+			name: "we can validate a jwt signed with rs256",
+			signer: func(t *testing.T) model.Signer {
+				t.Helper()
+				signer, err := rs256.NewSigner(2048)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return signer
+			},
+			publicKey: func(t *testing.T, signer model.Signer) crypto.PublicKey {
+				return signer.Public()
+			},
+			jwt: func(t *testing.T, signer crypto.Signer) string {
+				t.Helper()
+				jwt, err := New(signer,
+					map[string]any{},
+					map[string]any{
+						"firstname": "Michael",
+						"surname":   "Fraser",
+						"status":    "alive (hopefully)",
+					},
+				)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return *jwt
+			},
+			validate: func(t *testing.T, head, body map[string]any, err error) {
+				if err != nil {
+					t.Errorf("no error should be thrown: %s", err.Error())
+				}
+				if !maps.Equal(head, map[string]any{
+					"typ": "JWT",
+					"alg": "RS256",
+				}) {
+					t.Error("returned head does not match expected")
+				}
+				if !maps.Equal(body, map[string]any{
+					"firstname": "Michael",
+					"surname":   "Fraser",
+					"status":    "alive (hopefully)",
+				}) {
+					t.Error("returned body does not match expected")
+				}
+			},
+		},
+		{
+			name: "we can validate a jwt signed with rs384",
+			signer: func(t *testing.T) model.Signer {
+				t.Helper()
+				signer, err := rs384.NewSigner(2048)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return signer
+			},
+			publicKey: func(t *testing.T, signer model.Signer) crypto.PublicKey {
+				return signer.Public()
+			},
+			jwt: func(t *testing.T, signer crypto.Signer) string {
+				t.Helper()
+				jwt, err := New(signer,
+					map[string]any{},
+					map[string]any{
+						"firstname": "Michael",
+						"surname":   "Fraser",
+						"status":    "alive (hopefully)",
+					},
+				)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return *jwt
+			},
+			validate: func(t *testing.T, head, body map[string]any, err error) {
+				if err != nil {
+					t.Errorf("no error should be thrown: %s", err.Error())
+				}
+				if !maps.Equal(head, map[string]any{
+					"typ": "JWT",
+					"alg": "RS384",
+				}) {
+					t.Error("returned head does not match expected")
+				}
+				if !maps.Equal(body, map[string]any{
+					"firstname": "Michael",
+					"surname":   "Fraser",
+					"status":    "alive (hopefully)",
+				}) {
+					t.Error("returned body does not match expected")
+				}
+			},
+		},
+		{
+			name: "we can validate a jwt signed with rs512",
+			signer: func(t *testing.T) model.Signer {
+				t.Helper()
+				signer, err := rs512.NewSigner(2048)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return signer
+			},
+			publicKey: func(t *testing.T, signer model.Signer) crypto.PublicKey {
+				return signer.Public()
+			},
+			jwt: func(t *testing.T, signer crypto.Signer) string {
+				t.Helper()
+				jwt, err := New(signer,
+					map[string]any{},
+					map[string]any{
+						"firstname": "Michael",
+						"surname":   "Fraser",
+						"status":    "alive (hopefully)",
+					},
+				)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return *jwt
+			},
+			validate: func(t *testing.T, head, body map[string]any, err error) {
+				if err != nil {
+					t.Errorf("no error should be thrown: %s", err.Error())
+				}
+				if !maps.Equal(head, map[string]any{
+					"typ": "JWT",
+					"alg": "RS512",
+				}) {
+					t.Error("returned head does not match expected")
+				}
+				if !maps.Equal(body, map[string]any{
+					"firstname": "Michael",
+					"surname":   "Fraser",
+					"status":    "alive (hopefully)",
+				}) {
+					t.Error("returned body does not match expected")
+				}
+			},
+		},
+		{
+			name: "we can validate a jwt signed with ps256",
+			signer: func(t *testing.T) model.Signer {
+				t.Helper()
+				signer, err := ps256.NewSigner(2048)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return signer
+			},
+			publicKey: func(t *testing.T, signer model.Signer) crypto.PublicKey {
+				return signer.Public()
+			},
+			jwt: func(t *testing.T, signer crypto.Signer) string {
+				t.Helper()
+				jwt, err := New(signer,
+					map[string]any{},
+					map[string]any{
+						"firstname": "Michael",
+						"surname":   "Fraser",
+						"status":    "alive (hopefully)",
+					},
+				)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return *jwt
+			},
+			validate: func(t *testing.T, head, body map[string]any, err error) {
+				if err != nil {
+					t.Errorf("no error should be thrown: %s", err.Error())
+				}
+				if !maps.Equal(head, map[string]any{
+					"typ": "JWT",
+					"alg": "PS256",
+				}) {
+					t.Error("returned head does not match expected")
+				}
+				if !maps.Equal(body, map[string]any{
+					"firstname": "Michael",
+					"surname":   "Fraser",
+					"status":    "alive (hopefully)",
+				}) {
+					t.Error("returned body does not match expected")
+				}
+			},
+		},
+		{
+			name: "we can validate a jwt signed with ps384",
+			signer: func(t *testing.T) model.Signer {
+				t.Helper()
+				signer, err := ps384.NewSigner(2048)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return signer
+			},
+			publicKey: func(t *testing.T, signer model.Signer) crypto.PublicKey {
+				return signer.Public()
+			},
+			jwt: func(t *testing.T, signer crypto.Signer) string {
+				t.Helper()
+				jwt, err := New(signer,
+					map[string]any{},
+					map[string]any{
+						"firstname": "Michael",
+						"surname":   "Fraser",
+						"status":    "alive (hopefully)",
+					},
+				)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return *jwt
+			},
+			validate: func(t *testing.T, head, body map[string]any, err error) {
+				if err != nil {
+					t.Errorf("no error should be thrown: %s", err.Error())
+				}
+				if !maps.Equal(head, map[string]any{
+					"typ": "JWT",
+					"alg": "PS384",
+				}) {
+					t.Error("returned head does not match expected")
+				}
+				if !maps.Equal(body, map[string]any{
+					"firstname": "Michael",
+					"surname":   "Fraser",
+					"status":    "alive (hopefully)",
+				}) {
+					t.Error("returned body does not match expected")
+				}
+			},
+		},
+		{
+			name: "we can validate a jwt signed with ps512",
+			signer: func(t *testing.T) model.Signer {
+				t.Helper()
+				signer, err := ps512.NewSigner(2048)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return signer
+			},
+			publicKey: func(t *testing.T, signer model.Signer) crypto.PublicKey {
+				return signer.Public()
+			},
+			jwt: func(t *testing.T, signer crypto.Signer) string {
+				t.Helper()
+				jwt, err := New(signer,
+					map[string]any{},
+					map[string]any{
+						"firstname": "Michael",
+						"surname":   "Fraser",
+						"status":    "alive (hopefully)",
+					},
+				)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return *jwt
+			},
+			validate: func(t *testing.T, head, body map[string]any, err error) {
+				if err != nil {
+					t.Errorf("no error should be thrown: %s", err.Error())
+				}
+				if !maps.Equal(head, map[string]any{
+					"typ": "JWT",
+					"alg": "PS512",
+				}) {
+					t.Error("returned head does not match expected")
+				}
+				if !maps.Equal(body, map[string]any{
+					"firstname": "Michael",
+					"surname":   "Fraser",
+					"status":    "alive (hopefully)",
+				}) {
+					t.Error("returned body does not match expected")
+				}
+			},
+		},
+		{
+			name: "we can validate a jwt signed with es256",
+			signer: func(t *testing.T) model.Signer {
+				t.Helper()
+				signer, err := es256.NewSigner()
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return signer
+			},
+			publicKey: func(t *testing.T, signer model.Signer) crypto.PublicKey {
+				return signer.Public()
+			},
+			jwt: func(t *testing.T, signer crypto.Signer) string {
+				t.Helper()
+				jwt, err := New(signer,
+					map[string]any{},
+					map[string]any{
+						"firstname": "Michael",
+						"surname":   "Fraser",
+						"status":    "alive (hopefully)",
+					},
+				)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return *jwt
+			},
+			validate: func(t *testing.T, head, body map[string]any, err error) {
+				if err != nil {
+					t.Errorf("no error should be thrown: %s", err.Error())
+				}
+				if !maps.Equal(head, map[string]any{
+					"typ": "JWT",
+					"alg": "ES256",
+				}) {
+					t.Error("returned head does not match expected")
+				}
+				if !maps.Equal(body, map[string]any{
+					"firstname": "Michael",
+					"surname":   "Fraser",
+					"status":    "alive (hopefully)",
+				}) {
+					t.Error("returned body does not match expected")
+				}
+			},
+		},
+		{
+			name: "we can validate a jwt signed with es384",
+			signer: func(t *testing.T) model.Signer {
+				t.Helper()
+				signer, err := es384.NewSigner()
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return signer
+			},
+			publicKey: func(t *testing.T, signer model.Signer) crypto.PublicKey {
+				return signer.Public()
+			},
+			jwt: func(t *testing.T, signer crypto.Signer) string {
+				t.Helper()
+				jwt, err := New(signer,
+					map[string]any{},
+					map[string]any{
+						"firstname": "Michael",
+						"surname":   "Fraser",
+						"status":    "alive (hopefully)",
+					},
+				)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return *jwt
+			},
+			validate: func(t *testing.T, head, body map[string]any, err error) {
+				if err != nil {
+					t.Errorf("no error should be thrown: %s", err.Error())
+				}
+				if !maps.Equal(head, map[string]any{
+					"typ": "JWT",
+					"alg": "ES384",
+				}) {
+					t.Error("returned head does not match expected")
+				}
+				if !maps.Equal(body, map[string]any{
+					"firstname": "Michael",
+					"surname":   "Fraser",
+					"status":    "alive (hopefully)",
+				}) {
+					t.Error("returned body does not match expected")
+				}
+			},
+		},
+		{
+			name: "we can validate a jwt signed with es512",
+			signer: func(t *testing.T) model.Signer {
+				t.Helper()
+				signer, err := es512.NewSigner()
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return signer
+			},
+			publicKey: func(t *testing.T, signer model.Signer) crypto.PublicKey {
+				return signer.Public()
+			},
+			jwt: func(t *testing.T, signer crypto.Signer) string {
+				t.Helper()
+				jwt, err := New(signer,
+					map[string]any{},
+					map[string]any{
+						"firstname": "Michael",
+						"surname":   "Fraser",
+						"status":    "alive (hopefully)",
+					},
+				)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return *jwt
+			},
+			validate: func(t *testing.T, head, body map[string]any, err error) {
+				if err != nil {
+					t.Errorf("no error should be thrown: %s", err.Error())
+				}
+				if !maps.Equal(head, map[string]any{
+					"typ": "JWT",
+					"alg": "ES512",
+				}) {
+					t.Error("returned head does not match expected")
+				}
+				if !maps.Equal(body, map[string]any{
+					"firstname": "Michael",
+					"surname":   "Fraser",
+					"status":    "alive (hopefully)",
+				}) {
+					t.Error("returned body does not match expected")
+				}
+			},
+		},
+		{
+			name: "we can validate a jwt signed with hs256",
+			signer: func(t *testing.T) model.Signer {
+				t.Helper()
+				signer, err := hs256.NewSigner(&[]byte{'f', 'o', 'o', 'b', 'a', 'r'})
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return signer
+			},
+			publicKey: func(t *testing.T, signer model.Signer) crypto.PublicKey {
+				return signer.Public()
+			},
+			jwt: func(t *testing.T, signer crypto.Signer) string {
+				t.Helper()
+				jwt, err := New(signer,
+					map[string]any{},
+					map[string]any{
+						"firstname": "Michael",
+						"surname":   "Fraser",
+						"status":    "alive (hopefully)",
+					},
+				)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return *jwt
+			},
+			validate: func(t *testing.T, head, body map[string]any, err error) {
+				if err != nil {
+					t.Errorf("no error should be thrown: %s", err.Error())
+				}
+				if !maps.Equal(head, map[string]any{
+					"typ": "JWT",
+					"alg": "HS256",
+				}) {
+					t.Error("returned head does not match expected")
+				}
+				if !maps.Equal(body, map[string]any{
+					"firstname": "Michael",
+					"surname":   "Fraser",
+					"status":    "alive (hopefully)",
+				}) {
+					t.Error("returned body does not match expected")
+				}
+			},
+		},
+		{
+			name: "we can validate a jwt signed with hs384",
+			signer: func(t *testing.T) model.Signer {
+				t.Helper()
+				signer, err := hs384.NewSigner(&[]byte{'f', 'o', 'o', 'b', 'a', 'r'})
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return signer
+			},
+			publicKey: func(t *testing.T, signer model.Signer) crypto.PublicKey {
+				return signer.Public()
+			},
+			jwt: func(t *testing.T, signer crypto.Signer) string {
+				t.Helper()
+				jwt, err := New(signer,
+					map[string]any{},
+					map[string]any{
+						"firstname": "Michael",
+						"surname":   "Fraser",
+						"status":    "alive (hopefully)",
+					},
+				)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return *jwt
+			},
+			validate: func(t *testing.T, head, body map[string]any, err error) {
+				if err != nil {
+					t.Errorf("no error should be thrown: %s", err.Error())
+				}
+				if !maps.Equal(head, map[string]any{
+					"typ": "JWT",
+					"alg": "HS384",
+				}) {
+					t.Error("returned head does not match expected")
+				}
+				if !maps.Equal(body, map[string]any{
+					"firstname": "Michael",
+					"surname":   "Fraser",
+					"status":    "alive (hopefully)",
+				}) {
+					t.Error("returned body does not match expected")
+				}
+			},
+		},
+		{
+			name: "we can validate a jwt signed with hs512",
+			signer: func(t *testing.T) model.Signer {
+				t.Helper()
+				signer, err := hs512.NewSigner(&[]byte{'f', 'o', 'o', 'b', 'a', 'r'})
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return signer
+			},
+			publicKey: func(t *testing.T, signer model.Signer) crypto.PublicKey {
+				return signer.Public()
+			},
+			jwt: func(t *testing.T, signer crypto.Signer) string {
+				t.Helper()
+				jwt, err := New(signer,
+					map[string]any{},
+					map[string]any{
+						"firstname": "Michael",
+						"surname":   "Fraser",
+						"status":    "alive (hopefully)",
+					},
+				)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return *jwt
+			},
+			validate: func(t *testing.T, head, body map[string]any, err error) {
+				if err != nil {
+					t.Errorf("no error should be thrown: %s", err.Error())
+				}
+				if !maps.Equal(head, map[string]any{
+					"typ": "JWT",
+					"alg": "HS512",
+				}) {
+					t.Error("returned head does not match expected")
+				}
+				if !maps.Equal(body, map[string]any{
+					"firstname": "Michael",
+					"surname":   "Fraser",
+					"status":    "alive (hopefully)",
+				}) {
+					t.Error("returned body does not match expected")
+				}
+			},
+		},
+		{
+			name: "we can validate a jwt signed with an hs algorithm and pass in the passphrase as a secret key implementation",
+			signer: func(t *testing.T) model.Signer {
+				t.Helper()
+				signer, err := hs256.NewSigner(&[]byte{'f', 'o', 'o', 'b', 'a', 'r'})
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return signer
+			},
+			publicKey: func(t *testing.T, signer model.Signer) crypto.PublicKey {
+				return common.SecretKey("foobar")
+			},
+			jwt: func(t *testing.T, signer crypto.Signer) string {
+				t.Helper()
+				jwt, err := New(signer,
+					map[string]any{},
+					map[string]any{
+						"firstname": "Michael",
+						"surname":   "Fraser",
+						"status":    "alive (hopefully)",
+					},
+				)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return *jwt
+			},
+			validate: func(t *testing.T, head, body map[string]any, err error) {
+				if err != nil {
+					t.Errorf("no error should be thrown: %s", err.Error())
+				}
+			},
+		},
+		{
+			name: "we handler an unknown algorithm identifier",
+			signer: func(t *testing.T) model.Signer {
+				t.Helper()
+				signer, err := rs256.NewSigner(2048)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return signer
+			},
+			publicKey: func(t *testing.T, signer model.Signer) crypto.PublicKey {
+				return signer.Public()
+			},
+			jwt: func(t *testing.T, signer crypto.Signer) string {
+				t.Helper()
+				jwt, err := New(signer,
+					map[string]any{
+						"alg": "foobar",
+					},
+					map[string]any{
+						"firstname": "Michael",
+						"surname":   "Fraser",
+						"status":    "alive (hopefully)",
+					},
+				)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return *jwt
+			},
+			validate: func(t *testing.T, head, body map[string]any, err error) {
+				if err == nil {
+					t.Fatal("an error should be thrown")
+				}
+				if err.Error() != "unknown algorithm claim value: foobar" {
+					t.Errorf("wrong error returned: %s", err.Error())
+				}
+			},
+		},
+		{
+			name: "we handler a malformed iat",
+			signer: func(t *testing.T) model.Signer {
+				t.Helper()
+				signer, err := rs256.NewSigner(2048)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return signer
+			},
+			publicKey: func(t *testing.T, signer model.Signer) crypto.PublicKey {
+				return signer.Public()
+			},
+			jwt: func(t *testing.T, signer crypto.Signer) string {
+				t.Helper()
+				jwt, err := New(signer,
+					map[string]any{},
+					map[string]any{
+						"firstname": "Michael",
+						"surname":   "Fraser",
+						"status":    "alive (hopefully)",
+						"iat":       "foobar",
+					},
+				)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return *jwt
+			},
+			validate: func(t *testing.T, head, body map[string]any, err error) {
+				if err == nil {
+					t.Fatal("an error should be thrown")
+				}
+				if err.Error() != "iat claim malformed" {
+					t.Errorf("wrong error returned: %s", err.Error())
+				}
+			},
+		},
+		{
+			name: "we handler a future-dated iat",
+			signer: func(t *testing.T) model.Signer {
+				t.Helper()
+				signer, err := rs256.NewSigner(2048)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return signer
+			},
+			publicKey: func(t *testing.T, signer model.Signer) crypto.PublicKey {
+				return signer.Public()
+			},
+			jwt: func(t *testing.T, signer crypto.Signer) string {
+				t.Helper()
+				jwt, err := New(signer,
+					map[string]any{},
+					map[string]any{
+						"firstname": "Michael",
+						"surname":   "Fraser",
+						"status":    "alive (hopefully)",
+						"iat":       time.Now().Add(1 * time.Hour).Unix(),
+					},
+				)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return *jwt
+			},
+			validate: func(t *testing.T, head, body map[string]any, err error) {
+				if err == nil {
+					t.Fatal("an error should be thrown")
+				}
+				if err.Error() != "iat claim is after current time" {
+					t.Errorf("wrong error returned: %s", err.Error())
+				}
+			},
+		},
+		{
+			name: "we handler a malformed nbf",
+			signer: func(t *testing.T) model.Signer {
+				t.Helper()
+				signer, err := rs256.NewSigner(2048)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return signer
+			},
+			publicKey: func(t *testing.T, signer model.Signer) crypto.PublicKey {
+				return signer.Public()
+			},
+			jwt: func(t *testing.T, signer crypto.Signer) string {
+				t.Helper()
+				jwt, err := New(signer,
+					map[string]any{},
+					map[string]any{
+						"firstname": "Michael",
+						"surname":   "Fraser",
+						"status":    "alive (hopefully)",
+						"nbf":       "foobar",
+					},
+				)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return *jwt
+			},
+			validate: func(t *testing.T, head, body map[string]any, err error) {
+				if err == nil {
+					t.Fatal("an error should be thrown")
+				}
+				if err.Error() != "nbf claim malformed" {
+					t.Errorf("wrong error returned: %s", err.Error())
+				}
+			},
+		},
+		{
+			name: "we handler a future-dated nbf",
+			signer: func(t *testing.T) model.Signer {
+				t.Helper()
+				signer, err := rs256.NewSigner(2048)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return signer
+			},
+			publicKey: func(t *testing.T, signer model.Signer) crypto.PublicKey {
+				return signer.Public()
+			},
+			jwt: func(t *testing.T, signer crypto.Signer) string {
+				t.Helper()
+				jwt, err := New(signer,
+					map[string]any{},
+					map[string]any{
+						"firstname": "Michael",
+						"surname":   "Fraser",
+						"status":    "alive (hopefully)",
+						"nbf":       time.Now().Add(1 * time.Hour).Unix(),
+					},
+				)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return *jwt
+			},
+			validate: func(t *testing.T, head, body map[string]any, err error) {
+				if err == nil {
+					t.Fatal("an error should be thrown")
+				}
+				if err.Error() != "nbf claim is after current time" {
+					t.Errorf("wrong error returned: %s", err.Error())
+				}
+			},
+		},
+		{
+			name: "we handler a malformed exp",
+			signer: func(t *testing.T) model.Signer {
+				t.Helper()
+				signer, err := rs256.NewSigner(2048)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return signer
+			},
+			publicKey: func(t *testing.T, signer model.Signer) crypto.PublicKey {
+				return signer.Public()
+			},
+			jwt: func(t *testing.T, signer crypto.Signer) string {
+				t.Helper()
+				jwt, err := New(signer,
+					map[string]any{},
+					map[string]any{
+						"firstname": "Michael",
+						"surname":   "Fraser",
+						"status":    "alive (hopefully)",
+						"exp":       "foobar",
+					},
+				)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return *jwt
+			},
+			validate: func(t *testing.T, head, body map[string]any, err error) {
+				if err == nil {
+					t.Fatal("an error should be thrown")
+				}
+				if err.Error() != "exp claim malformed" {
+					t.Errorf("wrong error returned: %s", err.Error())
+				}
+			},
+		},
+		{
+			name: "we handler a future-dated exp",
+			signer: func(t *testing.T) model.Signer {
+				t.Helper()
+				signer, err := rs256.NewSigner(2048)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return signer
+			},
+			publicKey: func(t *testing.T, signer model.Signer) crypto.PublicKey {
+				return signer.Public()
+			},
+			jwt: func(t *testing.T, signer crypto.Signer) string {
+				t.Helper()
+				jwt, err := New(signer,
+					map[string]any{},
+					map[string]any{
+						"firstname": "Michael",
+						"surname":   "Fraser",
+						"status":    "alive (hopefully)",
+						"exp":       time.Now().Add(-1 * time.Hour).Unix(),
+					},
+				)
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return *jwt
+			},
+			validate: func(t *testing.T, head, body map[string]any, err error) {
+				if err == nil {
+					t.Fatal("an error should be thrown")
+				}
+				if err.Error() != "exp claim is before current time" {
+					t.Errorf("wrong error returned: %s", err.Error())
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			signer := tt.signer(t)
+			head, body, err := Validate(tt.publicKey(t, signer), tt.jwt(t, signer))
+			tt.validate(t, head, body, err)
 		})
 	}
 }

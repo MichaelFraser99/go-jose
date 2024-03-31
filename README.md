@@ -127,7 +127,9 @@ jwkMap, err := PublicJwk(&publicKey)
 ```
 
 ## JWTs
-This library includes a method for easily signing a jwt from provided signer implementation, head map, and body map
+This library includes two methods for jwt handling
+
+The first is for signing a jwt from provided signer implementation, head map, and body map
 
 If the head does not include the `typ` claim, the method will insert a value of "JWT"
 
@@ -135,6 +137,14 @@ Additionally, if the `crypto.Signer` implementation provided is one of the imple
 
 ```go
 New(signer crypto.Signer, head, body map[string]any) (*string, error) {
+```
+
+The second provides basic jwt validation and returns the decoded head and body values as instances of `map[string]any`
+
+If present, the `iat`, `nbf`, and `exp` claims will also be validated
+
+```go
+Validate(publicKey crypto.PublicKey, jwt string) (head, body map[string]any, err error)
 ```
 
 ### Errors

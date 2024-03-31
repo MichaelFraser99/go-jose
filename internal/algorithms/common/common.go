@@ -1,6 +1,7 @@
 package common
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -13,6 +14,17 @@ import (
 	"io"
 	"math/big"
 )
+
+type SecretKey []byte
+
+func (s *SecretKey) Equal(x crypto.PublicKey) bool {
+	secretKey, ok := x.(*SecretKey)
+	if !ok {
+		return false
+	}
+
+	return bytes.Equal(*s, *secretKey)
+}
 
 type ECDSAPublicKey struct {
 	Kty string `json:"kty"`

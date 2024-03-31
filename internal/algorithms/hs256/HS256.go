@@ -1,12 +1,12 @@
 package hs256
 
 import (
-	"bytes"
 	"crypto"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"fmt"
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
 	"github.com/MichaelFraser99/go-jose/model"
 	"hash"
 	"io"
@@ -14,19 +14,8 @@ import (
 
 type Signer struct {
 	alg    model.Algorithm
-	secret SecretKey
+	secret common.SecretKey
 	hasher hash.Hash
-}
-
-type SecretKey []byte
-
-func (s *SecretKey) Equal(x crypto.PublicKey) bool {
-	secretKey, ok := x.(*SecretKey)
-	if !ok {
-		return false
-	}
-
-	return bytes.Equal(*s, *secretKey)
 }
 
 func NewSigner(secretKey *[]byte) (*Signer, error) {

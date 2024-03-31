@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
 	"testing"
 )
 
@@ -99,7 +100,7 @@ func TestES384_SignGeneratedSecret(t *testing.T) {
 	stringSignature := base64.RawURLEncoding.EncodeToString(signature)
 	t.Logf("%s.%s", digest, stringSignature)
 
-	secretKey := hs384.Public().(SecretKey)
+	secretKey := hs384.Public().(common.SecretKey)
 
 	hs3842, err := NewSigner((*[]byte)(&secretKey))
 	if err != nil {
