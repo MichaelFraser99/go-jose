@@ -3,6 +3,7 @@ package model
 import "testing"
 
 func TestAlgorithm_String(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		algorithm Algorithm
 		expected  string
@@ -55,10 +56,15 @@ func TestAlgorithm_String(t *testing.T) {
 			algorithm: HS512,
 			expected:  "HS512",
 		},
+		{
+			algorithm: EdDSA,
+			expected:  "EdDSA",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.expected, func(t *testing.T) {
+			t.Parallel()
 			if tt.algorithm.String() != tt.expected {
 				t.Errorf("Expected: %s got: %s", tt.expected, tt.algorithm.String())
 			}
@@ -67,156 +73,76 @@ func TestAlgorithm_String(t *testing.T) {
 }
 
 func TestGetAlgorithm(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		algString string
-		validate  func(t *testing.T, alg *Algorithm)
+		expected  Algorithm
 	}{
 		{
 			algString: "ES256",
-			validate: func(t *testing.T, alg *Algorithm) {
-				if alg == nil {
-					t.Fatal("algorithm should not be nil")
-				}
-				if *alg != ES256 {
-					t.Errorf("wrong algorithm returned, expected ES256 got: %s", alg.String())
-				}
-			},
+			expected:  ES256,
 		},
 		{
 			algString: "ES384",
-			validate: func(t *testing.T, alg *Algorithm) {
-				if alg == nil {
-					t.Fatal("algorithm should not be nil")
-				}
-				if *alg != ES384 {
-					t.Errorf("wrong algorithm returned, expected ES384 got: %s", alg.String())
-				}
-			},
+			expected:  ES384,
 		},
 		{
 			algString: "ES512",
-			validate: func(t *testing.T, alg *Algorithm) {
-				if alg == nil {
-					t.Fatal("algorithm should not be nil")
-				}
-				if *alg != ES512 {
-					t.Errorf("wrong algorithm returned, expected ES512 got: %s", alg.String())
-				}
-			},
+			expected:  ES512,
 		},
 		{
 			algString: "RS256",
-			validate: func(t *testing.T, alg *Algorithm) {
-				if alg == nil {
-					t.Fatal("algorithm should not be nil")
-				}
-				if *alg != RS256 {
-					t.Errorf("wrong algorithm returned, expected RS256 got: %s", alg.String())
-				}
-			},
+			expected:  RS256,
 		},
 		{
 			algString: "RS384",
-			validate: func(t *testing.T, alg *Algorithm) {
-				if alg == nil {
-					t.Fatal("algorithm should not be nil")
-				}
-				if *alg != RS384 {
-					t.Errorf("wrong algorithm returned, expected RS384 got: %s", alg.String())
-				}
-			},
+			expected:  RS384,
 		},
 		{
 			algString: "RS512",
-			validate: func(t *testing.T, alg *Algorithm) {
-				if alg == nil {
-					t.Fatal("algorithm should not be nil")
-				}
-				if *alg != RS512 {
-					t.Errorf("wrong algorithm returned, expected RS512 got: %s", alg.String())
-				}
-			},
+			expected:  RS512,
 		},
 		{
 			algString: "PS256",
-			validate: func(t *testing.T, alg *Algorithm) {
-				if alg == nil {
-					t.Fatal("algorithm should not be nil")
-				}
-				if *alg != PS256 {
-					t.Errorf("wrong algorithm returned, expected PS256 got: %s", alg.String())
-				}
-			},
+			expected:  PS256,
 		},
 		{
 			algString: "PS384",
-			validate: func(t *testing.T, alg *Algorithm) {
-				if alg == nil {
-					t.Fatal("algorithm should not be nil")
-				}
-				if *alg != PS384 {
-					t.Errorf("wrong algorithm returned, expected PS384 got: %s", alg.String())
-				}
-			},
+			expected:  PS384,
 		},
 		{
 			algString: "PS512",
-			validate: func(t *testing.T, alg *Algorithm) {
-				if alg == nil {
-					t.Fatal("algorithm should not be nil")
-				}
-				if *alg != PS512 {
-					t.Errorf("wrong algorithm returned, expected PS512 got: %s", alg.String())
-				}
-			},
+			expected:  PS512,
 		},
 		{
 			algString: "HS256",
-			validate: func(t *testing.T, alg *Algorithm) {
-				if alg == nil {
-					t.Fatal("algorithm should not be nil")
-				}
-				if *alg != HS256 {
-					t.Errorf("wrong algorithm returned, expected HS256 got: %s", alg.String())
-				}
-			},
+			expected:  HS256,
 		},
 		{
 			algString: "HS384",
-			validate: func(t *testing.T, alg *Algorithm) {
-				if alg == nil {
-					t.Fatal("algorithm should not be nil")
-				}
-				if *alg != HS384 {
-					t.Errorf("wrong algorithm returned, expected HS384 got: %s", alg.String())
-				}
-			},
+			expected:  HS384,
 		},
 		{
 			algString: "HS512",
-			validate: func(t *testing.T, alg *Algorithm) {
-				if alg == nil {
-					t.Fatal("algorithm should not be nil")
-				}
-				if *alg != HS512 {
-					t.Errorf("wrong algorithm returned, expected HS512 got: %s", alg.String())
-				}
-			},
+			expected:  HS512,
+		},
+		{
+			algString: "EdDSA",
+			expected:  EdDSA,
 		},
 		{
 			algString: "rubbish",
-			validate: func(t *testing.T, alg *Algorithm) {
-				if alg != nil {
-					t.Errorf("algorithm should be nil: %s", alg.String())
-				}
-			},
+			expected:  Unknown,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.algString, func(t *testing.T) {
+			t.Parallel()
 			alg := GetAlgorithm(tt.algString)
-			tt.validate(t, alg)
+			if alg != tt.expected {
+				t.Errorf("wrong algorithm returned, expected %s got: %s", tt.expected.String(), alg.String())
+			}
 		})
 	}
 }

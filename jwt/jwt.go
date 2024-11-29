@@ -19,6 +19,7 @@ import (
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs256"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs384"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs512"
+	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/model"
 	"slices"
 	"strings"
@@ -100,10 +101,7 @@ func Validate(publicKey crypto.PublicKey, jwt string) (head, body map[string]any
 
 	var v model.Validator
 	parsedAlgorithm := model.GetAlgorithm(alg.(string))
-	if parsedAlgorithm == nil {
-		return nil, nil, fmt.Errorf("unknown algorithm claim value: %s", alg.(string))
-	}
-	switch *parsedAlgorithm {
+	switch parsedAlgorithm {
 	case model.ES256:
 		v, err = es256.NewValidator(publicKey)
 	case model.ES384:
@@ -128,6 +126,8 @@ func Validate(publicKey crypto.PublicKey, jwt string) (head, body map[string]any
 		return head, body, validateSymmetricAlgorithm(model.HS384, publicKey, []byte(fmt.Sprintf("%s.%s", jwtComponents[0], jwtComponents[1])), signatureBytes)
 	case model.HS512:
 		return head, body, validateSymmetricAlgorithm(model.HS512, publicKey, []byte(fmt.Sprintf("%s.%s", jwtComponents[0], jwtComponents[1])), signatureBytes)
+	default:
+		return nil, nil, fmt.Errorf("%wunknown algorithm claim value: %s", joseerror.UnsupportedAlgorithm, alg.(string))
 	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("error created validator from provided algorithm: %w", err)

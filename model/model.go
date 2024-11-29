@@ -2,16 +2,55 @@ package model
 
 import (
 	"crypto"
-	"io"
-	"strings"
+	"fmt"
+	"github.com/MichaelFraser99/go-jose/joseerror"
 )
+
+type Retriever func() ([]crypto.PublicKey, error)
+
+type Mode int //todo: do we actually need this?
+
+const (
+	JWS Mode = iota
+	JWE
+)
+
+type Jwks struct {
+	Keys []map[string]any `json:"keys"`
+}
+
+// RetrieveByKeyID
+//
+// # Returns a jwk from the key-set by provided key ID
+//
+// If no match is found or multiple entries exist for a given key ID, an error is thrown.
+// Any keys with malformed kid claims are ignored
+func (j *Jwks) RetrieveByKeyID(kid string) (map[string]any, error) {
+	var keys []map[string]any
+	for _, key := range j.Keys {
+		if keyKid, ok := key["kid"]; ok {
+			if strKeyKid, ok := keyKid.(string); ok {
+				if kid == strKeyKid {
+					keys = append(keys, key)
+				}
+			}
+		}
+	}
+	if len(keys) == 0 {
+		return nil, fmt.Errorf("%wno matching key found for provided key ID", joseerror.KeystoreError)
+	}
+	if len(keys) > 1 {
+		return nil, fmt.Errorf("%wmultiple keys found for provided key ID", joseerror.KeystoreError)
+	}
+	return keys[0], nil
+}
 
 type Signer interface {
 	Alg() Algorithm
-	Public() crypto.PublicKey
-	Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error)
+	crypto.Signer
 }
 
+// todo: these could have jwk methods - especially the Validator
 type Validator interface {
 	ValidateSignature(digest, signature []byte) (bool, error)
 	Public() crypto.PublicKey
@@ -19,6 +58,7 @@ type Validator interface {
 
 type Algorithm int
 
+// todo: finish this list
 const (
 	ES256 Algorithm = iota
 	ES384
@@ -32,6 +72,8 @@ const (
 	HS256
 	HS384
 	HS512
+	EdDSA //todo: this needs validator & signer implementations
+	Unknown
 )
 
 func (a Algorithm) String() string {
@@ -60,46 +102,46 @@ func (a Algorithm) String() string {
 		return "HS384"
 	case HS512:
 		return "HS512"
+	case EdDSA:
+		return "EdDSA"
 	default:
 		return ""
 	}
 }
 
 // GetAlgorithm takes in a string representation of an Algorithm ("ES256" or "HS384")
-// If the provided string does not match a defined algorithm, nil is returned
-func GetAlgorithm(alg string) *Algorithm {
-	switch strings.ToUpper(alg) {
+// If the provided string does not match a defined algorithm, Unknown is returned
+func GetAlgorithm(alg string) Algorithm {
+	switch alg {
 	case "ES256":
-		return algorithm(ES256)
+		return ES256
 	case "ES384":
-		return algorithm(ES384)
+		return ES384
 	case "ES512":
-		return algorithm(ES512)
+		return ES512
 	case "RS256":
-		return algorithm(RS256)
+		return RS256
 	case "RS384":
-		return algorithm(RS384)
+		return RS384
 	case "RS512":
-		return algorithm(RS512)
+		return RS512
 	case "PS256":
-		return algorithm(PS256)
+		return PS256
 	case "PS384":
-		return algorithm(PS384)
+		return PS384
 	case "PS512":
-		return algorithm(PS512)
+		return PS512
 	case "HS256":
-		return algorithm(HS256)
+		return HS256
 	case "HS384":
-		return algorithm(HS384)
+		return HS384
 	case "HS512":
-		return algorithm(HS512)
+		return HS512
+	case "EdDSA":
+		return EdDSA
 	default:
-		return nil
+		return Unknown
 	}
-}
-
-func algorithm(a Algorithm) *Algorithm {
-	return &a
 }
 
 type Opts struct {
@@ -113,4 +155,8 @@ type SignerOpts struct {
 
 func (s SignerOpts) HashFunc() crypto.Hash {
 	return s.Hash
+}
+
+func Pointer[T any](v T) *T {
+	return &v
 }

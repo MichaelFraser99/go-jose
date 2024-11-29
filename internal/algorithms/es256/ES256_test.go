@@ -82,10 +82,6 @@ func TestES256_Sign(t *testing.T) {
 		t.Errorf("crv key is missing or wrong")
 	}
 
-	t.Log(digest)
-	t.Log(base64.RawURLEncoding.EncodeToString(signature))
-	t.Log(string(jwkBytes))
-
 	valid, err := validator.ValidateSignature([]byte(digest), signature)
 	if err != nil {
 		t.Error("no error should be thrown:", err)
@@ -94,7 +90,13 @@ func TestES256_Sign(t *testing.T) {
 		t.Error("signature is not valid")
 	}
 
-	val2, err := NewValidatorFromJwk(jwkBytes)
+	var jwkMap map[string]any
+	err = json.Unmarshal(jwkBytes, &jwkMap)
+	if err != nil {
+		t.Fatal("no error should be thrown marshalling jwk bytws to a map:", err)
+	}
+
+	val2, err := NewValidatorFromJwk(jwkMap)
 	if err != nil {
 		t.Fatalf("failed to create validator from public key jwk: %s", err.Error())
 	}

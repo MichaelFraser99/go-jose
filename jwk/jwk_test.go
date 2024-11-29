@@ -3,6 +3,7 @@ package jwk
 import (
 	"crypto"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
@@ -164,6 +165,21 @@ func TestPublicJwk(t *testing.T) {
 				CheckPresenceAndValue(t, input, "e", "AQAB")
 			},
 		},
+		{
+			name: "valid new ed25519 public key",
+			key: func(t *testing.T) crypto.PublicKey {
+				pubKey, _, err := ed25519.GenerateKey(rand.Reader)
+				if err != nil {
+					t.Fatalf("error generating key: %s", err.Error())
+				}
+				return &pubKey
+			},
+			validate: func(t *testing.T, input map[string]any) {
+				CheckPresenceAndValue(t, input, "kty", "OKP")
+				CheckPresence(t, input, "x")
+				CheckPresenceAndValue(t, input, "crv", "Ed25519")
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -282,6 +298,22 @@ func TestPrivateJwk(t *testing.T) {
 			},
 		},
 		{
+			name: "valid new ed25519 private key",
+			key: func(t *testing.T) crypto.PrivateKey {
+				_, key, err := ed25519.GenerateKey(rand.Reader)
+				if err != nil {
+					t.Fatalf("error generating key: %s", err.Error())
+				}
+				return &key
+			},
+			validate: func(t *testing.T, input map[string]any) {
+				CheckPresenceAndValue(t, input, "kty", "OKP")
+				CheckPresence(t, input, "x")
+				CheckPresence(t, input, "d")
+				CheckPresenceAndValue(t, input, "crv", "Ed25519")
+			},
+		},
+		{
 			name: "valid existing rsa private key",
 			key: func(t *testing.T) crypto.PrivateKey {
 				block, _ := pem.Decode([]byte(rsaPrivateKey))
@@ -317,6 +349,13 @@ func TestPrivateJwk(t *testing.T) {
 				t.Fatalf("no error should be thrown: %s", err.Error())
 			}
 			tt.validate(t, *output)
+			newPk, err := PrivateFromJwk(*output)
+			if err != nil {
+				t.Errorf("no error should be thrown: %s", err.Error())
+			}
+			if !reflect.DeepEqual(pk, newPk) {
+				t.Errorf("the values should match")
+			}
 		})
 	}
 }

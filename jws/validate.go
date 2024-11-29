@@ -3,7 +3,6 @@ package jws
 import (
 	"crypto"
 	"fmt"
-	e "github.com/MichaelFraser99/go-jose/error"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es256"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es384"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es512"
@@ -13,6 +12,7 @@ import (
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs256"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs384"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs512"
+	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/model"
 )
 
@@ -46,9 +46,9 @@ func GetValidator(alg model.Algorithm, publicKey crypto.PublicKey) (model.Valida
 	case model.PS512:
 		v, err = ps512.NewValidator(publicKey)
 	case model.HS256, model.HS384, model.HS512:
-		return nil, fmt.Errorf("%wvalidators cannot be created for symmetric algorithms", e.UnsupportedAlgorithm)
+		return nil, fmt.Errorf("%wvalidators cannot be created for symmetric algorithms", joseerror.UnsupportedAlgorithm)
 	default:
-		return nil, fmt.Errorf("%wunsupported algorithm: '%s'", e.UnsupportedAlgorithm, alg.String())
+		return nil, fmt.Errorf("%wunsupported algorithm: '%s'", joseerror.UnsupportedAlgorithm, alg.String())
 	}
 	return v, err
 }
@@ -60,7 +60,7 @@ func GetValidator(alg model.Algorithm, publicKey crypto.PublicKey) (model.Valida
 // alg - Determines which validator type gets returned
 //
 // jwk - jwk format public key
-func GetValidatorFromJwk(alg model.Algorithm, jwk []byte) (model.Validator, error) {
+func GetValidatorFromJwk(alg model.Algorithm, jwk map[string]any) (model.Validator, error) {
 	var v model.Validator
 	var err error
 	switch alg {
@@ -83,9 +83,9 @@ func GetValidatorFromJwk(alg model.Algorithm, jwk []byte) (model.Validator, erro
 	case model.PS512:
 		v, err = ps512.NewValidatorFromJwk(jwk)
 	case model.HS256, model.HS384, model.HS512:
-		return nil, fmt.Errorf("%wvalidators cannot be created for symmetric algorithms", e.UnsupportedAlgorithm)
+		return nil, fmt.Errorf("%wvalidators cannot be created for symmetric algorithms", joseerror.UnsupportedAlgorithm)
 	default:
-		return nil, fmt.Errorf("%wunsupported algorithm: '%s'", e.UnsupportedAlgorithm, alg.String())
+		return nil, fmt.Errorf("%wunsupported algorithm: '%s'", joseerror.UnsupportedAlgorithm, alg.String())
 	}
 	return v, err
 }

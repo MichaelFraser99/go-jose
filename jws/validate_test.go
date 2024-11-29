@@ -3,7 +3,6 @@ package jws
 import (
 	"crypto"
 	"crypto/rand"
-	"encoding/json"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es256"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es384"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es512"
@@ -473,11 +472,7 @@ func TestGetValidatorFromJwk(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.algorithm.String(), func(t *testing.T) {
 			jwkMap, sig := tt.jwk()
-			jwkBytes, err := json.Marshal(jwkMap)
-			if err != nil {
-				t.Fatalf("no error should be thrown: %s", err.Error())
-			}
-			validator, err := GetValidatorFromJwk(tt.algorithm, jwkBytes)
+			validator, err := GetValidatorFromJwk(tt.algorithm, jwkMap)
 			tt.verify(t, validator, sig, err)
 		})
 	}

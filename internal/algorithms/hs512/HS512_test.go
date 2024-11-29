@@ -51,7 +51,6 @@ func TestES512_Sign(t *testing.T) {
 	}
 
 	stringSignature := base64.RawURLEncoding.EncodeToString(signature)
-	t.Logf("%s.%s", digest, stringSignature)
 
 	if stringSignature != "xDtSUFJH9k4yIq80TMQ1-miAjnNN1skOJ1BzUMdw_8VRFn-AR8fFNjvPiXyleHSRw28BXnEupZxCxWUfWwIoqg" {
 		t.Errorf("unexpected signature produced: %s", stringSignature)

@@ -3,7 +3,6 @@ package jws
 import (
 	"crypto"
 	"fmt"
-	e "github.com/MichaelFraser99/go-jose/error"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es256"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es384"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es512"
@@ -16,6 +15,7 @@ import (
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs256"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs384"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs512"
+	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/model"
 )
 
@@ -73,7 +73,7 @@ func GetSigner(alg model.Algorithm, opts *model.Opts) (model.Signer, error) {
 		s, err = hs512.NewSigner(opts.SecretKey)
 
 	default:
-		return nil, fmt.Errorf("%wunsupported algorithm: '%s'", e.UnsupportedAlgorithm, alg)
+		return nil, fmt.Errorf("%wunsupported algorithm: '%s'", joseerror.UnsupportedAlgorithm, alg)
 	}
 
 	return s, err
@@ -110,10 +110,10 @@ func GetSignerFromPrivateKey(alg model.Algorithm, privateKey crypto.PrivateKey) 
 	case model.PS512:
 		s, err = ps512.NewSignerFromPrivateKey(privateKey)
 	case model.HS256, model.HS384, model.HS512:
-		return nil, fmt.Errorf("%wHMAC Signers cannot be created this way - please use GetSigner and specify the secret key using the Opts function", e.UnsupportedAlgorithm)
+		return nil, fmt.Errorf("%wHMAC Signers cannot be created this way - please use GetSigner and specify the secret key using the Opts function", joseerror.UnsupportedAlgorithm)
 
 	default:
-		return nil, fmt.Errorf("%wunsupported algorithm: '%s'", e.UnsupportedAlgorithm, alg)
+		return nil, fmt.Errorf("%wunsupported algorithm: '%s'", joseerror.UnsupportedAlgorithm, alg)
 	}
 
 	return s, err
