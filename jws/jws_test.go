@@ -37,5 +37,5 @@ func Test_VerifyCompactSerialization(t *testing.T) {
 	protectedHeader, body, err := VerifyCompactSerialization(token, pubKey)
 	t.Log(err)
 	t.Log(protectedHeader)
-	t.Log(body) //todo: improve this test - its shit
+	t.Log(body) //todo: improve this test - its very poor
 }
