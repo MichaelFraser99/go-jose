@@ -15,7 +15,7 @@ import (
 //todo: should we consider json serialization? - no-one really uses it
 //todo: should pass an array of public keys instead - perfectly resonable that an oob method would have multiple possible options
 
-func VerifyCompactSerialization(compactSerialization string, publicKey crypto.PublicKey) (protectedHeader, body map[string]any, err error) {
+func VerifyCompactSerialization(compactSerialization string, outOfBoundsPublicKey model.Retriever) (protectedHeader, body map[string]any, err error) {
 	components := strings.Split(compactSerialization, ".")
 	if len(components) != 3 {
 		return nil, nil, fmt.Errorf("%winvalid compact serialization format", joseerror.MalformedToken)
@@ -28,12 +28,8 @@ func VerifyCompactSerialization(compactSerialization string, publicKey crypto.Pu
 
 	var jwkRetrievers []model.Retriever
 
-	if publicKey != nil {
-		jwkRetrievers = []model.Retriever{
-			func() ([]crypto.PublicKey, error) {
-				return []crypto.PublicKey{publicKey}, nil
-			},
-		}
+	if outOfBoundsPublicKey != nil {
+		jwkRetrievers = append(jwkRetrievers, outOfBoundsPublicKey)
 	}
 
 	headerJwkRetrievers, err := header.ValidateHeader(protectedHeader, nil, model.JWS) //todo: sort out client providing

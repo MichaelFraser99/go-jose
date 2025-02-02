@@ -1,6 +1,7 @@
 package jws
 
 import (
+	"crypto"
 	"encoding/json"
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/internal/jose/jwk"
@@ -34,7 +35,9 @@ func Test_VerifyCompactSerialization(t *testing.T) {
 		t.Fatal(fmt.Errorf("error unmarshaling public key: %s", err))
 	}
 
-	protectedHeader, body, err := VerifyCompactSerialization(token, pubKey)
+	protectedHeader, body, err := VerifyCompactSerialization(token, func() ([]crypto.PublicKey, error) {
+		return []crypto.PublicKey{pubKey}, nil
+	})
 	t.Log(err)
 	t.Log(protectedHeader)
 	t.Log(body) //todo: improve this test - its very poor
