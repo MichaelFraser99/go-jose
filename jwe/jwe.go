@@ -17,7 +17,7 @@ import (
    BASE64URL(JWE Ciphertext) || '.' ||
    BASE64URL(JWE Authentication Tag)
 */
-
+//todo: unfinished - do not use
 func VerifyCompactSerialization(compactSerialization string, publicKey crypto.PublicKey) (protectedHeader, body map[string]any, err error) {
 	components := strings.Split(compactSerialization, ".")
 	if len(components) != 5 {
@@ -50,4 +50,5 @@ func VerifyCompactSerialization(compactSerialization string, publicKey crypto.Pu
 		return nil, nil, fmt.Errorf("%wno cyptographic material provided for decryption", joseerror.MalformedToken)
 	}
 
+	return nil, nil, nil
 }
