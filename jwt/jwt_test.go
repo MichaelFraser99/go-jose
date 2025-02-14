@@ -62,7 +62,7 @@ func TestNew(t *testing.T) {
 			},
 			validate: func(t *testing.T, validator model.Validator, jwt *string, err error) {
 				if err != nil {
-					t.Errorf("no error should be thrown: %s", err.Error())
+					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
 				if jwt == nil {
 					t.Fatal("a jwt should be returned")
@@ -99,7 +99,7 @@ func TestNew(t *testing.T) {
 			},
 			validate: func(t *testing.T, validator model.Validator, jwt *string, err error) {
 				if err != nil {
-					t.Errorf("no error should be thrown: %s", err.Error())
+					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
 				if jwt == nil {
 					t.Fatal("a jwt should be returned")
@@ -136,7 +136,7 @@ func TestNew(t *testing.T) {
 			},
 			validate: func(t *testing.T, validator model.Validator, jwt *string, err error) {
 				if err != nil {
-					t.Errorf("no error should be thrown: %s", err.Error())
+					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
 				if jwt == nil {
 					t.Fatal("a jwt should be returned")
@@ -173,7 +173,7 @@ func TestNew(t *testing.T) {
 			},
 			validate: func(t *testing.T, validator model.Validator, jwt *string, err error) {
 				if err != nil {
-					t.Errorf("no error should be thrown: %s", err.Error())
+					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
 				if jwt == nil {
 					t.Fatal("a jwt should be returned")
@@ -210,7 +210,7 @@ func TestNew(t *testing.T) {
 			},
 			validate: func(t *testing.T, validator model.Validator, jwt *string, err error) {
 				if err != nil {
-					t.Errorf("no error should be thrown: %s", err.Error())
+					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
 				if jwt == nil {
 					t.Fatal("a jwt should be returned")
@@ -247,7 +247,7 @@ func TestNew(t *testing.T) {
 			},
 			validate: func(t *testing.T, validator model.Validator, jwt *string, err error) {
 				if err != nil {
-					t.Errorf("no error should be thrown: %s", err.Error())
+					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
 				if jwt == nil {
 					t.Fatal("a jwt should be returned")
@@ -284,7 +284,7 @@ func TestNew(t *testing.T) {
 			},
 			validate: func(t *testing.T, validator model.Validator, jwt *string, err error) {
 				if err != nil {
-					t.Errorf("no error should be thrown: %s", err.Error())
+					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
 				if jwt == nil {
 					t.Fatal("a jwt should be returned")
@@ -321,7 +321,7 @@ func TestNew(t *testing.T) {
 			},
 			validate: func(t *testing.T, validator model.Validator, jwt *string, err error) {
 				if err != nil {
-					t.Errorf("no error should be thrown: %s", err.Error())
+					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
 				if jwt == nil {
 					t.Fatal("a jwt should be returned")
@@ -358,7 +358,7 @@ func TestNew(t *testing.T) {
 			},
 			validate: func(t *testing.T, validator model.Validator, jwt *string, err error) {
 				if err != nil {
-					t.Errorf("no error should be thrown: %s", err.Error())
+					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
 				if jwt == nil {
 					t.Fatal("a jwt should be returned")
@@ -390,7 +390,7 @@ func TestNew(t *testing.T) {
 			},
 			validate: func(t *testing.T, validator model.Validator, jwt *string, err error) {
 				if err != nil {
-					t.Errorf("no error should be thrown: %s", err.Error())
+					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
 				if jwt == nil {
 					t.Fatal("a jwt should be returned")
@@ -445,7 +445,7 @@ func TestNew(t *testing.T) {
 			},
 			validate: func(t *testing.T, validator model.Validator, jwt *string, err error) {
 				if err != nil {
-					t.Errorf("no error should be thrown: %s", err.Error())
+					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
 				if jwt == nil {
 					t.Fatal("a jwt should be returned")
@@ -500,7 +500,7 @@ func TestNew(t *testing.T) {
 			},
 			validate: func(t *testing.T, validator model.Validator, jwt *string, err error) {
 				if err != nil {
-					t.Errorf("no error should be thrown: %s", err.Error())
+					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
 				if jwt == nil {
 					t.Fatal("a jwt should be returned")
@@ -562,7 +562,7 @@ func TestNew(t *testing.T) {
 			},
 			validate: func(t *testing.T, validator model.Validator, jwt *string, err error) {
 				if err != nil {
-					t.Errorf("no error should be thrown: %s", err.Error())
+					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
 				if jwt == nil {
 					t.Fatal("a jwt should be returned")
@@ -623,7 +623,7 @@ func TestValidate(t *testing.T) {
 			},
 			validate: func(t *testing.T, head, body map[string]any, err error) {
 				if err != nil {
-					t.Errorf("no error should be thrown: %s", err.Error())
+					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
 				if !maps.Equal(head, map[string]any{
 					"typ": "JWT",
@@ -670,7 +670,7 @@ func TestValidate(t *testing.T) {
 			},
 			validate: func(t *testing.T, head, body map[string]any, err error) {
 				if err != nil {
-					t.Errorf("no error should be thrown: %s", err.Error())
+					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
 				if !maps.Equal(head, map[string]any{
 					"typ": "JWT",
@@ -717,7 +717,7 @@ func TestValidate(t *testing.T) {
 			},
 			validate: func(t *testing.T, head, body map[string]any, err error) {
 				if err != nil {
-					t.Errorf("no error should be thrown: %s", err.Error())
+					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
 				if !maps.Equal(head, map[string]any{
 					"typ": "JWT",
@@ -764,7 +764,7 @@ func TestValidate(t *testing.T) {
 			},
 			validate: func(t *testing.T, head, body map[string]any, err error) {
 				if err != nil {
-					t.Errorf("no error should be thrown: %s", err.Error())
+					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
 				if !maps.Equal(head, map[string]any{
 					"typ": "JWT",
@@ -811,7 +811,7 @@ func TestValidate(t *testing.T) {
 			},
 			validate: func(t *testing.T, head, body map[string]any, err error) {
 				if err != nil {
-					t.Errorf("no error should be thrown: %s", err.Error())
+					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
 				if !maps.Equal(head, map[string]any{
 					"typ": "JWT",
@@ -858,7 +858,7 @@ func TestValidate(t *testing.T) {
 			},
 			validate: func(t *testing.T, head, body map[string]any, err error) {
 				if err != nil {
-					t.Errorf("no error should be thrown: %s", err.Error())
+					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
 				if !maps.Equal(head, map[string]any{
 					"typ": "JWT",
@@ -905,7 +905,7 @@ func TestValidate(t *testing.T) {
 			},
 			validate: func(t *testing.T, head, body map[string]any, err error) {
 				if err != nil {
-					t.Errorf("no error should be thrown: %s", err.Error())
+					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
 				if !maps.Equal(head, map[string]any{
 					"typ": "JWT",
@@ -952,7 +952,7 @@ func TestValidate(t *testing.T) {
 			},
 			validate: func(t *testing.T, head, body map[string]any, err error) {
 				if err != nil {
-					t.Errorf("no error should be thrown: %s", err.Error())
+					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
 				if !maps.Equal(head, map[string]any{
 					"typ": "JWT",
@@ -999,7 +999,7 @@ func TestValidate(t *testing.T) {
 			},
 			validate: func(t *testing.T, head, body map[string]any, err error) {
 				if err != nil {
-					t.Errorf("no error should be thrown: %s", err.Error())
+					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
 				if !maps.Equal(head, map[string]any{
 					"typ": "JWT",
@@ -1046,7 +1046,7 @@ func TestValidate(t *testing.T) {
 			},
 			validate: func(t *testing.T, head, body map[string]any, err error) {
 				if err != nil {
-					t.Errorf("no error should be thrown: %s", err.Error())
+					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
 				if !maps.Equal(head, map[string]any{
 					"typ": "JWT",
@@ -1093,7 +1093,7 @@ func TestValidate(t *testing.T) {
 			},
 			validate: func(t *testing.T, head, body map[string]any, err error) {
 				if err != nil {
-					t.Errorf("no error should be thrown: %s", err.Error())
+					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
 				if !maps.Equal(head, map[string]any{
 					"typ": "JWT",
@@ -1140,7 +1140,7 @@ func TestValidate(t *testing.T) {
 			},
 			validate: func(t *testing.T, head, body map[string]any, err error) {
 				if err != nil {
-					t.Errorf("no error should be thrown: %s", err.Error())
+					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
 				if !maps.Equal(head, map[string]any{
 					"typ": "JWT",
@@ -1187,7 +1187,7 @@ func TestValidate(t *testing.T) {
 			},
 			validate: func(t *testing.T, head, body map[string]any, err error) {
 				if err != nil {
-					t.Errorf("no error should be thrown: %s", err.Error())
+					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
 			},
 		},
@@ -1225,7 +1225,7 @@ func TestValidate(t *testing.T) {
 				if err == nil {
 					t.Fatal("an error should be thrown")
 				}
-				if err.Error() != "unknown algorithm claim value: foobar" {
+				if err.Error() != "failed to verify jws compact serialization: error validating header: 'foobar' is not a supported algorithm" {
 					t.Errorf("wrong error returned: %s", err.Error())
 				}
 			},
@@ -1463,7 +1463,9 @@ func TestValidate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			signer := tt.signer(t)
-			head, body, err := Validate(tt.publicKey(t, signer), tt.jwt(t, signer))
+			head, body, err := Validate(tt.jwt(t, signer), func() ([]crypto.PublicKey, error) {
+				return []crypto.PublicKey{tt.publicKey(t, signer)}, nil
+			})
 			tt.validate(t, head, body, err)
 		})
 	}

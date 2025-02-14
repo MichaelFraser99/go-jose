@@ -6,6 +6,9 @@ import (
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es256"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es384"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es512"
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/hs256"
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/hs384"
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/hs512"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/ps256"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/ps384"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/ps512"
@@ -45,8 +48,12 @@ func GetValidator(alg model.Algorithm, publicKey crypto.PublicKey) (model.Valida
 		v, err = ps384.NewValidator(publicKey)
 	case model.PS512:
 		v, err = ps512.NewValidator(publicKey)
-	case model.HS256, model.HS384, model.HS512:
-		return nil, fmt.Errorf("%wvalidators cannot be created for symmetric algorithms", joseerror.UnsupportedAlgorithm)
+	case model.HS256:
+		v, err = hs256.NewValidator(publicKey)
+	case model.HS384:
+		v, err = hs384.NewValidator(publicKey)
+	case model.HS512:
+		v, err = hs512.NewValidator(publicKey)
 	default:
 		return nil, fmt.Errorf("%wunsupported algorithm: '%s'", joseerror.UnsupportedAlgorithm, alg.String())
 	}

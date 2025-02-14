@@ -1,6 +1,7 @@
 package hs384
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/hmac"
 	"crypto/rand"
@@ -12,10 +13,30 @@ import (
 	"io"
 )
 
+var (
+	_ model.Signer    = &Signer{}
+	_ model.Validator = &Validator{} //todo: tests
+)
+
 type Signer struct {
 	alg    model.Algorithm
 	secret common.SecretKey
 	hasher hash.Hash
+}
+
+type Validator struct {
+	alg    model.Algorithm
+	secret common.SecretKey
+	hasher hash.Hash
+}
+
+func (v Validator) ValidateSignature(digest, signature []byte) (bool, error) {
+	mac := common.ProduceMac(v.hasher, digest)
+	return bytes.Equal(signature, mac), nil
+}
+
+func (v Validator) Public() crypto.PublicKey {
+	return v.secret
 }
 
 func NewSigner(secretKey *[]byte) (*Signer, error) {
@@ -41,6 +62,24 @@ func NewSigner(secretKey *[]byte) (*Signer, error) {
 	}, nil
 }
 
+func NewValidator(publicKey crypto.PublicKey) (*Validator, error) {
+	if publicKey == nil {
+		return nil, fmt.Errorf("nil public key provided")
+	} else if _, ok := publicKey.(common.SecretKey); !ok {
+		return nil, fmt.Errorf("invalid public key provided - must be of type `common.SecretKey` for hmac algorithms")
+	}
+	secret := []byte(publicKey.(common.SecretKey))
+	h := hmac.New(func() hash.Hash {
+		return sha512.New384()
+	}, secret)
+
+	return &Validator{
+		alg:    model.HS384,
+		secret: secret,
+		hasher: h,
+	}, nil
+}
+
 func (signer *Signer) Alg() model.Algorithm {
 	return signer.alg
 }
@@ -50,9 +89,5 @@ func (signer *Signer) Public() crypto.PublicKey {
 }
 
 func (signer *Signer) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error) {
-	signer.hasher.Write(digest)
-	signature = signer.hasher.Sum(nil)
-	signer.hasher.Reset()
-
-	return signature, nil
+	return common.ProduceMac(signer.hasher, digest), nil
 }

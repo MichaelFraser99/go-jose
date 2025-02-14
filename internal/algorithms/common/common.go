@@ -14,6 +14,7 @@ import (
 	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
 	jose_errors "github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/model"
+	"hash"
 	"io"
 	"math/big"
 )
@@ -456,4 +457,11 @@ func RsaPSSSign(rand io.Reader, pk rsa.PrivateKey, digest []byte, hash crypto.Ha
 		return nil, fmt.Errorf("%wfailed to sign token: %s", jose_errors.SigningError, err.Error())
 	}
 	return s, nil
+}
+
+func ProduceMac(h hash.Hash, digest []byte) []byte {
+	h.Write(digest)
+	signature := h.Sum(nil)
+	h.Reset()
+	return signature
 }

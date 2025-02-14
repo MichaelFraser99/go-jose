@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestES384_Sign(t *testing.T) {
+func TestHS384_Sign(t *testing.T) {
 	body := map[string]any{
 		"sub":  "1234567890",
 		"name": "John Doe",
@@ -58,7 +58,7 @@ func TestES384_Sign(t *testing.T) {
 	}
 }
 
-func TestES384_SignGeneratedSecret(t *testing.T) {
+func TestHS384_SignGeneratedSecret(t *testing.T) {
 	body := map[string]any{
 		"sub":  "1234567890",
 		"name": "John Doe",

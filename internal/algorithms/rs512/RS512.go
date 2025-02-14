@@ -18,6 +18,7 @@ type Signer struct {
 }
 
 type Validator struct {
+	alg       model.Algorithm
 	publicKey *rsa.PublicKey
 }
 
@@ -52,6 +53,7 @@ func NewValidator(publicKey crypto.PublicKey) (*Validator, error) {
 		return nil, fmt.Errorf("%winvalid key provided - should be instance of `*rsa.PublicKey`", joseerror.InvalidPublicKey)
 	}
 	return &Validator{
+		alg:       model.RS512,
 		publicKey: rsaPublicKey,
 	}, nil
 }

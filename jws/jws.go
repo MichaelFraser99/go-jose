@@ -13,7 +13,6 @@ import (
 )
 
 //todo: should we consider json serialization? - no-one really uses it
-//todo: should pass an array of public keys instead - perfectly resonable that an oob method would have multiple possible options
 
 func VerifyCompactSerialization(compactSerialization string, outOfBoundsPublicKey model.Retriever) (protectedHeader, body map[string]any, err error) {
 	components := strings.Split(compactSerialization, ".")

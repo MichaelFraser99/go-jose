@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestES512_Sign(t *testing.T) {
+func TestHS512_Sign(t *testing.T) {
 	body := map[string]any{
 		"sub":  "1234567890",
 		"name": "John Doe",
@@ -57,7 +57,7 @@ func TestES512_Sign(t *testing.T) {
 	}
 }
 
-func TestES512_SignGeneratedSecret(t *testing.T) {
+func TestHS512_SignGeneratedSecret(t *testing.T) {
 	body := map[string]any{
 		"sub":  "1234567890",
 		"name": "John Doe",
