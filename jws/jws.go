@@ -14,7 +14,7 @@ import (
 
 //todo: should we consider json serialization? - no-one really uses it
 
-func VerifyCompactSerialization(compactSerialization string, outOfBoundsPublicKey model.Retriever) (protectedHeader, body map[string]any, err error) {
+func VerifyCompactSerialization(compactSerialization string, outOfBoundsPublicKey model.Retriever, opts *model.JoseOptions) (protectedHeader, body map[string]any, err error) {
 	components := strings.Split(compactSerialization, ".")
 	if len(components) != 3 {
 		return nil, nil, fmt.Errorf("%winvalid compact serialization format", joseerror.MalformedToken)
@@ -31,12 +31,14 @@ func VerifyCompactSerialization(compactSerialization string, outOfBoundsPublicKe
 		jwkRetrievers = append(jwkRetrievers, outOfBoundsPublicKey)
 	}
 
-	headerJwkRetrievers, err := header.ValidateHeader(protectedHeader, nil, model.JWS) //todo: sort out client providing
+	headerJwkRetrievers, err := header.ValidateHeader(protectedHeader, nil, model.JWS) //todo: sort out http client providing
 	if err != nil {
 		return nil, nil, fmt.Errorf("%werror validating header: %v", joseerror.MalformedToken, err)
 	}
 
-	jwkRetrievers = append(jwkRetrievers, headerJwkRetrievers...)
+	if opts == nil || opts.UseTokenProvidedKeys {
+		jwkRetrievers = append(jwkRetrievers, headerJwkRetrievers...)
+	}
 
 	if len(jwkRetrievers) == 0 {
 		return nil, nil, fmt.Errorf("%wno cyptographic material provided for signature validation", joseerror.MalformedToken)

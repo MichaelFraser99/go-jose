@@ -1465,11 +1465,11 @@ func TestValidate(t *testing.T) {
 			signer := tt.signer(t)
 			head, body, err := Validate(tt.jwt(t, signer), func() ([]crypto.PublicKey, error) {
 				return []crypto.PublicKey{tt.publicKey(t, signer)}, nil
-			})
+			}, nil)
 			tt.validate(t, head, body, err)
 		})
 	}
-}
+} //todo: tests with opts
 
 func validateJwtSignature(t *testing.T, jwt string, validator model.Validator) []string {
 	t.Helper()

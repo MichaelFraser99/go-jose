@@ -6,6 +6,11 @@ import (
 	"github.com/MichaelFraser99/go-jose/joseerror"
 )
 
+type JoseOptions struct {
+	// UseTokenProvidedKeys determines if cryptographic keys provided in the token header should be used for verification. Defaults to true
+	UseTokenProvidedKeys bool
+}
+
 type Retriever func() ([]crypto.PublicKey, error)
 
 type Mode int //todo: do we actually need this?
