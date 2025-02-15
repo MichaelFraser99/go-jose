@@ -9,6 +9,7 @@ import (
 	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/model"
+	"slices"
 	"strings"
 )
 
@@ -55,6 +56,12 @@ func VerifyCompactSerialization(compactSerialization string, outOfBoundsPublicKe
 	}
 
 	algorithm := model.GetAlgorithm(protectedHeader["alg"].(string)) //validated to exist and be of correct type earlier
+
+	if opts != nil && len(opts.AllowedSigningAlgorithms) > 0 {
+		if !slices.Contains(opts.AllowedSigningAlgorithms, algorithm) {
+			return nil, nil, fmt.Errorf("%walgorithm not permitted by application-level constraints", joseerror.InvalidSignature)
+		}
+	}
 
 	var noKeyIdentifierErrors []error
 	for _, retriever := range jwkRetrievers {

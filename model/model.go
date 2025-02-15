@@ -9,6 +9,9 @@ import (
 type JoseOptions struct {
 	// UseTokenProvidedKeys determines if cryptographic keys provided in the token header should be used for verification. Defaults to true
 	UseTokenProvidedKeys bool
+
+	// AllowedSigningAlgorithms defines the list of acceptable algorithms for token signature verification. If not specified, all algorithms are permitted
+	AllowedSigningAlgorithms []Algorithm
 }
 
 type Retriever func() ([]crypto.PublicKey, error)
