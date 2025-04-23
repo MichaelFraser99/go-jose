@@ -25,6 +25,9 @@ const (
 
 type Jwks struct {
 	Keys []map[string]any `json:"keys"`
+	Opts struct {
+		EnforceUniqueKIDs bool //todo: we should enforce this on marshal too
+	}
 }
 
 // RetrieveByKeyID
@@ -51,6 +54,20 @@ func (j *Jwks) RetrieveByKeyID(kid string) (map[string]any, error) {
 		return nil, fmt.Errorf("%wmultiple keys found for provided key ID", joseerror.KeystoreError)
 	}
 	return keys[0], nil
+}
+
+func (j *Jwks) Add(jwk map[string]any) error {
+	if kid, ok := jwk["kid"]; ok && j.Opts.EnforceUniqueKIDs {
+		if sKid, ok := kid.(string); !ok {
+			return fmt.Errorf("%w malformed key ID found for JWK", joseerror.KeystoreError)
+		} else {
+			if existing, _ := j.RetrieveByKeyID(sKid); existing != nil {
+				return fmt.Errorf("%w provided jwk has kid value matching a value already present in the keyset", joseerror.KeystoreError)
+			}
+		}
+	}
+	j.Keys = append(j.Keys, jwk)
+	return nil
 }
 
 type Signer interface {
