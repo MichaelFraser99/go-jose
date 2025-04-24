@@ -27,7 +27,7 @@ type Jwks struct {
 	Keys []map[string]any `json:"keys"`
 	Opts struct {
 		EnforceUniqueKIDs bool //todo: we should enforce this on marshal too
-	}
+	} `json:"-"`
 }
 
 // RetrieveByKeyID
