@@ -8,20 +8,25 @@ import (
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/jws"
 	"github.com/MichaelFraser99/go-jose/model"
+	"slices"
 	"strings"
 	"time"
 )
 
+type Opts struct {
+	Algorithm model.Algorithm
+}
+
 //todo: jwe support
 
 // New This function takes a signer implementation and contents for a head and body, signs them, and returns a complete jwt
-func New(signer crypto.Signer, head, body map[string]any) (*string, error) {
+func New(signer crypto.Signer, head, body map[string]any, opts Opts) (*string, error) {
 	if s, ok := signer.(model.Signer); ok {
 		if _, found := head["alg"]; !found {
 			head["alg"] = s.Alg().String()
 		}
 	}
-	return newJwt(signer, head, body)
+	return newJwt(signer, head, body, opts)
 }
 
 // Validate verifies a token's structure, claims, and signature, returning its header and body or an error if validation fails.
@@ -72,7 +77,7 @@ func Validate(token string, outOfBoundsPublicKey model.Retriever, opts *model.Jo
 	return head, body, nil
 }
 
-func newJwt(signer crypto.Signer, head, body map[string]any) (*string, error) {
+func newJwt(signer crypto.Signer, head, body map[string]any, opts Opts) (*string, error) {
 	if _, found := head["typ"]; !found {
 		head["typ"] = "JWT"
 	}
@@ -90,7 +95,28 @@ func newJwt(signer crypto.Signer, head, body map[string]any) (*string, error) {
 	base64.RawURLEncoding.Encode(b64Head, headBytes)
 	base64.RawURLEncoding.Encode(b64Body, bodyBytes)
 
-	signatureBytes, err := signer.Sign(rand.Reader, append(append(b64Head, '.'), b64Body...), model.SignerOpts{})
+	signerOpts := model.SignerOpts{}
+	var digest []byte
+	if slices.Contains([]string{"RS256", "PS256", "ES256"}, opts.Algorithm.String()) {
+		signerOpts.Hash = crypto.SHA256
+	} else if slices.Contains([]string{"RS384", "PS384", "ES384"}, opts.Algorithm.String()) {
+		signerOpts.Hash = crypto.SHA384
+	} else if slices.Contains([]string{"RS512", "PS512", "ES512"}, opts.Algorithm.String()) {
+		signerOpts.Hash = crypto.SHA512
+	}
+
+	if signerOpts.Hash != 0 {
+		h := signerOpts.Hash.New()
+		_, err = h.Write(append(append(b64Head, '.'), b64Body...))
+		if err != nil {
+			return nil, err
+		}
+		digest = h.Sum(nil)
+	} else {
+		digest = append(append(b64Head, '.'), b64Body...)
+	}
+
+	signatureBytes, err := signer.Sign(rand.Reader, digest, signerOpts)
 	if err != nil {
 		return nil, err
 	}

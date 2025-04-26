@@ -578,7 +578,7 @@ func TestNew(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			signer := tt.signer(t)
-			jwt, err := New(signer, tt.head, tt.body)
+			jwt, err := New(signer, tt.head, tt.body, Opts{signer.Alg()})
 			validator := tt.validator(t, signer.Public())
 			tt.validate(t, validator, jwt, err)
 		})
@@ -615,6 +615,7 @@ func TestValidate(t *testing.T) {
 						"surname":   "Fraser",
 						"status":    "alive (hopefully)",
 					},
+					Opts{model.RS256},
 				)
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
@@ -662,6 +663,7 @@ func TestValidate(t *testing.T) {
 						"surname":   "Fraser",
 						"status":    "alive (hopefully)",
 					},
+					Opts{model.RS384},
 				)
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
@@ -709,6 +711,7 @@ func TestValidate(t *testing.T) {
 						"surname":   "Fraser",
 						"status":    "alive (hopefully)",
 					},
+					Opts{model.RS512},
 				)
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
@@ -756,6 +759,7 @@ func TestValidate(t *testing.T) {
 						"surname":   "Fraser",
 						"status":    "alive (hopefully)",
 					},
+					Opts{model.PS256},
 				)
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
@@ -803,6 +807,7 @@ func TestValidate(t *testing.T) {
 						"surname":   "Fraser",
 						"status":    "alive (hopefully)",
 					},
+					Opts{model.PS384},
 				)
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
@@ -850,6 +855,7 @@ func TestValidate(t *testing.T) {
 						"surname":   "Fraser",
 						"status":    "alive (hopefully)",
 					},
+					Opts{model.PS512},
 				)
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
@@ -897,6 +903,7 @@ func TestValidate(t *testing.T) {
 						"surname":   "Fraser",
 						"status":    "alive (hopefully)",
 					},
+					Opts{model.ES256},
 				)
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
@@ -944,6 +951,7 @@ func TestValidate(t *testing.T) {
 						"surname":   "Fraser",
 						"status":    "alive (hopefully)",
 					},
+					Opts{model.ES384},
 				)
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
@@ -991,6 +999,7 @@ func TestValidate(t *testing.T) {
 						"surname":   "Fraser",
 						"status":    "alive (hopefully)",
 					},
+					Opts{model.ES512},
 				)
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
@@ -1038,6 +1047,7 @@ func TestValidate(t *testing.T) {
 						"surname":   "Fraser",
 						"status":    "alive (hopefully)",
 					},
+					Opts{model.HS256},
 				)
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
@@ -1085,6 +1095,7 @@ func TestValidate(t *testing.T) {
 						"surname":   "Fraser",
 						"status":    "alive (hopefully)",
 					},
+					Opts{model.HS384},
 				)
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
@@ -1132,6 +1143,7 @@ func TestValidate(t *testing.T) {
 						"surname":   "Fraser",
 						"status":    "alive (hopefully)",
 					},
+					Opts{model.HS512},
 				)
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
@@ -1179,6 +1191,7 @@ func TestValidate(t *testing.T) {
 						"surname":   "Fraser",
 						"status":    "alive (hopefully)",
 					},
+					Opts{model.HS256},
 				)
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
@@ -1215,6 +1228,7 @@ func TestValidate(t *testing.T) {
 						"surname":   "Fraser",
 						"status":    "alive (hopefully)",
 					},
+					Opts{model.RS256},
 				)
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
@@ -1253,6 +1267,7 @@ func TestValidate(t *testing.T) {
 						"status":    "alive (hopefully)",
 						"iat":       "foobar",
 					},
+					Opts{model.RS256},
 				)
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
@@ -1291,6 +1306,7 @@ func TestValidate(t *testing.T) {
 						"status":    "alive (hopefully)",
 						"iat":       time.Now().Add(1 * time.Hour).Unix(),
 					},
+					Opts{model.RS256},
 				)
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
@@ -1329,6 +1345,7 @@ func TestValidate(t *testing.T) {
 						"status":    "alive (hopefully)",
 						"nbf":       "foobar",
 					},
+					Opts{model.RS256},
 				)
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
@@ -1367,6 +1384,7 @@ func TestValidate(t *testing.T) {
 						"status":    "alive (hopefully)",
 						"nbf":       time.Now().Add(1 * time.Hour).Unix(),
 					},
+					Opts{model.RS256},
 				)
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
@@ -1405,6 +1423,7 @@ func TestValidate(t *testing.T) {
 						"status":    "alive (hopefully)",
 						"exp":       "foobar",
 					},
+					Opts{model.RS256},
 				)
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
@@ -1443,6 +1462,7 @@ func TestValidate(t *testing.T) {
 						"status":    "alive (hopefully)",
 						"exp":       time.Now().Add(-1 * time.Hour).Unix(),
 					},
+					Opts{model.RS256},
 				)
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
