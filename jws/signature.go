@@ -74,7 +74,7 @@ func GetSigner(alg jwa.Algorithm, opts *model.Opts) (model.Signer, error) {
 		s, err = hs512.NewSigner(opts.SecretKey)
 
 	default:
-		return nil, fmt.Errorf("%wunsupported algorithm: '%s'", joseerror.UnsupportedAlgorithm, alg)
+		return nil, fmt.Errorf("%wunsupported algorithm: '%s'", joseerror.ErrUnsupportedAlgorithm, alg)
 	}
 
 	return s, err
@@ -111,10 +111,10 @@ func GetSignerFromPrivateKey(alg jwa.Algorithm, privateKey crypto.PrivateKey) (m
 	case jwa.PS512:
 		s, err = ps512.NewSignerFromPrivateKey(privateKey)
 	case jwa.HS256, jwa.HS384, jwa.HS512:
-		return nil, fmt.Errorf("%wHMAC Signers cannot be created this way - please use GetSigner and specify the secret key using the Opts function", joseerror.UnsupportedAlgorithm)
+		return nil, fmt.Errorf("%wHMAC Signers cannot be created this way - please use GetSigner and specify the secret key using the Opts function", joseerror.ErrUnsupportedAlgorithm)
 
 	default:
-		return nil, fmt.Errorf("%wunsupported algorithm: '%s'", joseerror.UnsupportedAlgorithm, alg)
+		return nil, fmt.Errorf("%wunsupported algorithm: '%s'", joseerror.ErrUnsupportedAlgorithm, alg)
 	}
 
 	return s, err

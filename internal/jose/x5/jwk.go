@@ -21,9 +21,9 @@ func CertificateToJwk(certificate x509.Certificate) (map[string]any, error) {
 	case x509.Ed25519:
 		jwk = common.JwkFromEdDSAPublicKey(certificate.PublicKey.(*ed25519.PublicKey))
 	case x509.DSA:
-		return nil, fmt.Errorf("%wcertificates signed with the DSA algorithm are not supported", joseerror.ApplicationError)
+		return nil, fmt.Errorf("%wcertificates signed with the DSA algorithm are not supported", joseerror.ErrApplicationError)
 	default:
-		return nil, fmt.Errorf("%wunknown / unsupported certificate public key algorithm: %s", joseerror.UnsupportedAlgorithm, certificate.PublicKeyAlgorithm)
+		return nil, fmt.Errorf("%wunknown / unsupported certificate public key algorithm: %s", joseerror.ErrUnsupportedAlgorithm, certificate.PublicKeyAlgorithm)
 	}
 
 	alg, err := CertificateSigningAlgorithmToJoseIdentifier(certificate.SignatureAlgorithm)
@@ -59,7 +59,7 @@ func CertificateSigningAlgorithmToJoseIdentifier(x509Alg x509.SignatureAlgorithm
 	case x509.PureEd25519:
 		alg = "Ed25519"
 	default:
-		return "", fmt.Errorf("%wunknown certificate signing algorithm", joseerror.UnsupportedAlgorithm)
+		return "", fmt.Errorf("%wunknown certificate signing algorithm", joseerror.ErrUnsupportedAlgorithm)
 	}
 	return alg, nil
 }

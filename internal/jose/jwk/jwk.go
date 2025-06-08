@@ -19,10 +19,10 @@ func InlineJWK(jwk map[string]any, kid *string, alg string) model.Retriever {
 			if k, present := jwk["kid"]; present {
 				if sk, ok := k.(string); ok {
 					if sk != *kid {
-						return nil, fmt.Errorf("%wjwk kid does not match value from jose header", joseerror.NoKeyIdentifierMatch)
+						return nil, fmt.Errorf("%wjwk kid does not match value from jose header", joseerror.ErrNoKeyIdentifierMatch)
 					}
 				} else {
-					return nil, fmt.Errorf("%wreturned jwk has malformed kid value", joseerror.MalformedClaim)
+					return nil, fmt.Errorf("%wreturned jwk has malformed kid value", joseerror.ErrMalformedClaim)
 				}
 			}
 		}
@@ -30,16 +30,16 @@ func InlineJWK(jwk map[string]any, kid *string, alg string) model.Retriever {
 		if k, present := jwk["alg"]; present {
 			if sk, ok := k.(string); ok {
 				if sk != alg {
-					return nil, fmt.Errorf("%wjwk alg does not match value from jose header", joseerror.NoKeyIdentifierMatch)
+					return nil, fmt.Errorf("%wjwk alg does not match value from jose header", joseerror.ErrNoKeyIdentifierMatch)
 				}
 			} else {
-				return nil, fmt.Errorf("%wreturned jwk has malformed alg value", joseerror.MalformedClaim)
+				return nil, fmt.Errorf("%wreturned jwk has malformed alg value", joseerror.ErrMalformedClaim)
 			}
 		}
 
 		publicKey, err := PublicFromJwk(jwk)
 		if err != nil {
-			return nil, fmt.Errorf("%wfailed to convert jwk to public key: %w", joseerror.ApplicationError, err)
+			return nil, fmt.Errorf("%wfailed to convert jwk to public key: %w", joseerror.ErrApplicationError, err)
 		}
 
 		return []crypto.PublicKey{publicKey}, nil
@@ -54,23 +54,23 @@ func RetrieveJKU(jku string, client *http.Client, kid *string, alg string) model
 		}
 
 		if response.Body == nil {
-			return nil, fmt.Errorf("%wfailed to retrieve jku: response body is nil", joseerror.ApplicationError)
+			return nil, fmt.Errorf("%wfailed to retrieve jku: response body is nil", joseerror.ErrApplicationError)
 		}
 
 		responseBytes, err := io.ReadAll(response.Body)
 		if err != nil {
-			return nil, fmt.Errorf("%wfailed to read jku response: %w", joseerror.ApplicationError, err)
+			return nil, fmt.Errorf("%wfailed to read jku response: %w", joseerror.ErrApplicationError, err)
 		}
 
 		err = response.Body.Close()
 		if err != nil {
-			return nil, fmt.Errorf("%wfailed to close jku response: %w", joseerror.ApplicationError, err)
+			return nil, fmt.Errorf("%wfailed to close jku response: %w", joseerror.ErrApplicationError, err)
 		}
 
 		var returnedKeystore model.Jwks
 		err = json.Unmarshal(responseBytes, &returnedKeystore)
 		if err != nil {
-			return nil, fmt.Errorf("%wfailed to unmarshal jku response: %w", joseerror.ApplicationError, err)
+			return nil, fmt.Errorf("%wfailed to unmarshal jku response: %w", joseerror.ErrApplicationError, err)
 		}
 
 		var keystore []crypto.PublicKey
@@ -81,17 +81,17 @@ func RetrieveJKU(jku string, client *http.Client, kid *string, alg string) model
 
 			publicKey, err := PublicFromJwk(jwk)
 			if err != nil {
-				if errors.Is(err, joseerror.UnsupportedAlgorithm) {
+				if errors.Is(err, joseerror.ErrUnsupportedAlgorithm) {
 					continue //simply omit jwk if a type the application doesn't support
 				} else {
-					return nil, fmt.Errorf("%wfailed to convert jwk to public key: %w", joseerror.ApplicationError, err)
+					return nil, fmt.Errorf("%wfailed to convert jwk to public key: %w", joseerror.ErrApplicationError, err)
 				}
 			} else {
 				keystore = append(keystore, publicKey)
 			}
 		}
 		if len(keystore) == 0 {
-			return nil, fmt.Errorf("%wnone of the returned jwk entries match the identifiers specified in the jose header", joseerror.NoKeyIdentifierMatch)
+			return nil, fmt.Errorf("%wnone of the returned jwk entries match the identifiers specified in the jose header", joseerror.ErrNoKeyIdentifierMatch)
 		}
 
 		return keystore, err
@@ -108,7 +108,7 @@ func PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error) {
 		case "OKP":
 			return common.EdDSAPrivateKeyFromJwk(jwk)
 		default:
-			return nil, fmt.Errorf("%wunsupported kty: %s", joseerror.UnsupportedAlgorithm, kty.(string))
+			return nil, fmt.Errorf("%wunsupported kty: %s", joseerror.ErrUnsupportedAlgorithm, kty.(string))
 		}
 	} else {
 		return nil, fmt.Errorf("no kty claim present in jwk, cannot infer type of private key to return")
@@ -125,7 +125,7 @@ func PublicFromJwk(jwk map[string]any) (crypto.PublicKey, error) {
 		case "OKP":
 			return common.EdDSAPublicKeyFromJwk(jwk)
 		default:
-			return nil, fmt.Errorf("%wunsupported kty: %s", joseerror.UnsupportedAlgorithm, kty.(string))
+			return nil, fmt.Errorf("%wunsupported kty: %s", joseerror.ErrUnsupportedAlgorithm, kty.(string))
 		}
 	} else {
 		return nil, fmt.Errorf("no kty claim present in jwk, cannot infer type of public key to return")

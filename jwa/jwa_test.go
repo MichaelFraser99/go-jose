@@ -64,7 +64,6 @@ func TestAlgorithm_String(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.expected, func(t *testing.T) {
-			t.Parallel()
 			if tt.algorithm.String() != tt.expected {
 				t.Errorf("Expected: %s got: %s", tt.expected, tt.algorithm.String())
 			}
@@ -138,7 +137,6 @@ func TestGetAlgorithm(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.algString, func(t *testing.T) {
-			t.Parallel()
 			alg := GetAlgorithm(tt.algString)
 			if alg != tt.expected {
 				t.Errorf("wrong algorithm returned, expected %s got: %s", tt.expected.String(), alg.String())

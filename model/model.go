@@ -49,10 +49,10 @@ func (j *Jwks) RetrieveByKeyID(kid string) (map[string]any, error) {
 		}
 	}
 	if len(keys) == 0 {
-		return nil, fmt.Errorf("%wno matching key found for provided key ID", joseerror.KeystoreError)
+		return nil, fmt.Errorf("%wno matching key found for provided key ID", joseerror.ErrKeystoreError)
 	}
 	if len(keys) > 1 {
-		return nil, fmt.Errorf("%wmultiple keys found for provided key ID", joseerror.KeystoreError)
+		return nil, fmt.Errorf("%wmultiple keys found for provided key ID", joseerror.ErrKeystoreError)
 	}
 	return keys[0], nil
 }
@@ -60,10 +60,10 @@ func (j *Jwks) RetrieveByKeyID(kid string) (map[string]any, error) {
 func (j *Jwks) Add(jwk map[string]any) error {
 	if kid, ok := jwk["kid"]; ok && j.Opts.EnforceUniqueKIDs {
 		if sKid, ok := kid.(string); !ok {
-			return fmt.Errorf("%w malformed key ID found for JWK", joseerror.KeystoreError)
+			return fmt.Errorf("%w malformed key ID found for JWK", joseerror.ErrKeystoreError)
 		} else {
 			if existing, _ := j.RetrieveByKeyID(sKid); existing != nil {
-				return fmt.Errorf("%w provided jwk has kid value matching a value already present in the keyset", joseerror.KeystoreError)
+				return fmt.Errorf("%w provided jwk has kid value matching a value already present in the keyset", joseerror.ErrKeystoreError)
 			}
 		}
 	}

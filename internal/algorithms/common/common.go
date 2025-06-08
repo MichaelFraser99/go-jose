@@ -101,7 +101,7 @@ func extractECDSACoordinatesFromJwk(jwk map[string]any) (*big.Int, *big.Int, *bi
 	}
 
 	dBytes, err := jsonutils.ExtractAndDecodeBase64urlString(jwk, "d")
-	if err != nil && !errors.Is(err, jose_errors.MissingClaim) { //won't be present on public key material
+	if err != nil && !errors.Is(err, jose_errors.ErrMissingClaim) { //won't be present on public key material
 		return nil, nil, nil, fmt.Errorf("error extracting 'd' coordinate from jwk: %w", err)
 	}
 
@@ -268,12 +268,12 @@ func RSAPrivateKeyFromJwk(jwk map[string]any) (*rsa.PrivateKey, error) {
 	}
 
 	pBytes, err := jsonutils.ExtractAndDecodeBase64urlString(jwk, "p")
-	if err != nil && !errors.Is(err, jose_errors.MissingClaim) {
+	if err != nil && !errors.Is(err, jose_errors.ErrMissingClaim) {
 		return nil, fmt.Errorf("error extracting 'p' parameter from jwk: %w", err)
 	}
 
 	qBytes, err := jsonutils.ExtractAndDecodeBase64urlString(jwk, "q")
-	if err != nil && !errors.Is(err, jose_errors.MissingClaim) {
+	if err != nil && !errors.Is(err, jose_errors.ErrMissingClaim) {
 		return nil, fmt.Errorf("error extracting 'q' parameter from jwk: %w", err)
 	}
 
@@ -281,7 +281,7 @@ func RSAPrivateKeyFromJwk(jwk map[string]any) (*rsa.PrivateKey, error) {
 	for _, v := range []string{"q", "dp", "dq", "qi"} {
 		present := jsonutils.KeyPresent(jwk, v)
 		if present != pPresent {
-			return nil, fmt.Errorf("%wmalformed RSA jwk - refer to text in section 6.3.2 of RFC 7518 for explanation", jose_errors.InvalidPrivateKey)
+			return nil, fmt.Errorf("%wmalformed RSA jwk - refer to text in section 6.3.2 of RFC 7518 for explanation", jose_errors.ErrInvalidPrivateKey)
 		}
 	}
 
@@ -414,7 +414,7 @@ func JwkFromRSAPrivateKey(privateKey *rsa.PrivateKey) map[string]any {
 
 func ExtractRSFromSignature(signature []byte, keySize int) (*big.Int, *big.Int, error) {
 	if len(signature) != keySize {
-		return nil, nil, fmt.Errorf("%wsignature should be %d bytes for given algorithm", jose_errors.InvalidSignature, keySize)
+		return nil, nil, fmt.Errorf("%wsignature should be %d bytes for given algorithm", jose_errors.ErrInvalidSignature, keySize)
 	}
 	rb := signature[:keySize/2]
 	sb := signature[keySize/2:]
@@ -428,7 +428,7 @@ func ExtractRSFromSignature(signature []byte, keySize int) (*big.Int, *big.Int, 
 func EllipticCurveSign(rand io.Reader, pk ecdsa.PrivateKey, digest []byte, keySize int) ([]byte, error) {
 	r, s, err := ecdsa.Sign(rand, &pk, digest)
 	if err != nil {
-		return nil, fmt.Errorf("%wfailed to sign token: %s", jose_errors.SigningError, err.Error())
+		return nil, fmt.Errorf("%wfailed to sign token: %s", jose_errors.ErrSigningError, err.Error())
 	}
 
 	sigBytes := make([]byte, keySize)
@@ -442,7 +442,7 @@ func EllipticCurveSign(rand io.Reader, pk ecdsa.PrivateKey, digest []byte, keySi
 func RsaPkcs1Sign(rand io.Reader, pk rsa.PrivateKey, digest []byte, hash crypto.Hash) ([]byte, error) {
 	s, err := rsa.SignPKCS1v15(rand, &pk, hash, digest)
 	if err != nil {
-		return nil, fmt.Errorf("%wfailed to sign token: %s", jose_errors.SigningError, err.Error())
+		return nil, fmt.Errorf("%wfailed to sign token: %s", jose_errors.ErrSigningError, err.Error())
 	}
 	return s, nil
 }
@@ -454,7 +454,7 @@ func RsaPSSSign(rand io.Reader, pk rsa.PrivateKey, digest []byte, hash crypto.Ha
 	}
 	s, err := rsa.SignPSS(rand, &pk, hash, digest, opts)
 	if err != nil {
-		return nil, fmt.Errorf("%wfailed to sign token: %s", jose_errors.SigningError, err.Error())
+		return nil, fmt.Errorf("%wfailed to sign token: %s", jose_errors.ErrSigningError, err.Error())
 	}
 	return s, nil
 }

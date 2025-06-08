@@ -37,7 +37,7 @@ func TestJwks_Add(t *testing.T) {
 			},
 			keyToAdd:    map[string]any{"kid": "key1", "alg": "RS256"},
 			expectErr:   true,
-			expectedErr: fmt.Errorf("%w provided jwk has kid value matching a value already present in the keyset", joseerror.KeystoreError),
+			expectedErr: fmt.Errorf("%w provided jwk has kid value matching a value already present in the keyset", joseerror.ErrKeystoreError),
 		},
 		{
 			name: "Add duplicate key with unique KIDs not enforced",
@@ -74,13 +74,12 @@ func TestJwks_Add(t *testing.T) {
 			},
 			keyToAdd:    map[string]any{"kid": 12345, "alg": "RS256"},
 			expectErr:   true,
-			expectedErr: fmt.Errorf("%w malformed key ID found for JWK", joseerror.KeystoreError),
+			expectedErr: fmt.Errorf("%w malformed key ID found for JWK", joseerror.ErrKeystoreError),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			err := tt.initialJwks.Add(tt.keyToAdd)
 			if tt.expectErr {
 				if err == nil {
@@ -122,7 +121,7 @@ func TestRetrieveByKeyID(t *testing.T) {
 			jwks:        Jwks{Keys: []map[string]any{}},
 			kid:         "non-existent-kid",
 			expectErr:   true,
-			expectedErr: fmt.Errorf("%wno matching key found for provided key ID", joseerror.KeystoreError),
+			expectedErr: fmt.Errorf("%wno matching key found for provided key ID", joseerror.ErrKeystoreError),
 		},
 		{
 			name: "Single matching key",
@@ -146,7 +145,7 @@ func TestRetrieveByKeyID(t *testing.T) {
 			},
 			kid:         "key1",
 			expectErr:   true,
-			expectedErr: fmt.Errorf("%wmultiple keys found for provided key ID", joseerror.KeystoreError),
+			expectedErr: fmt.Errorf("%wmultiple keys found for provided key ID", joseerror.ErrKeystoreError),
 		},
 		{
 			name: "Invalid key format",
@@ -155,13 +154,12 @@ func TestRetrieveByKeyID(t *testing.T) {
 			}},
 			kid:         "key1",
 			expectErr:   true,
-			expectedErr: fmt.Errorf("%wno matching key found for provided key ID", joseerror.KeystoreError),
+			expectedErr: fmt.Errorf("%wno matching key found for provided key ID", joseerror.ErrKeystoreError),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			key, err := tt.jwks.RetrieveByKeyID(tt.kid)
 			if tt.expectErr {
 				if err == nil {

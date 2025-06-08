@@ -22,14 +22,14 @@ func ExtractAndDecodeBase64urlString(m map[string]any, key string) ([]byte, erro
 		if vString, ok := v.(string); ok {
 			vBytes, err := base64.RawURLEncoding.DecodeString(vString)
 			if err != nil {
-				return nil, fmt.Errorf("%winvalid base64url in %q claim", joseerror.MalformedClaim, key)
+				return nil, fmt.Errorf("%winvalid base64url in %q claim", joseerror.ErrMalformedClaim, key)
 			}
 			return vBytes, nil
 		} else {
-			return nil, fmt.Errorf("%wprovided %q claim cannot be parsed as a string", joseerror.MalformedClaim, key)
+			return nil, fmt.Errorf("%wprovided %q claim cannot be parsed as a string", joseerror.ErrMalformedClaim, key)
 		}
 	} else {
-		return nil, fmt.Errorf("%wno %q claim present in map", joseerror.MissingClaim, key)
+		return nil, fmt.Errorf("%wno %q claim present in map", joseerror.ErrMissingClaim, key)
 	}
 }
 
@@ -51,10 +51,10 @@ func RetrieveClaim[T any](jsonInput map[string]any, claimName string, validator 
 	var castedValue T
 	if value, ok := jsonInput[claimName]; ok {
 		if castedValue, ok = value.(T); !ok {
-			return nil, fmt.Errorf("%wthe value of claim '%s' cannot be parsed as a %s", joseerror.MalformedClaim, claimName, reflect.TypeOf(castedValue).String())
+			return nil, fmt.Errorf("%wthe value of claim '%s' cannot be parsed as a %s", joseerror.ErrMalformedClaim, claimName, reflect.TypeOf(castedValue).String())
 		}
 	} else {
-		return nil, fmt.Errorf("%w'%s' key is missing", joseerror.MissingClaim, claimName)
+		return nil, fmt.Errorf("%w'%s' key is missing", joseerror.ErrMissingClaim, claimName)
 	}
 
 	for _, v := range validator {
@@ -70,7 +70,7 @@ var (
 	ValidateAlg = func(jsonInput map[string]any, retrievedClaimValue string) error {
 		parsedAlg := jwa.GetAlgorithm(retrievedClaimValue)
 		if parsedAlg == jwa.Unknown {
-			return fmt.Errorf("%w'%s' is not a supported algorithm", joseerror.UnsupportedAlgorithm, retrievedClaimValue)
+			return fmt.Errorf("%w'%s' is not a supported algorithm", joseerror.ErrUnsupportedAlgorithm, retrievedClaimValue)
 		}
 		return nil
 	}
@@ -78,28 +78,28 @@ var (
 	ValidateHttpsUrlClaim = func(jsonInput map[string]any, retrievedClaimValue string) error {
 		parsedUrl, err := url.Parse(retrievedClaimValue)
 		if err != nil {
-			return fmt.Errorf("%w'%s' is not a valid URL", joseerror.MalformedClaim, retrievedClaimValue)
+			return fmt.Errorf("%w'%s' is not a valid URL", joseerror.ErrMalformedClaim, retrievedClaimValue)
 		}
 		if parsedUrl.Scheme != "https" {
-			return fmt.Errorf("%w'%s' is not a valid HTTPS URL", joseerror.MalformedClaim, retrievedClaimValue)
+			return fmt.Errorf("%w'%s' is not a valid HTTPS URL", joseerror.ErrMalformedClaim, retrievedClaimValue)
 		}
 		return nil
 	}
 
 	ValidateBase64Url = func(jsonInput map[string]any, retrievedClaimValue string) error {
 		if retrievedClaimValue == "" {
-			return fmt.Errorf("%wthe claim's value is an empty string", joseerror.MalformedClaim)
+			return fmt.Errorf("%wthe claim's value is an empty string", joseerror.ErrMalformedClaim)
 		}
 		_, err := base64.RawURLEncoding.DecodeString(retrievedClaimValue)
 		if err != nil {
-			return fmt.Errorf("%w'%s' is not valid base64url", joseerror.MalformedClaim, retrievedClaimValue)
+			return fmt.Errorf("%w'%s' is not valid base64url", joseerror.ErrMalformedClaim, retrievedClaimValue)
 		}
 		return nil
 	}
 
 	ValidateNonEmptySlice = Validator[[]any](func(jsonInput map[string]any, s []any) error {
 		if len(s) == 0 {
-			return fmt.Errorf("%wthe provided slice is empty", joseerror.MalformedClaim)
+			return fmt.Errorf("%wthe provided slice is empty", joseerror.ErrMalformedClaim)
 		}
 		return nil
 	})
@@ -109,7 +109,7 @@ var (
 
 		for _, v := range s {
 			if _, exists := seen[v]; exists {
-				return fmt.Errorf("%wthe array has duplicate values", joseerror.MalformedClaim)
+				return fmt.Errorf("%wthe array has duplicate values", joseerror.ErrMalformedClaim)
 			}
 			seen[v] = struct{}{}
 		}
@@ -122,11 +122,11 @@ var (
 		}
 		for _, claim := range critical {
 			if sClaim, ok := claim.(string); !ok {
-				return fmt.Errorf("%wthe 'crit' array contains one or more non-string values", joseerror.MalformedClaim)
+				return fmt.Errorf("%wthe 'crit' array contains one or more non-string values", joseerror.ErrMalformedClaim)
 			} else {
 				for _, bannedClaim := range bannedCriticalValues {
 					if sClaim == bannedClaim {
-						return fmt.Errorf("%wthe 'crit' array contains one or more illegal values", joseerror.MalformedClaim)
+						return fmt.Errorf("%wthe 'crit' array contains one or more illegal values", joseerror.ErrMalformedClaim)
 					}
 				}
 			}
@@ -140,11 +140,11 @@ var (
 		}
 		for _, claim := range critical {
 			if sClaim, ok := claim.(string); !ok {
-				return fmt.Errorf("%wthe 'crit' array contains one or more non-string values", joseerror.MalformedClaim)
+				return fmt.Errorf("%wthe 'crit' array contains one or more non-string values", joseerror.ErrMalformedClaim)
 			} else {
 				for _, bannedClaim := range bannedCriticalValues {
 					if sClaim == bannedClaim {
-						return fmt.Errorf("%wthe 'crit' array contains one or more illegal values in JWE", joseerror.MalformedClaim)
+						return fmt.Errorf("%wthe 'crit' array contains one or more illegal values in JWE", joseerror.ErrMalformedClaim)
 					}
 				}
 			}
@@ -155,10 +155,10 @@ var (
 	ValidateCriticalValuesPresent = Validator[[]any](func(jsonInput map[string]any, critical []any) error {
 		for _, claim := range critical {
 			if sClaim, ok := claim.(string); !ok {
-				return fmt.Errorf("%wthe 'crit' array contains one or more non-string values", joseerror.MalformedClaim)
+				return fmt.Errorf("%wthe 'crit' array contains one or more non-string values", joseerror.ErrMalformedClaim)
 			} else {
 				if _, ok := jsonInput[sClaim]; !ok {
-					return fmt.Errorf("%wthe 'crit' array contains one or more values not included in the header", joseerror.MissingCriticalClaim)
+					return fmt.Errorf("%wthe 'crit' array contains one or more values not included in the header", joseerror.ErrMissingCriticalClaim)
 				}
 			}
 		}

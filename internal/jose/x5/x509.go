@@ -24,7 +24,7 @@ var (
 		for _, entry := range certificateChain {
 			decodedCertificate, err := base64.StdEncoding.DecodeString(entry) // certificates are base64 encoded DER - not base64url
 			if err != nil {
-				return fmt.Errorf("%wone or more entries in the chain is not a valid base64 string: %s", joseerror.MalformedClaim, err.Error())
+				return fmt.Errorf("%wone or more entries in the chain is not a valid base64 string: %s", joseerror.ErrMalformedClaim, err.Error())
 			}
 			decodedCertificateStrings = append(decodedCertificateStrings, string(decodedCertificate))
 		}
@@ -37,7 +37,7 @@ var (
 func validateCertificateChain(certificateChain []byte) ([]*x509.Certificate, error) {
 	certificates, err := x509.ParseCertificates(certificateChain)
 	if err != nil {
-		return nil, fmt.Errorf("%wone or more of the provided values is not a valid certificate: %s", joseerror.MalformedClaim, err.Error())
+		return nil, fmt.Errorf("%wone or more of the provided values is not a valid certificate: %s", joseerror.ErrMalformedClaim, err.Error())
 	}
 
 	rootCertPool := x509.NewCertPool()
@@ -53,7 +53,7 @@ func validateCertificateChain(certificateChain []byte) ([]*x509.Certificate, err
 
 	_, err = certificates[0].Verify(x509.VerifyOptions{Roots: rootCertPool, Intermediates: intermediateCertPool})
 	if err != nil {
-		return nil, fmt.Errorf("%wone or more of the provided values is not a valid certificate chain: %s", joseerror.MalformedClaim, err.Error())
+		return nil, fmt.Errorf("%wone or more of the provided values is not a valid certificate chain: %s", joseerror.ErrMalformedClaim, err.Error())
 	}
 
 	return certificates, nil
@@ -64,25 +64,25 @@ func InlineCertificate(certificateChain []string, x5t, x5ts256 *string, alg stri
 		signingCertificate := certificateChain[0] //chain has already been validated
 		decodedCertificate, err := base64.StdEncoding.DecodeString(signingCertificate)
 		if err != nil {
-			return nil, fmt.Errorf("%wfailed to decode certificate base64: %w", joseerror.ApplicationError, err)
+			return nil, fmt.Errorf("%wfailed to decode certificate base64: %w", joseerror.ErrApplicationError, err)
 		}
 
 		parsedCertificate, err := x509.ParseCertificate(decodedCertificate)
 		if err != nil {
-			return nil, fmt.Errorf("%wfailed to parse decoded base64 as certificate: %w", joseerror.ApplicationError, err)
+			return nil, fmt.Errorf("%wfailed to parse decoded base64 as certificate: %w", joseerror.ErrApplicationError, err)
 		}
 
 		if x5t != nil {
 			calculatedX5t := CalculateX5t(parsedCertificate.Raw)
 			if calculatedX5t != *x5t {
-				return nil, fmt.Errorf("%wcalculated x5t does not match value from jose header", joseerror.NoKeyIdentifierMatch)
+				return nil, fmt.Errorf("%wcalculated x5t does not match value from jose header", joseerror.ErrNoKeyIdentifierMatch)
 			}
 		}
 
 		if x5ts256 != nil {
 			calculatedX5tS256 := CalculateX5tS256(parsedCertificate.Raw)
 			if calculatedX5tS256 != *x5ts256 {
-				return nil, fmt.Errorf("%wcalculated x5ts256 does not match value from jose header", joseerror.NoKeyIdentifierMatch)
+				return nil, fmt.Errorf("%wcalculated x5ts256 does not match value from jose header", joseerror.ErrNoKeyIdentifierMatch)
 			}
 		}
 
@@ -92,7 +92,7 @@ func InlineCertificate(certificateChain []string, x5t, x5ts256 *string, alg stri
 		}
 
 		if certificateAlgorithm != alg {
-			return nil, fmt.Errorf("%wcertificate signing algorithm does not match jwk algorithm", joseerror.NoKeyIdentifierMatch)
+			return nil, fmt.Errorf("%wcertificate signing algorithm does not match jwk algorithm", joseerror.ErrNoKeyIdentifierMatch)
 		}
 
 		return []crypto.PublicKey{parsedCertificate.PublicKey}, nil
@@ -107,22 +107,22 @@ func RetrieveX5U(x5u string, client *http.Client, x5t, x5ts256 *string, alg stri
 		}
 
 		if response.Body == nil {
-			return nil, fmt.Errorf("%wfailed to retrieve x5u: response body is nil", joseerror.ApplicationError)
+			return nil, fmt.Errorf("%wfailed to retrieve x5u: response body is nil", joseerror.ErrApplicationError)
 		}
 
 		responseBytes, err := io.ReadAll(response.Body)
 		if err != nil {
-			return nil, fmt.Errorf("%wfailed to read x5u response: %w", joseerror.ApplicationError, err)
+			return nil, fmt.Errorf("%wfailed to read x5u response: %w", joseerror.ErrApplicationError, err)
 		}
 
 		err = response.Body.Close()
 		if err != nil {
-			return nil, fmt.Errorf("%wfailed to close x5u response: %w", joseerror.ApplicationError, err)
+			return nil, fmt.Errorf("%wfailed to close x5u response: %w", joseerror.ErrApplicationError, err)
 		}
 
 		certificates, err := validateCertificateChain(responseBytes)
 		if err != nil {
-			return nil, fmt.Errorf("%wunable to parse retrieved x5u response as a certificate chain: %w", joseerror.ApplicationError, err)
+			return nil, fmt.Errorf("%wunable to parse retrieved x5u response as a certificate chain: %w", joseerror.ErrApplicationError, err)
 		}
 
 		if len(certificates) == 0 {
@@ -134,14 +134,14 @@ func RetrieveX5U(x5u string, client *http.Client, x5t, x5ts256 *string, alg stri
 		if x5t != nil {
 			calculatedX5t := CalculateX5t(parsedCertificate.Raw)
 			if calculatedX5t != *x5t {
-				return nil, fmt.Errorf("%wcalculated x5t does not match value from jose header", joseerror.NoKeyIdentifierMatch)
+				return nil, fmt.Errorf("%wcalculated x5t does not match value from jose header", joseerror.ErrNoKeyIdentifierMatch)
 			}
 		}
 
 		if x5ts256 != nil {
 			calculatedX5tS256 := CalculateX5tS256(parsedCertificate.Raw)
 			if calculatedX5tS256 != *x5ts256 {
-				return nil, fmt.Errorf("%wcalculated x5ts256 does not match value from jose header", joseerror.NoKeyIdentifierMatch)
+				return nil, fmt.Errorf("%wcalculated x5ts256 does not match value from jose header", joseerror.ErrNoKeyIdentifierMatch)
 			}
 		}
 
@@ -151,7 +151,7 @@ func RetrieveX5U(x5u string, client *http.Client, x5t, x5ts256 *string, alg stri
 		}
 
 		if certificateAlgorithm != alg {
-			return nil, fmt.Errorf("%wcertificate signing algorithm does not match jwk algorithm", joseerror.NoKeyIdentifierMatch)
+			return nil, fmt.Errorf("%wcertificate signing algorithm does not match jwk algorithm", joseerror.ErrNoKeyIdentifierMatch)
 		}
 
 		return []crypto.PublicKey{parsedCertificate.PublicKey}, nil

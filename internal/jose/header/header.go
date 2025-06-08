@@ -28,45 +28,45 @@ func ValidateHeader(header map[string]any, client *http.Client, mode model.Mode)
 			return nil, err
 		} //todo: do something with value
 
-		_, err = jsonutils.RetrieveClaim[string](header, "zip")    //todo: we can do a validator for zip options this implementation understands
-		if err != nil && !errors.Is(err, joseerror.MissingClaim) { //optional claim
+		_, err = jsonutils.RetrieveClaim[string](header, "zip")       //todo: we can do a validator for zip options this implementation understands
+		if err != nil && !errors.Is(err, joseerror.ErrMissingClaim) { //optional claim
 			return nil, err
 		} //todo: do something with value
 
 	}
 
 	jku, err := jsonutils.RetrieveClaim(header, "jku", jsonutils.ValidateHttpsUrlClaim)
-	if err != nil && !errors.Is(err, joseerror.MissingClaim) { //optional claim
+	if err != nil && !errors.Is(err, joseerror.ErrMissingClaim) { //optional claim
 		return nil, err
 	}
 
 	includedJwk, err := jsonutils.RetrieveClaim[map[string]any](header, "jwk")
-	if err != nil && !errors.Is(err, joseerror.MissingClaim) { //optional claim
+	if err != nil && !errors.Is(err, joseerror.ErrMissingClaim) { //optional claim
 		return nil, err
 	}
 
 	kid, err := jsonutils.RetrieveClaim[string](header, "kid")
-	if err != nil && !errors.Is(err, joseerror.MissingClaim) { //optional claim
+	if err != nil && !errors.Is(err, joseerror.ErrMissingClaim) { //optional claim
 		return nil, err
 	}
 
 	x5u, err := jsonutils.RetrieveClaim(header, "x5u", jsonutils.ValidateHttpsUrlClaim)
-	if err != nil && !errors.Is(err, joseerror.MissingClaim) { //optional claim
+	if err != nil && !errors.Is(err, joseerror.ErrMissingClaim) { //optional claim
 		return nil, err
 	}
 
 	x5c, err := jsonutils.RetrieveClaim[[]string](header, "x5c", x5.ValidateCertificateChain)
-	if err != nil && !errors.Is(err, joseerror.MissingClaim) { //optional claim
+	if err != nil && !errors.Is(err, joseerror.ErrMissingClaim) { //optional claim
 		return nil, err
 	}
 
 	x5t, err := jsonutils.RetrieveClaim(header, "x5t", jsonutils.ValidateBase64Url)
-	if err != nil && !errors.Is(err, joseerror.MissingClaim) { //optional claim
+	if err != nil && !errors.Is(err, joseerror.ErrMissingClaim) { //optional claim
 		return nil, err
 	}
 
 	x5ts256, err := jsonutils.RetrieveClaim(header, "x5t#S256", jsonutils.ValidateBase64Url)
-	if err != nil && !errors.Is(err, joseerror.MissingClaim) { //optional claim
+	if err != nil && !errors.Is(err, joseerror.ErrMissingClaim) { //optional claim
 		return nil, err
 	}
 
@@ -79,7 +79,7 @@ func ValidateHeader(header map[string]any, client *http.Client, mode model.Mode)
 	}
 
 	_, err = jsonutils.RetrieveClaim[[]any](header, "crit", critValidators...)
-	if err != nil && !errors.Is(err, joseerror.MissingClaim) { //optional claim
+	if err != nil && !errors.Is(err, joseerror.ErrMissingClaim) { //optional claim
 		return nil, err
 	}
 

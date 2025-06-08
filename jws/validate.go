@@ -56,7 +56,7 @@ func GetValidator(alg jwa.Algorithm, publicKey crypto.PublicKey) (model.Validato
 	case jwa.HS512:
 		v, err = hs512.NewValidator(publicKey)
 	default:
-		return nil, fmt.Errorf("%wunsupported algorithm: '%s'", joseerror.UnsupportedAlgorithm, alg.String())
+		return nil, fmt.Errorf("%wunsupported algorithm: '%s'", joseerror.ErrUnsupportedAlgorithm, alg.String())
 	}
 	return v, err
 }
@@ -91,9 +91,9 @@ func GetValidatorFromJwk(alg jwa.Algorithm, jwk map[string]any) (model.Validator
 	case jwa.PS512:
 		v, err = ps512.NewValidatorFromJwk(jwk)
 	case jwa.HS256, jwa.HS384, jwa.HS512:
-		return nil, fmt.Errorf("%wvalidators cannot be created for symmetric algorithms", joseerror.UnsupportedAlgorithm)
+		return nil, fmt.Errorf("%wvalidators cannot be created for symmetric algorithms", joseerror.ErrUnsupportedAlgorithm)
 	default:
-		return nil, fmt.Errorf("%wunsupported algorithm: '%s'", joseerror.UnsupportedAlgorithm, alg.String())
+		return nil, fmt.Errorf("%wunsupported algorithm: '%s'", joseerror.ErrUnsupportedAlgorithm, alg.String())
 	}
 	return v, err
 }

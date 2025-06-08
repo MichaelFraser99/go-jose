@@ -51,7 +51,7 @@ func Test_validateCertificateChain(t *testing.T) {
 		"malformed entry": {
 			certificates: []string{encodedCerts[3], "foo-bar", encodedCerts[1], encodedCerts[0]},
 			errMsg:       "one or more entries in the chain is not a valid base64 string: illegal base64 data at input byte 3",
-			errTypes:     []error{joseerror.MalformedClaim},
+			errTypes:     []error{joseerror.ErrMalformedClaim},
 		},
 		"empty slice": {
 			certificates: []string{},
@@ -62,7 +62,7 @@ func Test_validateCertificateChain(t *testing.T) {
 		"broken chain": {
 			certificates: []string{encodedCerts[3], encodedCerts[0]},
 			errMsg:       "one or more of the provided values is not a valid certificate chain: x509: certificate signed by unknown authority",
-			errTypes:     []error{joseerror.MalformedClaim},
+			errTypes:     []error{joseerror.ErrMalformedClaim},
 		},
 	}
 

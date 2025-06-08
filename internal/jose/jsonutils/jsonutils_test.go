@@ -30,7 +30,7 @@ func Test_retrieveClaim(t *testing.T) {
 			},
 			key:  "kid",
 			want: nil,
-			err:  fmt.Errorf("%w'kid' key is missing", joseerror.MissingClaim),
+			err:  fmt.Errorf("%w'kid' key is missing", joseerror.ErrMissingClaim),
 		},
 		"unexpected type": {
 			header: map[string]any{
@@ -38,7 +38,7 @@ func Test_retrieveClaim(t *testing.T) {
 			},
 			key:  "alg",
 			want: nil,
-			err:  fmt.Errorf("%wthe value of claim 'alg' cannot be parsed as a string", joseerror.MalformedClaim),
+			err:  fmt.Errorf("%wthe value of claim 'alg' cannot be parsed as a string", joseerror.ErrMalformedClaim),
 		},
 	}
 
@@ -82,12 +82,12 @@ func Test_validateAlg(t *testing.T) {
 		"invalid alg": {
 			retrievedClaimValue: "foo-bar",
 			errMsg:              "'foo-bar' is not a supported algorithm",
-			errTypes:            []error{joseerror.UnsupportedAlgorithm},
+			errTypes:            []error{joseerror.ErrUnsupportedAlgorithm},
 		},
 		"missing alg": {
 			retrievedClaimValue: "",
 			errMsg:              "'' is not a supported algorithm",
-			errTypes:            []error{joseerror.UnsupportedAlgorithm},
+			errTypes:            []error{joseerror.ErrUnsupportedAlgorithm},
 		},
 	}
 
@@ -111,17 +111,17 @@ func Test_validateHttpsUrlClaim(t *testing.T) {
 		"http url": {
 			retrievedClaimValue: "http://example.com",
 			errMsg:              "'http://example.com' is not a valid HTTPS URL",
-			errTypes:            []error{joseerror.MalformedClaim},
+			errTypes:            []error{joseerror.ErrMalformedClaim},
 		},
 		"illegal character in url": {
 			retrievedClaimValue: "foobar" + string(rune(0x7f)),
 			errMsg:              fmt.Sprintf("'%s' is not a valid URL", "foobar"+string(rune(0x7f))),
-			errTypes:            []error{joseerror.MalformedClaim},
+			errTypes:            []error{joseerror.ErrMalformedClaim},
 		},
 		"empty string": {
 			retrievedClaimValue: "",
 			errMsg:              "'' is not a valid HTTPS URL",
-			errTypes:            []error{joseerror.MalformedClaim},
+			errTypes:            []error{joseerror.ErrMalformedClaim},
 		},
 	}
 
@@ -145,17 +145,17 @@ func Test_validateBase64Url(t *testing.T) {
 		"invalid base64url": {
 			retrievedClaimValue: "abcde",
 			errMsg:              "'abcde' is not valid base64url",
-			errTypes:            []error{joseerror.MalformedClaim},
+			errTypes:            []error{joseerror.ErrMalformedClaim},
 		},
 		"padded base64url": {
 			retrievedClaimValue: "eyJhbGciOiJSUzI1NiIsInR5cCI6Impzb24rc2Qtand0In0==",
 			errMsg:              "'eyJhbGciOiJSUzI1NiIsInR5cCI6Impzb24rc2Qtand0In0==' is not valid base64url",
-			errTypes:            []error{joseerror.MalformedClaim},
+			errTypes:            []error{joseerror.ErrMalformedClaim},
 		},
 		"empty string": {
 			retrievedClaimValue: "",
 			errMsg:              "the claim's value is an empty string",
-			errTypes:            []error{joseerror.MalformedClaim},
+			errTypes:            []error{joseerror.ErrMalformedClaim},
 		},
 	}
 
@@ -185,7 +185,7 @@ func Test_validateNonEmptySlice(t *testing.T) {
 		"empty slice": {
 			slice:    []any{},
 			errMsg:   "the provided slice is empty",
-			errTypes: []error{joseerror.MalformedClaim},
+			errTypes: []error{joseerror.ErrMalformedClaim},
 		},
 		"nil slice": {
 			slice:  nil,
@@ -219,17 +219,17 @@ func Test_validateNoDuplicateSliceValues(t *testing.T) {
 		"duplicate values - string": {
 			slice:    []any{"foo", "bar", "foo"},
 			errMsg:   "the array has duplicate values",
-			errTypes: []error{joseerror.MalformedClaim},
+			errTypes: []error{joseerror.ErrMalformedClaim},
 		},
 		"duplicate values - int": {
 			slice:    []any{1, 2, 1},
 			errMsg:   "the array has duplicate values",
-			errTypes: []error{joseerror.MalformedClaim},
+			errTypes: []error{joseerror.ErrMalformedClaim},
 		},
 		"duplicate values - bool": {
 			slice:    []any{true, false, true},
 			errMsg:   "the array has duplicate values",
-			errTypes: []error{joseerror.MalformedClaim},
+			errTypes: []error{joseerror.ErrMalformedClaim},
 		},
 		"empty slice": {
 			slice: []any{},
@@ -271,17 +271,17 @@ func Test_validateNoBannedCriticalValues(t *testing.T) {
 		"single illegal value": {
 			critical: []any{"alg"},
 			errMsg:   "the 'crit' array contains one or more illegal values",
-			errTypes: []error{joseerror.MalformedClaim},
+			errTypes: []error{joseerror.ErrMalformedClaim},
 		},
 		"multiple illegal values": {
 			critical: []any{"alg", "jku", "jwk"},
 			errMsg:   "the 'crit' array contains one or more illegal values",
-			errTypes: []error{joseerror.MalformedClaim},
+			errTypes: []error{joseerror.ErrMalformedClaim},
 		},
 		"mixed illegal and legal values": {
 			critical: []any{"foo", "alg", "bar", "jwk", "baz"},
 			errMsg:   "the 'crit' array contains one or more illegal values",
-			errTypes: []error{joseerror.MalformedClaim},
+			errTypes: []error{joseerror.ErrMalformedClaim},
 		},
 	}
 
@@ -360,7 +360,7 @@ func Test_validateCriticalValuesPresent(t *testing.T) {
 			},
 			critical: []any{"foo", "bin"},
 			errMsg:   "the 'crit' array contains one or more values not included in the header",
-			errTypes: []error{joseerror.MissingCriticalClaim},
+			errTypes: []error{joseerror.ErrMissingCriticalClaim},
 		},
 		"multiple missing values": {
 			header: map[string]any{
@@ -373,7 +373,7 @@ func Test_validateCriticalValuesPresent(t *testing.T) {
 			},
 			critical: []any{"foo", "bin"},
 			errMsg:   "the 'crit' array contains one or more values not included in the header",
-			errTypes: []error{joseerror.MissingCriticalClaim},
+			errTypes: []error{joseerror.ErrMissingCriticalClaim},
 		},
 	}
 
