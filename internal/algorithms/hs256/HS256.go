@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
+	"github.com/MichaelFraser99/go-jose/jwa"
 	"github.com/MichaelFraser99/go-jose/model"
 	"hash"
 	"io"
@@ -19,13 +20,13 @@ var (
 )
 
 type Signer struct {
-	alg    model.Algorithm
+	alg    jwa.Algorithm
 	secret common.SecretKey
 	hasher hash.Hash
 }
 
 type Validator struct {
-	alg    model.Algorithm
+	alg    jwa.Algorithm
 	secret common.SecretKey
 	hasher hash.Hash
 }
@@ -56,7 +57,7 @@ func NewSigner(secretKey *[]byte) (*Signer, error) {
 	}, secret)
 
 	return &Signer{
-		alg:    model.HS256,
+		alg:    jwa.HS256,
 		secret: secret,
 		hasher: h,
 	}, nil
@@ -74,13 +75,13 @@ func NewValidator(publicKey crypto.PublicKey) (*Validator, error) {
 	}, secret)
 
 	return &Validator{
-		alg:    model.HS256,
+		alg:    jwa.HS256,
 		secret: secret,
 		hasher: h,
 	}, nil
 }
 
-func (signer *Signer) Alg() model.Algorithm {
+func (signer *Signer) Alg() jwa.Algorithm {
 	return signer.alg
 }
 

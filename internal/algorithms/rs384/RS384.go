@@ -8,17 +8,17 @@ import (
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
 	"github.com/MichaelFraser99/go-jose/joseerror"
-	"github.com/MichaelFraser99/go-jose/model"
+	"github.com/MichaelFraser99/go-jose/jwa"
 	"io"
 )
 
 type Signer struct {
-	alg        model.Algorithm
+	alg        jwa.Algorithm
 	privateKey *rsa.PrivateKey
 }
 
 type Validator struct {
-	alg       model.Algorithm
+	alg       jwa.Algorithm
 	publicKey *rsa.PublicKey
 }
 
@@ -31,7 +31,7 @@ func NewSigner(size int) (*Signer, error) {
 		return nil, fmt.Errorf("%wfailed to generate key: %s", joseerror.SigningError, err.Error())
 	}
 	return &Signer{
-		alg:        model.RS384,
+		alg:        jwa.RS384,
 		privateKey: pk,
 	}, nil
 }
@@ -42,7 +42,7 @@ func NewSignerFromPrivateKey(privateKey crypto.PrivateKey) (*Signer, error) {
 		return nil, fmt.Errorf("%winvalid key provided - should be instance of `*rsa.Privatekey`", joseerror.InvalidPrivateKey)
 	}
 	return &Signer{
-		alg:        model.RS384,
+		alg:        jwa.RS384,
 		privateKey: rsaPrivateKey,
 	}, nil
 }
@@ -53,7 +53,7 @@ func NewValidator(publicKey crypto.PublicKey) (*Validator, error) {
 		return nil, fmt.Errorf("%winvalid key provided - should be instance of `*rsa.PublicKey`", joseerror.InvalidPublicKey)
 	}
 	return &Validator{
-		alg:       model.RS384,
+		alg:       jwa.RS384,
 		publicKey: rsaPublicKey,
 	}, nil
 }
@@ -66,7 +66,7 @@ func NewValidatorFromJwk(jwk map[string]any) (*Validator, error) {
 	return NewValidator(publicKey)
 }
 
-func (signer *Signer) Alg() model.Algorithm {
+func (signer *Signer) Alg() jwa.Algorithm {
 	return signer.alg
 }
 

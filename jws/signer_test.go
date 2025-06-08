@@ -1,6 +1,7 @@
 package jws
 
 import (
+	"github.com/MichaelFraser99/go-jose/jwa"
 	"github.com/MichaelFraser99/go-jose/model"
 	"testing"
 )
@@ -8,24 +9,24 @@ import (
 func TestGetSigner(t *testing.T) {
 	secretKey := []byte("a super secret key")
 	tests := []struct {
-		algorithm model.Algorithm
+		algorithm jwa.Algorithm
 		opts      *model.Opts
 		verify    func(t *testing.T, signer model.Signer, err error)
 	}{
 		{
-			algorithm: model.RS256,
+			algorithm: jwa.RS256,
 			opts:      nil,
 			verify: func(t *testing.T, signer model.Signer, err error) {
 				if err != nil {
 					t.Fatalf("no error expected: %s", err.Error())
 				}
-				if signer.Alg() != model.RS256 {
+				if signer.Alg() != jwa.RS256 {
 					t.Errorf("wrong algorithm returned: %s", signer.Alg())
 				}
 			},
 		},
 		{
-			algorithm: model.RS256,
+			algorithm: jwa.RS256,
 			opts: &model.Opts{
 				BitSize: 2048,
 			},
@@ -33,13 +34,13 @@ func TestGetSigner(t *testing.T) {
 				if err != nil {
 					t.Fatalf("no error expected: %s", err.Error())
 				}
-				if signer.Alg() != model.RS256 {
+				if signer.Alg() != jwa.RS256 {
 					t.Errorf("wrong algorithm returned: %s", signer.Alg())
 				}
 			},
 		},
 		{
-			algorithm: model.RS256,
+			algorithm: jwa.RS256,
 			opts: &model.Opts{
 				BitSize: 1024,
 			},
@@ -53,19 +54,19 @@ func TestGetSigner(t *testing.T) {
 			},
 		},
 		{
-			algorithm: model.RS384,
+			algorithm: jwa.RS384,
 			opts:      nil,
 			verify: func(t *testing.T, signer model.Signer, err error) {
 				if err != nil {
 					t.Fatalf("no error expected: %s", err.Error())
 				}
-				if signer.Alg() != model.RS384 {
+				if signer.Alg() != jwa.RS384 {
 					t.Errorf("wrong algorithm returned: %s", signer.Alg())
 				}
 			},
 		},
 		{
-			algorithm: model.RS384,
+			algorithm: jwa.RS384,
 			opts: &model.Opts{
 				BitSize: 2048,
 			},
@@ -73,13 +74,13 @@ func TestGetSigner(t *testing.T) {
 				if err != nil {
 					t.Fatalf("no error expected: %s", err.Error())
 				}
-				if signer.Alg() != model.RS384 {
+				if signer.Alg() != jwa.RS384 {
 					t.Errorf("wrong algorithm returned: %s", signer.Alg())
 				}
 			},
 		},
 		{
-			algorithm: model.RS384,
+			algorithm: jwa.RS384,
 			opts: &model.Opts{
 				BitSize: 1024,
 			},
@@ -93,19 +94,19 @@ func TestGetSigner(t *testing.T) {
 			},
 		},
 		{
-			algorithm: model.RS512,
+			algorithm: jwa.RS512,
 			opts:      nil,
 			verify: func(t *testing.T, signer model.Signer, err error) {
 				if err != nil {
 					t.Fatalf("no error expected: %s", err.Error())
 				}
-				if signer.Alg() != model.RS512 {
+				if signer.Alg() != jwa.RS512 {
 					t.Errorf("wrong algorithm returned: %s", signer.Alg())
 				}
 			},
 		},
 		{
-			algorithm: model.RS512,
+			algorithm: jwa.RS512,
 			opts: &model.Opts{
 				BitSize: 2048,
 			},
@@ -113,13 +114,13 @@ func TestGetSigner(t *testing.T) {
 				if err != nil {
 					t.Fatalf("no error expected: %s", err.Error())
 				}
-				if signer.Alg() != model.RS512 {
+				if signer.Alg() != jwa.RS512 {
 					t.Errorf("wrong algorithm returned: %s", signer.Alg())
 				}
 			},
 		},
 		{
-			algorithm: model.RS512,
+			algorithm: jwa.RS512,
 			opts: &model.Opts{
 				BitSize: 1024,
 			},
@@ -133,19 +134,19 @@ func TestGetSigner(t *testing.T) {
 			},
 		},
 		{
-			algorithm: model.PS256,
+			algorithm: jwa.PS256,
 			opts:      nil,
 			verify: func(t *testing.T, signer model.Signer, err error) {
 				if err != nil {
 					t.Fatalf("no error expected: %s", err.Error())
 				}
-				if signer.Alg() != model.PS256 {
+				if signer.Alg() != jwa.PS256 {
 					t.Errorf("wrong algorithm returned: %s", signer.Alg())
 				}
 			},
 		},
 		{
-			algorithm: model.PS256,
+			algorithm: jwa.PS256,
 			opts: &model.Opts{
 				BitSize: 2048,
 			},
@@ -153,13 +154,13 @@ func TestGetSigner(t *testing.T) {
 				if err != nil {
 					t.Fatalf("no error expected: %s", err.Error())
 				}
-				if signer.Alg() != model.PS256 {
+				if signer.Alg() != jwa.PS256 {
 					t.Errorf("wrong algorithm returned: %s", signer.Alg())
 				}
 			},
 		},
 		{
-			algorithm: model.PS256,
+			algorithm: jwa.PS256,
 			opts: &model.Opts{
 				BitSize: 1024,
 			},
@@ -173,19 +174,19 @@ func TestGetSigner(t *testing.T) {
 			},
 		},
 		{
-			algorithm: model.PS384,
+			algorithm: jwa.PS384,
 			opts:      nil,
 			verify: func(t *testing.T, signer model.Signer, err error) {
 				if err != nil {
 					t.Fatalf("no error expected: %s", err.Error())
 				}
-				if signer.Alg() != model.PS384 {
+				if signer.Alg() != jwa.PS384 {
 					t.Errorf("wrong algorithm returned: %s", signer.Alg())
 				}
 			},
 		},
 		{
-			algorithm: model.PS384,
+			algorithm: jwa.PS384,
 			opts: &model.Opts{
 				BitSize: 2048,
 			},
@@ -193,13 +194,13 @@ func TestGetSigner(t *testing.T) {
 				if err != nil {
 					t.Fatalf("no error expected: %s", err.Error())
 				}
-				if signer.Alg() != model.PS384 {
+				if signer.Alg() != jwa.PS384 {
 					t.Errorf("wrong algorithm returned: %s", signer.Alg())
 				}
 			},
 		},
 		{
-			algorithm: model.PS384,
+			algorithm: jwa.PS384,
 			opts: &model.Opts{
 				BitSize: 1024,
 			},
@@ -213,19 +214,19 @@ func TestGetSigner(t *testing.T) {
 			},
 		},
 		{
-			algorithm: model.PS512,
+			algorithm: jwa.PS512,
 			opts:      nil,
 			verify: func(t *testing.T, signer model.Signer, err error) {
 				if err != nil {
 					t.Fatalf("no error expected: %s", err.Error())
 				}
-				if signer.Alg() != model.PS512 {
+				if signer.Alg() != jwa.PS512 {
 					t.Errorf("wrong algorithm returned: %s", signer.Alg())
 				}
 			},
 		},
 		{
-			algorithm: model.PS512,
+			algorithm: jwa.PS512,
 			opts: &model.Opts{
 				BitSize: 2048,
 			},
@@ -233,13 +234,13 @@ func TestGetSigner(t *testing.T) {
 				if err != nil {
 					t.Fatalf("no error expected: %s", err.Error())
 				}
-				if signer.Alg() != model.PS512 {
+				if signer.Alg() != jwa.PS512 {
 					t.Errorf("wrong algorithm returned: %s", signer.Alg())
 				}
 			},
 		},
 		{
-			algorithm: model.PS512,
+			algorithm: jwa.PS512,
 			opts: &model.Opts{
 				BitSize: 1024,
 			},
@@ -253,19 +254,19 @@ func TestGetSigner(t *testing.T) {
 			},
 		},
 		{
-			algorithm: model.ES256,
+			algorithm: jwa.ES256,
 			opts:      nil,
 			verify: func(t *testing.T, signer model.Signer, err error) {
 				if err != nil {
 					t.Fatalf("no error expected: %s", err.Error())
 				}
-				if signer.Alg() != model.ES256 {
+				if signer.Alg() != jwa.ES256 {
 					t.Errorf("wrong algorithm returned: %s", signer.Alg())
 				}
 			},
 		},
 		{
-			algorithm: model.ES256,
+			algorithm: jwa.ES256,
 			opts: &model.Opts{
 				BitSize: 2048,
 			},
@@ -273,13 +274,13 @@ func TestGetSigner(t *testing.T) {
 				if err != nil {
 					t.Fatalf("no error expected: %s", err.Error())
 				}
-				if signer.Alg() != model.ES256 {
+				if signer.Alg() != jwa.ES256 {
 					t.Errorf("wrong algorithm returned: %s", signer.Alg())
 				}
 			},
 		},
 		{
-			algorithm: model.ES256,
+			algorithm: jwa.ES256,
 			opts: &model.Opts{
 				BitSize: 1024,
 			},
@@ -287,25 +288,25 @@ func TestGetSigner(t *testing.T) {
 				if err != nil {
 					t.Fatalf("no error expected: %s", err.Error())
 				}
-				if signer.Alg() != model.ES256 {
+				if signer.Alg() != jwa.ES256 {
 					t.Errorf("wrong algorithm returned: %s", signer.Alg())
 				}
 			},
 		},
 		{
-			algorithm: model.ES384,
+			algorithm: jwa.ES384,
 			opts:      nil,
 			verify: func(t *testing.T, signer model.Signer, err error) {
 				if err != nil {
 					t.Fatalf("no error expected: %s", err.Error())
 				}
-				if signer.Alg() != model.ES384 {
+				if signer.Alg() != jwa.ES384 {
 					t.Errorf("wrong algorithm returned: %s", signer.Alg())
 				}
 			},
 		},
 		{
-			algorithm: model.ES384,
+			algorithm: jwa.ES384,
 			opts: &model.Opts{
 				BitSize: 2048,
 			},
@@ -313,13 +314,13 @@ func TestGetSigner(t *testing.T) {
 				if err != nil {
 					t.Fatalf("no error expected: %s", err.Error())
 				}
-				if signer.Alg() != model.ES384 {
+				if signer.Alg() != jwa.ES384 {
 					t.Errorf("wrong algorithm returned: %s", signer.Alg())
 				}
 			},
 		},
 		{
-			algorithm: model.ES384,
+			algorithm: jwa.ES384,
 			opts: &model.Opts{
 				BitSize: 1024,
 			},
@@ -327,25 +328,25 @@ func TestGetSigner(t *testing.T) {
 				if err != nil {
 					t.Fatalf("no error expected: %s", err.Error())
 				}
-				if signer.Alg() != model.ES384 {
+				if signer.Alg() != jwa.ES384 {
 					t.Errorf("wrong algorithm returned: %s", signer.Alg())
 				}
 			},
 		},
 		{
-			algorithm: model.ES512,
+			algorithm: jwa.ES512,
 			opts:      nil,
 			verify: func(t *testing.T, signer model.Signer, err error) {
 				if err != nil {
 					t.Fatalf("no error expected: %s", err.Error())
 				}
-				if signer.Alg() != model.ES512 {
+				if signer.Alg() != jwa.ES512 {
 					t.Errorf("wrong algorithm returned: %s", signer.Alg())
 				}
 			},
 		},
 		{
-			algorithm: model.ES512,
+			algorithm: jwa.ES512,
 			opts: &model.Opts{
 				BitSize: 2048,
 			},
@@ -353,13 +354,13 @@ func TestGetSigner(t *testing.T) {
 				if err != nil {
 					t.Fatalf("no error expected: %s", err.Error())
 				}
-				if signer.Alg() != model.ES512 {
+				if signer.Alg() != jwa.ES512 {
 					t.Errorf("wrong algorithm returned: %s", signer.Alg())
 				}
 			},
 		},
 		{
-			algorithm: model.ES512,
+			algorithm: jwa.ES512,
 			opts: &model.Opts{
 				BitSize: 1024,
 			},
@@ -367,13 +368,13 @@ func TestGetSigner(t *testing.T) {
 				if err != nil {
 					t.Fatalf("no error expected: %s", err.Error())
 				}
-				if signer.Alg() != model.ES512 {
+				if signer.Alg() != jwa.ES512 {
 					t.Errorf("wrong algorithm returned: %s", signer.Alg())
 				}
 			},
 		},
 		{
-			algorithm: model.HS256,
+			algorithm: jwa.HS256,
 			opts:      nil,
 			verify: func(t *testing.T, signer model.Signer, err error) {
 				if err == nil {
@@ -385,7 +386,7 @@ func TestGetSigner(t *testing.T) {
 			},
 		},
 		{
-			algorithm: model.HS256,
+			algorithm: jwa.HS256,
 			opts: &model.Opts{
 				SecretKey: &secretKey,
 			},
@@ -393,13 +394,13 @@ func TestGetSigner(t *testing.T) {
 				if err != nil {
 					t.Fatalf("no error expected: %s", err.Error())
 				}
-				if signer.Alg() != model.HS256 {
+				if signer.Alg() != jwa.HS256 {
 					t.Errorf("wrong algorithm returned: %s", signer.Alg())
 				}
 			},
 		},
 		{
-			algorithm: model.HS256,
+			algorithm: jwa.HS256,
 			opts:      &model.Opts{},
 			verify: func(t *testing.T, signer model.Signer, err error) {
 				if err == nil {
@@ -411,7 +412,7 @@ func TestGetSigner(t *testing.T) {
 			},
 		},
 		{
-			algorithm: model.HS384,
+			algorithm: jwa.HS384,
 			opts:      nil,
 			verify: func(t *testing.T, signer model.Signer, err error) {
 				if err == nil {
@@ -423,7 +424,7 @@ func TestGetSigner(t *testing.T) {
 			},
 		},
 		{
-			algorithm: model.HS384,
+			algorithm: jwa.HS384,
 			opts: &model.Opts{
 				SecretKey: &secretKey,
 			},
@@ -431,13 +432,13 @@ func TestGetSigner(t *testing.T) {
 				if err != nil {
 					t.Fatalf("no error expected: %s", err.Error())
 				}
-				if signer.Alg() != model.HS384 {
+				if signer.Alg() != jwa.HS384 {
 					t.Errorf("wrong algorithm returned: %s", signer.Alg())
 				}
 			},
 		},
 		{
-			algorithm: model.HS384,
+			algorithm: jwa.HS384,
 			opts:      &model.Opts{},
 			verify: func(t *testing.T, signer model.Signer, err error) {
 				if err == nil {
@@ -449,7 +450,7 @@ func TestGetSigner(t *testing.T) {
 			},
 		},
 		{
-			algorithm: model.HS512,
+			algorithm: jwa.HS512,
 			opts:      nil,
 			verify: func(t *testing.T, signer model.Signer, err error) {
 				if err == nil {
@@ -461,7 +462,7 @@ func TestGetSigner(t *testing.T) {
 			},
 		},
 		{
-			algorithm: model.HS512,
+			algorithm: jwa.HS512,
 			opts: &model.Opts{
 				SecretKey: &secretKey,
 			},
@@ -469,13 +470,13 @@ func TestGetSigner(t *testing.T) {
 				if err != nil {
 					t.Fatalf("no error expected: %s", err.Error())
 				}
-				if signer.Alg() != model.HS512 {
+				if signer.Alg() != jwa.HS512 {
 					t.Errorf("wrong algorithm returned: %s", signer.Alg())
 				}
 			},
 		},
 		{
-			algorithm: model.HS512,
+			algorithm: jwa.HS512,
 			opts:      &model.Opts{},
 			verify: func(t *testing.T, signer model.Signer, err error) {
 				if err == nil {

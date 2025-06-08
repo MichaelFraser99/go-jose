@@ -6,6 +6,7 @@ var (
 	InvalidPublicKey     = errors.New("")
 	InvalidPrivateKey    = errors.New("")
 	InvalidSignature     = errors.New("")
+	DecryptionFailed     = errors.New("")
 	UnsupportedAlgorithm = errors.New("")
 	SigningError         = errors.New("")
 	MalformedClaim       = errors.New("")

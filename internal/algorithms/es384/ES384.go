@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
 	"github.com/MichaelFraser99/go-jose/joseerror"
-	"github.com/MichaelFraser99/go-jose/model"
+	"github.com/MichaelFraser99/go-jose/jwa"
 	"io"
 )
 
@@ -17,7 +17,7 @@ const keySize = 96
 const curveName = "P-384"
 
 type Signer struct {
-	alg        model.Algorithm
+	alg        jwa.Algorithm
 	privateKey *ecdsa.PrivateKey
 }
 
@@ -32,7 +32,7 @@ func NewSigner() (*Signer, error) {
 		return nil, fmt.Errorf("%wfailed to generate key: %s", joseerror.SigningError, err.Error())
 	}
 	return &Signer{
-		alg:        model.ES384,
+		alg:        jwa.ES384,
 		privateKey: pk,
 	}, nil
 }
@@ -46,7 +46,7 @@ func NewSignerFromPrivateKey(privateKey crypto.PrivateKey) (*Signer, error) {
 		return nil, fmt.Errorf("%winvalid key provided - curve should be %s, was %s", joseerror.InvalidPrivateKey, curveName, ecdsaPrivateKey.Curve.Params().Name)
 	}
 	return &Signer{
-		alg:        model.ES384,
+		alg:        jwa.ES384,
 		privateKey: ecdsaPrivateKey,
 	}, nil
 }
@@ -72,7 +72,7 @@ func NewValidatorFromJwk(jwk map[string]any) (*Validator, error) {
 	return NewValidator(publicKey)
 }
 
-func (signer *Signer) Alg() model.Algorithm {
+func (signer *Signer) Alg() jwa.Algorithm {
 	return signer.alg
 }
 

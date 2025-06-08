@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/MichaelFraser99/go-jose/jwa"
 	"github.com/MichaelFraser99/go-jose/jws"
 	"github.com/MichaelFraser99/go-jose/model"
 	"slices"
@@ -14,7 +15,7 @@ import (
 )
 
 type Opts struct {
-	Algorithm model.Algorithm
+	Algorithm jwa.Algorithm
 }
 
 //todo: jwe support

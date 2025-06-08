@@ -23,7 +23,7 @@ func ValidateHeader(header map[string]any, client *http.Client, mode model.Mode)
 	}
 
 	if mode == model.JWE {
-		_, err := jsonutils.RetrieveClaim(header, "enc", jsonutils.ValidateAlg)
+		_, err = jsonutils.RetrieveClaim(header, "enc", jsonutils.ValidateAlg)
 		if err != nil {
 			return nil, err
 		} //todo: do something with value
