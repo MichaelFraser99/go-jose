@@ -7,9 +7,9 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"fmt"
-	e "github.com/MichaelFraser99/go-jose/error"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
-	"github.com/MichaelFraser99/go-jose/model"
+	"github.com/MichaelFraser99/go-jose/joseerror"
+	"github.com/MichaelFraser99/go-jose/jwa"
 	"io"
 )
 
@@ -17,7 +17,7 @@ const keySize = 64
 const curveName = "P-256"
 
 type Signer struct {
-	alg        model.Algorithm
+	alg        jwa.Algorithm
 	privateKey *ecdsa.PrivateKey
 }
 
@@ -29,10 +29,10 @@ func NewSigner() (*Signer, error) {
 	curve := elliptic.P256()
 	pk, err := ecdsa.GenerateKey(curve, rand.Reader)
 	if err != nil {
-		return nil, fmt.Errorf("%wfailed to generate key: %s", e.SigningError, err.Error())
+		return nil, fmt.Errorf("%wfailed to generate key: %s", joseerror.ErrSigningError, err.Error())
 	}
 	return &Signer{
-		alg:        model.ES256,
+		alg:        jwa.ES256,
 		privateKey: pk,
 	}, nil
 }
@@ -40,13 +40,13 @@ func NewSigner() (*Signer, error) {
 func NewSignerFromPrivateKey(privateKey crypto.PrivateKey) (*Signer, error) {
 	ecdsaPrivateKey, ok := privateKey.(*ecdsa.PrivateKey)
 	if !ok {
-		return nil, fmt.Errorf("%winvalid key provided - should be instance of `*ecdsa.Privatekey`", e.InvalidPrivateKey)
+		return nil, fmt.Errorf("%winvalid key provided - should be instance of `*ecdsa.Privatekey`", joseerror.ErrInvalidPrivateKey)
 	}
 	if ecdsaPrivateKey.Curve.Params().Name != curveName {
-		return nil, fmt.Errorf("%winvalid key provided - curve should be %s, was %s", e.InvalidPrivateKey, curveName, ecdsaPrivateKey.Curve.Params().Name)
+		return nil, fmt.Errorf("%winvalid key provided - curve should be %s, was %s", joseerror.ErrInvalidPrivateKey, curveName, ecdsaPrivateKey.Curve.Params().Name)
 	}
 	return &Signer{
-		alg:        model.ES256,
+		alg:        jwa.ES256,
 		privateKey: ecdsaPrivateKey,
 	}, nil
 }
@@ -54,22 +54,25 @@ func NewSignerFromPrivateKey(privateKey crypto.PrivateKey) (*Signer, error) {
 func NewValidator(publicKey crypto.PublicKey) (*Validator, error) {
 	ecdsaPublicKey, ok := publicKey.(*ecdsa.PublicKey)
 	if !ok {
-		return nil, fmt.Errorf("%winvalid key provided - should be instance of `*ecdsa.PublicKey`", e.InvalidPublicKey)
+		return nil, fmt.Errorf("%winvalid key provided - should be instance of `*ecdsa.PublicKey`", joseerror.ErrInvalidPublicKey)
 	}
 	return &Validator{
 		publicKey: ecdsaPublicKey,
 	}, nil
 }
 
-func NewValidatorFromJwk(publicKeyJson []byte) (*Validator, error) {
-	publicKey, err := common.NewECDSAPublicKeyFromJson(publicKeyJson, elliptic.P256())
+func NewValidatorFromJwk(jwk map[string]any) (*Validator, error) {
+	publicKey, err := common.ECDSAPublicKeyFromJwk(jwk)
 	if err != nil {
 		return nil, err
+	}
+	if publicKey.Curve.Params().Name != curveName {
+		return nil, fmt.Errorf("provided jwk has invalid curve for the ES256 algorithm: %s", publicKey.Curve.Params().Name)
 	}
 	return NewValidator(publicKey)
 }
 
-func (signer *Signer) Alg() model.Algorithm {
+func (signer *Signer) Alg() jwa.Algorithm {
 	return signer.alg
 }
 
@@ -79,7 +82,7 @@ func (signer *Signer) Public() crypto.PublicKey {
 
 func (signer *Signer) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error) {
 	if opts != nil && opts.HashFunc() > 0 && opts.HashFunc() != crypto.SHA256 {
-		return nil, fmt.Errorf("%winvalid hash function provided for specified signer", e.SigningError)
+		return nil, fmt.Errorf("%winvalid hash function provided for specified signer", joseerror.ErrSigningError)
 	}
 
 	if opts == nil || opts.HashFunc() == 0 {
@@ -96,11 +99,12 @@ func (signer *Signer) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts
 }
 
 func (validator *Validator) ValidateSignature(digest, signature []byte) (bool, error) {
+	//todo: I don't think we should eagerly hash the digest iun any validator - rather, return control to the end user
 	bodyHash := sha256.Sum256(digest)
 
 	r, s, err := common.ExtractRSFromSignature(signature, keySize)
 	if err != nil {
-		return false, fmt.Errorf("%winvalid signature", e.InvalidSignature)
+		return false, fmt.Errorf("%winvalid signature", joseerror.ErrInvalidSignature)
 	}
 
 	return ecdsa.Verify(validator.publicKey, bodyHash[:], r, s), nil

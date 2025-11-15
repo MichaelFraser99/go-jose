@@ -60,12 +60,12 @@ GetAlgorithm takes in a string and returns a pointer to the relevant algorithm t
 ## Signers
 To create a Signer object use the `GetSigner` method. This takes in an algorithm and an optional `Opts` object (defines a bit size used for RSA keys) and returns a `crypto.Signer` implementation complete with generated key pair. The below example shows how to generate a signer for ES256:
 ```go
-signer, err := jose.GetSigner(model.ES256, nil)
+signer, err := jose.GetSigner(jwa.ES256, nil)
 ```
 
 The `GetSignerFromPrivateKey` method can also be used. This takes in an algorithm and a pointer to a `crypto.PrivateKey` implementation. The below example shows how to generate a signer for ES256:
 ```go
-signer, err := jose.GetSignerFromPrivateKey(model.ES256, privateKey)
+signer, err := jose.GetSignerFromPrivateKey(jwa.ES256, privateKey)
 ```
 
 ## SignerOpts
@@ -83,30 +83,30 @@ In addition to the packaged signers, a validator type is also included for each 
 The `GetValidator` method takes in a crypto.PublicKey implementation and returns a validator instance. The below example shows how to generate a validator for ES256:
 ```go
 // Construct a validator from a public key
-validator, err := jose.GetValidator(model.ES256, publicKey)
+validator, err := jose.GetValidator(jwa.ES256, publicKey)
 
 // Construct a validator from a signer instance
-signer, err := jose.GetSigner(model.ES256, nil)
+signer, err := jose.GetSigner(jwa.ES256, nil)
 validator, err := jose.GetValidator(signer.Alg(), signer.Public())
 ```
 
 The `GetValidatorFromJwk` method takes in the bytes of a jwk format public key and returns a validator instance. The below example shows how to generate a validator for ES256:
 ```go
 // Construct a validator from a jwk public key
-validator, err := jose.GetValidatorFromJwk(model.ES256, publicKeyBytes)
+validator, err := jose.GetValidatorFromJwk(jwa.ES256, publicKeyBytes)
 ```
 
 The validator object has a method `ValidateSignature` which takes in the bytes of the digest and signature and returns a boolean indicating whether the signature is valid. The below example shows how to validate a signature:
 ```go
 // Validate a signature
-validator, err := jose.GetValidator(model.ES256, publicKey)
+validator, err := jose.GetValidator(jwa.ES256, publicKey)
 
 valid, err := validator.ValidateSignature(digest, signature)
 ```
 
 Finally, validators expose their PublicKey with the `Public()` method
 ```go
-validator, err :- jose.GetValidator(model.ES256, publicKey)
+validator, err :- jose.GetValidator(jwa.ES256, publicKey)
 pk := validator.Public()
 ```
 
@@ -121,7 +121,7 @@ PublicJwk takes in a pointer to a public key and returns a `map[string]string` c
 jwkMap, err := PublicJwk(publicKey)
 
 // From a Signer
-signer, err := jose.GetSigner(model.ES256, nil)
+signer, err := jose.GetSigner(jwa.ES256, nil)
 publicKey := signer.Public
 jwkMap, err := PublicJwk(&publicKey)
 ```

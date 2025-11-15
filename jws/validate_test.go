@@ -3,7 +3,6 @@ package jws
 import (
 	"crypto"
 	"crypto/rand"
-	"encoding/json"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es256"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es384"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es512"
@@ -13,6 +12,7 @@ import (
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs256"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs384"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs512"
+	"github.com/MichaelFraser99/go-jose/jwa"
 	"github.com/MichaelFraser99/go-jose/jwk"
 	"github.com/MichaelFraser99/go-jose/model"
 	"testing"
@@ -24,12 +24,12 @@ const (
 
 func TestGetValidator(t *testing.T) {
 	tests := []struct {
-		algorithm model.Algorithm
+		algorithm jwa.Algorithm
 		publicKey func() (crypto.PublicKey, []byte)
 		verify    func(t *testing.T, validator model.Validator, signature []byte, err error)
 	}{
 		{
-			algorithm: model.ES256,
+			algorithm: jwa.ES256,
 			publicKey: func() (crypto.PublicKey, []byte) {
 				signer, _ := es256.NewSigner()
 				digest, _ := signer.Sign(rand.Reader, []byte(signedString), nil)
@@ -52,7 +52,7 @@ func TestGetValidator(t *testing.T) {
 			},
 		},
 		{
-			algorithm: model.ES384,
+			algorithm: jwa.ES384,
 			publicKey: func() (crypto.PublicKey, []byte) {
 				signer, _ := es384.NewSigner()
 				digest, _ := signer.Sign(rand.Reader, []byte(signedString), nil)
@@ -75,7 +75,7 @@ func TestGetValidator(t *testing.T) {
 			},
 		},
 		{
-			algorithm: model.ES512,
+			algorithm: jwa.ES512,
 			publicKey: func() (crypto.PublicKey, []byte) {
 				signer, _ := es512.NewSigner()
 				digest, _ := signer.Sign(rand.Reader, []byte(signedString), nil)
@@ -98,7 +98,7 @@ func TestGetValidator(t *testing.T) {
 			},
 		},
 		{
-			algorithm: model.RS256,
+			algorithm: jwa.RS256,
 			publicKey: func() (crypto.PublicKey, []byte) {
 				signer, _ := rs256.NewSigner(2048)
 				digest, _ := signer.Sign(rand.Reader, []byte(signedString), nil)
@@ -121,7 +121,7 @@ func TestGetValidator(t *testing.T) {
 			},
 		},
 		{
-			algorithm: model.RS384,
+			algorithm: jwa.RS384,
 			publicKey: func() (crypto.PublicKey, []byte) {
 				signer, _ := rs384.NewSigner(2048)
 				digest, _ := signer.Sign(rand.Reader, []byte(signedString), nil)
@@ -144,7 +144,7 @@ func TestGetValidator(t *testing.T) {
 			},
 		},
 		{
-			algorithm: model.RS512,
+			algorithm: jwa.RS512,
 			publicKey: func() (crypto.PublicKey, []byte) {
 				signer, _ := rs512.NewSigner(2048)
 				digest, _ := signer.Sign(rand.Reader, []byte(signedString), nil)
@@ -167,7 +167,7 @@ func TestGetValidator(t *testing.T) {
 			},
 		},
 		{
-			algorithm: model.PS256,
+			algorithm: jwa.PS256,
 			publicKey: func() (crypto.PublicKey, []byte) {
 				signer, _ := ps256.NewSigner(2048)
 				digest, _ := signer.Sign(rand.Reader, []byte(signedString), nil)
@@ -190,7 +190,7 @@ func TestGetValidator(t *testing.T) {
 			},
 		},
 		{
-			algorithm: model.PS384,
+			algorithm: jwa.PS384,
 			publicKey: func() (crypto.PublicKey, []byte) {
 				signer, _ := ps384.NewSigner(2048)
 				digest, _ := signer.Sign(rand.Reader, []byte(signedString), nil)
@@ -213,7 +213,7 @@ func TestGetValidator(t *testing.T) {
 			},
 		},
 		{
-			algorithm: model.PS512,
+			algorithm: jwa.PS512,
 			publicKey: func() (crypto.PublicKey, []byte) {
 				signer, _ := ps512.NewSigner(2048)
 				digest, _ := signer.Sign(rand.Reader, []byte(signedString), nil)
@@ -248,12 +248,12 @@ func TestGetValidator(t *testing.T) {
 
 func TestGetValidatorFromJwk(t *testing.T) {
 	tests := []struct {
-		algorithm model.Algorithm
+		algorithm jwa.Algorithm
 		jwk       func() (map[string]any, []byte)
 		verify    func(t *testing.T, validator model.Validator, signature []byte, err error)
 	}{
 		{
-			algorithm: model.ES256,
+			algorithm: jwa.ES256,
 			jwk: func() (map[string]any, []byte) {
 				signer, _ := es256.NewSigner()
 				key, _ := jwk.PublicJwk(signer.Public())
@@ -277,7 +277,7 @@ func TestGetValidatorFromJwk(t *testing.T) {
 			},
 		},
 		{
-			algorithm: model.ES384,
+			algorithm: jwa.ES384,
 			jwk: func() (map[string]any, []byte) {
 				signer, _ := es384.NewSigner()
 				key, _ := jwk.PublicJwk(signer.Public())
@@ -301,7 +301,7 @@ func TestGetValidatorFromJwk(t *testing.T) {
 			},
 		},
 		{
-			algorithm: model.ES512,
+			algorithm: jwa.ES512,
 			jwk: func() (map[string]any, []byte) {
 				signer, _ := es512.NewSigner()
 				key, _ := jwk.PublicJwk(signer.Public())
@@ -325,7 +325,7 @@ func TestGetValidatorFromJwk(t *testing.T) {
 			},
 		},
 		{
-			algorithm: model.RS256,
+			algorithm: jwa.RS256,
 			jwk: func() (map[string]any, []byte) {
 				signer, _ := rs256.NewSigner(2048)
 				key, _ := jwk.PublicJwk(signer.Public())
@@ -349,7 +349,7 @@ func TestGetValidatorFromJwk(t *testing.T) {
 			},
 		},
 		{
-			algorithm: model.RS384,
+			algorithm: jwa.RS384,
 			jwk: func() (map[string]any, []byte) {
 				signer, _ := rs384.NewSigner(2048)
 				key, _ := jwk.PublicJwk(signer.Public())
@@ -373,7 +373,7 @@ func TestGetValidatorFromJwk(t *testing.T) {
 			},
 		},
 		{
-			algorithm: model.RS512,
+			algorithm: jwa.RS512,
 			jwk: func() (map[string]any, []byte) {
 				signer, _ := rs512.NewSigner(2048)
 				key, _ := jwk.PublicJwk(signer.Public())
@@ -397,7 +397,7 @@ func TestGetValidatorFromJwk(t *testing.T) {
 			},
 		},
 		{
-			algorithm: model.PS256,
+			algorithm: jwa.PS256,
 			jwk: func() (map[string]any, []byte) {
 				signer, _ := ps256.NewSigner(2048)
 				key, _ := jwk.PublicJwk(signer.Public())
@@ -421,7 +421,7 @@ func TestGetValidatorFromJwk(t *testing.T) {
 			},
 		},
 		{
-			algorithm: model.PS384,
+			algorithm: jwa.PS384,
 			jwk: func() (map[string]any, []byte) {
 				signer, _ := ps384.NewSigner(2048)
 				key, _ := jwk.PublicJwk(signer.Public())
@@ -445,7 +445,7 @@ func TestGetValidatorFromJwk(t *testing.T) {
 			},
 		},
 		{
-			algorithm: model.PS512,
+			algorithm: jwa.PS512,
 			jwk: func() (map[string]any, []byte) {
 				signer, _ := ps512.NewSigner(2048)
 				key, _ := jwk.PublicJwk(signer.Public())
@@ -473,11 +473,7 @@ func TestGetValidatorFromJwk(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.algorithm.String(), func(t *testing.T) {
 			jwkMap, sig := tt.jwk()
-			jwkBytes, err := json.Marshal(jwkMap)
-			if err != nil {
-				t.Fatalf("no error should be thrown: %s", err.Error())
-			}
-			validator, err := GetValidatorFromJwk(tt.algorithm, jwkBytes)
+			validator, err := GetValidatorFromJwk(tt.algorithm, jwkMap)
 			tt.verify(t, validator, sig, err)
 		})
 	}

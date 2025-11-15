@@ -7,13 +7,14 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"github.com/MichaelFraser99/go-jose/jwa"
 	"github.com/MichaelFraser99/go-jose/jws"
 	"github.com/MichaelFraser99/go-jose/model"
 	"testing"
 )
 
 func Test_Sign(t *testing.T) {
-	signer, err := jws.GetSigner(model.ES256, nil)
+	signer, err := jws.GetSigner(jwa.ES256, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +42,7 @@ func Test_Sign(t *testing.T) {
 }
 
 func Test_SignPreHashed(t *testing.T) {
-	signer, err := jws.GetSigner(model.ES256, nil)
+	signer, err := jws.GetSigner(jwa.ES256, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,19 +115,19 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 
 	tests := []struct {
 		name      string
-		algorithm model.Algorithm
+		algorithm jwa.Algorithm
 		key       crypto.PrivateKey
 		validate  func(t *testing.T, signer model.Signer, err error)
 	}{
 		{
 			"RS256 valid pk",
-			model.RS256,
+			jwa.RS256,
 			rsaPk,
 			func(t *testing.T, signer model.Signer, err error) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if signer.Alg() != model.RS256 {
+				if signer.Alg() != jwa.RS256 {
 					t.Errorf("returned signer should be of algorithm RS256 and is: %s", signer.Alg().String())
 				}
 				if signer.Public() == nil {
@@ -136,13 +137,13 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 		},
 		{
 			"RS384 valid pk",
-			model.RS384,
+			jwa.RS384,
 			rsaPk,
 			func(t *testing.T, signer model.Signer, err error) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if signer.Alg() != model.RS384 {
+				if signer.Alg() != jwa.RS384 {
 					t.Errorf("returned signer should be of algorithm RS384 and is: %s", signer.Alg().String())
 				}
 				if signer.Public() == nil {
@@ -152,13 +153,13 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 		},
 		{
 			"RS512 valid pk",
-			model.RS512,
+			jwa.RS512,
 			rsaPk,
 			func(t *testing.T, signer model.Signer, err error) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if signer.Alg() != model.RS512 {
+				if signer.Alg() != jwa.RS512 {
 					t.Errorf("returned signer should be of algorithm RS512 and is: %s", signer.Alg().String())
 				}
 				if signer.Public() == nil {
@@ -168,13 +169,13 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 		},
 		{
 			"PS256 valid pk",
-			model.PS256,
+			jwa.PS256,
 			rsaPk,
 			func(t *testing.T, signer model.Signer, err error) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if signer.Alg() != model.PS256 {
+				if signer.Alg() != jwa.PS256 {
 					t.Errorf("returned signer should be of algorithm PS256 and is: %s", signer.Alg().String())
 				}
 				if signer.Public() == nil {
@@ -184,13 +185,13 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 		},
 		{
 			"PS384 valid pk",
-			model.PS384,
+			jwa.PS384,
 			rsaPk,
 			func(t *testing.T, signer model.Signer, err error) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if signer.Alg() != model.PS384 {
+				if signer.Alg() != jwa.PS384 {
 					t.Errorf("returned signer should be of algorithm PS384 and is: %s", signer.Alg().String())
 				}
 				if signer.Public() == nil {
@@ -200,13 +201,13 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 		},
 		{
 			"PS512 valid pk",
-			model.PS512,
+			jwa.PS512,
 			rsaPk,
 			func(t *testing.T, signer model.Signer, err error) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if signer.Alg() != model.PS512 {
+				if signer.Alg() != jwa.PS512 {
 					t.Errorf("returned signer should be of algorithm PS512 and is: %s", signer.Alg().String())
 				}
 				if signer.Public() == nil {
@@ -216,13 +217,13 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 		},
 		{
 			"ES256 valid pk",
-			model.ES256,
+			jwa.ES256,
 			ec256Pk,
 			func(t *testing.T, signer model.Signer, err error) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if signer.Alg() != model.ES256 {
+				if signer.Alg() != jwa.ES256 {
 					t.Errorf("returned signer should be of algorithm ES256 and is: %s", signer.Alg().String())
 				}
 				if signer.Public() == nil {
@@ -232,13 +233,13 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 		},
 		{
 			"ES384 valid pk",
-			model.ES384,
+			jwa.ES384,
 			ec384Pk,
 			func(t *testing.T, signer model.Signer, err error) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if signer.Alg() != model.ES384 {
+				if signer.Alg() != jwa.ES384 {
 					t.Errorf("returned signer should be of algorithm ES384 and is: %s", signer.Alg().String())
 				}
 				if signer.Public() == nil {
@@ -248,13 +249,13 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 		},
 		{
 			"ES512 valid pk",
-			model.ES512,
+			jwa.ES512,
 			ec521Pk,
 			func(t *testing.T, signer model.Signer, err error) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if signer.Alg() != model.ES512 {
+				if signer.Alg() != jwa.ES512 {
 					t.Errorf("returned signer should be of algorithm ES512 and is: %s", signer.Alg().String())
 				}
 				if signer.Public() == nil {
@@ -264,7 +265,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 		},
 		{
 			"ES256 invalid pk",
-			model.ES256,
+			jwa.ES256,
 			rsaPk,
 			func(t *testing.T, signer model.Signer, err error) {
 				if err == nil {
@@ -277,7 +278,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 		},
 		{
 			"ES256 invalid pk",
-			model.ES256,
+			jwa.ES256,
 			ec521Pk,
 			func(t *testing.T, signer model.Signer, err error) {
 				if err == nil {
@@ -290,7 +291,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 		},
 		{
 			"ES384 invalid pk",
-			model.ES384,
+			jwa.ES384,
 			rsaPk,
 			func(t *testing.T, signer model.Signer, err error) {
 				if err == nil {
@@ -303,7 +304,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 		},
 		{
 			"ES384 invalid pk",
-			model.ES384,
+			jwa.ES384,
 			ec521Pk,
 			func(t *testing.T, signer model.Signer, err error) {
 				if err == nil {
@@ -316,7 +317,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 		},
 		{
 			"ES512 invalid pk",
-			model.ES512,
+			jwa.ES512,
 			rsaPk,
 			func(t *testing.T, signer model.Signer, err error) {
 				if err == nil {
@@ -329,7 +330,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 		},
 		{
 			"ES512 invalid pk",
-			model.ES512,
+			jwa.ES512,
 			ec256Pk,
 			func(t *testing.T, signer model.Signer, err error) {
 				if err == nil {
@@ -342,7 +343,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 		},
 		{
 			"RS256 invalid pk",
-			model.RS256,
+			jwa.RS256,
 			ec256Pk,
 			func(t *testing.T, signer model.Signer, err error) {
 				if err == nil {
@@ -355,7 +356,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 		},
 		{
 			"RS384 invalid pk",
-			model.RS384,
+			jwa.RS384,
 			ec256Pk,
 			func(t *testing.T, signer model.Signer, err error) {
 				if err == nil {
@@ -368,7 +369,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 		},
 		{
 			"RS512 invalid pk",
-			model.RS512,
+			jwa.RS512,
 			ec256Pk,
 			func(t *testing.T, signer model.Signer, err error) {
 				if err == nil {
@@ -381,7 +382,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 		},
 		{
 			"PS256 invalid pk",
-			model.PS256,
+			jwa.PS256,
 			ec256Pk,
 			func(t *testing.T, signer model.Signer, err error) {
 				if err == nil {
@@ -394,7 +395,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 		},
 		{
 			"PS384 invalid pk",
-			model.PS384,
+			jwa.PS384,
 			ec256Pk,
 			func(t *testing.T, signer model.Signer, err error) {
 				if err == nil {
@@ -407,7 +408,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 		},
 		{
 			"PS512 invalid pk",
-			model.PS512,
+			jwa.PS512,
 			ec256Pk,
 			func(t *testing.T, signer model.Signer, err error) {
 				if err == nil {
@@ -420,7 +421,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 		},
 		{
 			"HS256",
-			model.HS256,
+			jwa.HS256,
 			ec256Pk,
 			func(t *testing.T, signer model.Signer, err error) {
 				if err == nil {
@@ -433,7 +434,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 		},
 		{
 			"HS384",
-			model.HS384,
+			jwa.HS384,
 			ec256Pk,
 			func(t *testing.T, signer model.Signer, err error) {
 				if err == nil {
@@ -446,7 +447,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 		},
 		{
 			"HS512",
-			model.HS512,
+			jwa.HS512,
 			ec256Pk,
 			func(t *testing.T, signer model.Signer, err error) {
 				if err == nil {

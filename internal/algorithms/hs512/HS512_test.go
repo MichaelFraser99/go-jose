@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestES512_Sign(t *testing.T) {
+func TestHS512_Sign(t *testing.T) {
 	body := map[string]any{
 		"sub":  "1234567890",
 		"name": "John Doe",
@@ -51,14 +51,13 @@ func TestES512_Sign(t *testing.T) {
 	}
 
 	stringSignature := base64.RawURLEncoding.EncodeToString(signature)
-	t.Logf("%s.%s", digest, stringSignature)
 
 	if stringSignature != "xDtSUFJH9k4yIq80TMQ1-miAjnNN1skOJ1BzUMdw_8VRFn-AR8fFNjvPiXyleHSRw28BXnEupZxCxWUfWwIoqg" {
 		t.Errorf("unexpected signature produced: %s", stringSignature)
 	}
 }
 
-func TestES512_SignGeneratedSecret(t *testing.T) {
+func TestHS512_SignGeneratedSecret(t *testing.T) {
 	body := map[string]any{
 		"sub":  "1234567890",
 		"name": "John Doe",

@@ -6,18 +6,19 @@ import (
 	"crypto/rsa"
 	"crypto/sha512"
 	"fmt"
-	e "github.com/MichaelFraser99/go-jose/error"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
-	"github.com/MichaelFraser99/go-jose/model"
+	"github.com/MichaelFraser99/go-jose/joseerror"
+	"github.com/MichaelFraser99/go-jose/jwa"
 	"io"
 )
 
 type Signer struct {
-	alg        model.Algorithm
+	alg        jwa.Algorithm
 	privateKey *rsa.PrivateKey
 }
 
 type Validator struct {
+	alg       jwa.Algorithm
 	publicKey *rsa.PublicKey
 }
 
@@ -27,10 +28,10 @@ func NewSigner(size int) (*Signer, error) {
 	}
 	pk, err := rsa.GenerateKey(rand.Reader, size)
 	if err != nil {
-		return nil, fmt.Errorf("%wfailed to generate key: %s", e.SigningError, err.Error())
+		return nil, fmt.Errorf("%wfailed to generate key: %s", joseerror.ErrSigningError, err.Error())
 	}
 	return &Signer{
-		alg:        model.PS384,
+		alg:        jwa.PS384,
 		privateKey: pk,
 	}, nil
 }
@@ -38,10 +39,10 @@ func NewSigner(size int) (*Signer, error) {
 func NewSignerFromPrivateKey(privateKey crypto.PrivateKey) (*Signer, error) {
 	rsaPrivateKey, ok := privateKey.(*rsa.PrivateKey)
 	if !ok {
-		return nil, fmt.Errorf("%winvalid key provided - should be instance of `*rsa.Privatekey`", e.InvalidPrivateKey)
+		return nil, fmt.Errorf("%winvalid key provided - should be instance of `*rsa.Privatekey`", joseerror.ErrInvalidPrivateKey)
 	}
 	return &Signer{
-		alg:        model.PS384,
+		alg:        jwa.PS384,
 		privateKey: rsaPrivateKey,
 	}, nil
 }
@@ -49,22 +50,23 @@ func NewSignerFromPrivateKey(privateKey crypto.PrivateKey) (*Signer, error) {
 func NewValidator(publicKey crypto.PublicKey) (*Validator, error) {
 	rsaPublicKey, ok := publicKey.(*rsa.PublicKey)
 	if !ok {
-		return nil, fmt.Errorf("%winvalid key provided - should be instance of `*rsa.PublicKey`", e.InvalidPublicKey)
+		return nil, fmt.Errorf("%winvalid key provided - should be instance of `*rsa.PublicKey`", joseerror.ErrInvalidPublicKey)
 	}
 	return &Validator{
+		alg:       jwa.PS384,
 		publicKey: rsaPublicKey,
 	}, nil
 }
 
-func NewValidatorFromJwk(publicKeyJson []byte) (*Validator, error) {
-	publicKey, err := common.NewRSAPublicKeyFromJson(publicKeyJson)
+func NewValidatorFromJwk(jwk map[string]any) (*Validator, error) {
+	publicKey, err := common.RSAPublicKeyFromJwk(jwk)
 	if err != nil {
 		return nil, err
 	}
 	return NewValidator(publicKey)
 }
 
-func (signer *Signer) Alg() model.Algorithm {
+func (signer *Signer) Alg() jwa.Algorithm {
 	return signer.alg
 }
 
@@ -74,7 +76,7 @@ func (signer *Signer) Public() crypto.PublicKey {
 
 func (signer *Signer) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error) {
 	if opts != nil && opts.HashFunc() > 0 && opts.HashFunc() != crypto.SHA384 {
-		return nil, fmt.Errorf("%winvalid hash function provided for specified signer", e.SigningError)
+		return nil, fmt.Errorf("%winvalid hash function provided for specified signer", joseerror.ErrSigningError)
 	}
 
 	var hashedDigest []byte
@@ -104,7 +106,7 @@ func (validator *Validator) ValidateSignature(digest, signature []byte) (bool, e
 	err := rsa.VerifyPSS(validator.publicKey, crypto.SHA384, hashedDigest[:], signature, opts)
 
 	if err != nil {
-		return false, fmt.Errorf("%winvalid signature: %s", e.InvalidSignature, err.Error())
+		return false, fmt.Errorf("%winvalid signature: %s", joseerror.ErrInvalidSignature, err.Error())
 	}
 
 	return true, nil
