@@ -37,7 +37,7 @@ func PublicJwk(publicKey crypto.PublicKey) (*map[string]any, error) {
 		return &m, nil
 	}
 
-	return nil, fmt.Errorf("%wunknown public key format provided", e.InvalidPublicKey)
+	return nil, fmt.Errorf("%wunknown format", e.ErrInvalidPublicKey)
 }
 
 func PrivateJwk(privateKey crypto.PrivateKey) (*map[string]any, error) {
@@ -53,5 +53,5 @@ func PrivateJwk(privateKey crypto.PrivateKey) (*map[string]any, error) {
 		return &m, nil
 	}
 
-	return nil, fmt.Errorf("%wunknown private key format provided", e.InvalidPrivateKey)
+	return nil, fmt.Errorf("%wunknown format", e.ErrInvalidPrivateKey)
 }
