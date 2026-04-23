@@ -6,12 +6,27 @@ import (
 	"strings"
 )
 
+// Signer signs JWS payloads per RFC 7515 / RFC 7518.
+//
+// The Sign method follows JOSE conventions rather than Go's crypto.Signer contract.
+// It supports two modes:
+//   - JOSE mode (opts == nil or opts.HashFunc() == 0): digest is the raw JWS Signing Input
+//     and the implementation hashes it internally using the algorithm's designated hash.
+//     This is the expected usage for JWS operations per RFC 7518.
+//   - Pre-hashed mode (opts.HashFunc() != 0): digest is already hashed by the caller
+//     and the implementation skips internal hashing. This supports interoperability with
+//     callers following Go's crypto.Signer convention.
 type Signer interface {
 	Alg() Algorithm
 	Public() crypto.PublicKey
 	Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error)
 }
 
+// Validator verifies JWS signatures per RFC 7515 / RFC 7518.
+//
+// ValidateSignature expects the raw JWS Signing Input as digest (not pre-hashed).
+// The implementation hashes it internally using the algorithm's designated hash
+// before performing verification.
 type Validator interface {
 	ValidateSignature(digest, signature []byte) (bool, error)
 	Public() crypto.PublicKey
@@ -102,11 +117,16 @@ func algorithm(a Algorithm) *Algorithm {
 	return &a
 }
 
+// Opts configures key generation for new signers.
+// BitSize applies to RSA algorithms. SecretKey applies to HMAC algorithms.
 type Opts struct {
 	BitSize   int
 	SecretKey *[]byte
 }
 
+// SignerOpts implements crypto.SignerOpts and is used to signal that the digest
+// passed to Sign has already been hashed. When provided with a non-zero Hash,
+// the signer will skip internal hashing.
 type SignerOpts struct {
 	Hash crypto.Hash
 }

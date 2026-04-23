@@ -56,17 +56,17 @@ func NewECDSAPublicKeyFromJson(publicKeyJson []byte, curve elliptic.Curve) (*ecd
 	var publicKey ECDSAPublicKey
 	err := json.Unmarshal(publicKeyJson, &publicKey)
 	if err != nil {
-		return nil, fmt.Errorf("%wprovided public key json isn't a valid ecdsa public key: %s", jose_errors.InvalidPublicKey, err.Error())
+		return nil, fmt.Errorf("%wprovided public key json isn't a valid ecdsa public key: %s", jose_errors.ErrInvalidPublicKey, err.Error())
 	}
 
 	xBytes, err := base64.RawURLEncoding.DecodeString(publicKey.X)
 	if err != nil {
-		return nil, fmt.Errorf("%werror decoding provided public key: %s", jose_errors.InvalidPublicKey, err.Error())
+		return nil, fmt.Errorf("%werror decoding provided public key: %s", jose_errors.ErrInvalidPublicKey, err.Error())
 	}
 
 	yBytes, err := base64.RawURLEncoding.DecodeString(publicKey.Y)
 	if err != nil {
-		return nil, fmt.Errorf("%werror decoding provided public key: %s", jose_errors.InvalidPublicKey, err.Error())
+		return nil, fmt.Errorf("%werror decoding provided public key: %s", jose_errors.ErrInvalidPublicKey, err.Error())
 	}
 
 	pk := &ecdsa.PublicKey{
@@ -212,17 +212,17 @@ func NewRSAPublicKeyFromJson(publicKeyJson []byte) (*rsa.PublicKey, error) {
 	var publicKey RSAPublicKey
 	err := json.Unmarshal(publicKeyJson, &publicKey)
 	if err != nil {
-		return nil, fmt.Errorf("%wprovided public key json isn't a valid rsa public key: %s", jose_errors.InvalidPublicKey, err.Error())
+		return nil, fmt.Errorf("%wprovided public key json isn't a valid rsa public key: %s", jose_errors.ErrInvalidPublicKey, err.Error())
 	}
 
 	nBytes, err := base64.RawURLEncoding.DecodeString(publicKey.N)
 	if err != nil {
-		return nil, fmt.Errorf("%werror decoding provided public key: %s", jose_errors.InvalidPublicKey, err.Error())
+		return nil, fmt.Errorf("%werror decoding provided public key: %s", jose_errors.ErrInvalidPublicKey, err.Error())
 	}
 
 	eBytes, err := base64.RawURLEncoding.DecodeString(publicKey.E)
 	if err != nil {
-		return nil, fmt.Errorf("%werror decoding provided public key: %s", jose_errors.InvalidPublicKey, err.Error())
+		return nil, fmt.Errorf("%werror decoding provided public key: %s", jose_errors.ErrInvalidPublicKey, err.Error())
 	}
 
 	pk := &rsa.PublicKey{
@@ -377,7 +377,7 @@ func JwkFromRSAPrivateKey(privateKey *rsa.PrivateKey) map[string]any {
 
 func ExtractRSFromSignature(signature []byte, keySize int) (*big.Int, *big.Int, error) {
 	if len(signature) != keySize {
-		return nil, nil, fmt.Errorf("%wsignature should be %d bytes for given algorithm", jose_errors.InvalidSignature, keySize)
+		return nil, nil, fmt.Errorf("%wsignature should be %d bytes for given algorithm", jose_errors.ErrInvalidSignature, keySize)
 	}
 	rb := signature[:keySize/2]
 	sb := signature[keySize/2:]
@@ -391,7 +391,7 @@ func ExtractRSFromSignature(signature []byte, keySize int) (*big.Int, *big.Int, 
 func EllipticCurveSign(rand io.Reader, pk ecdsa.PrivateKey, digest []byte, keySize int) ([]byte, error) {
 	r, s, err := ecdsa.Sign(rand, &pk, digest)
 	if err != nil {
-		return nil, fmt.Errorf("%wfailed to sign token: %s", jose_errors.SigningError, err.Error())
+		return nil, fmt.Errorf("%wfailed to sign token: %s", jose_errors.ErrSigning, err.Error())
 	}
 
 	sigBytes := make([]byte, keySize)
@@ -405,7 +405,7 @@ func EllipticCurveSign(rand io.Reader, pk ecdsa.PrivateKey, digest []byte, keySi
 func RsaPkcs1Sign(rand io.Reader, pk rsa.PrivateKey, digest []byte, hash crypto.Hash) ([]byte, error) {
 	s, err := rsa.SignPKCS1v15(rand, &pk, hash, digest)
 	if err != nil {
-		return nil, fmt.Errorf("%wfailed to sign token: %s", jose_errors.SigningError, err.Error())
+		return nil, fmt.Errorf("%wfailed to sign token: %s", jose_errors.ErrSigning, err.Error())
 	}
 	return s, nil
 }
@@ -417,7 +417,7 @@ func RsaPSSSign(rand io.Reader, pk rsa.PrivateKey, digest []byte, hash crypto.Ha
 	}
 	s, err := rsa.SignPSS(rand, &pk, hash, digest, opts)
 	if err != nil {
-		return nil, fmt.Errorf("%wfailed to sign token: %s", jose_errors.SigningError, err.Error())
+		return nil, fmt.Errorf("%wfailed to sign token: %s", jose_errors.ErrSigning, err.Error())
 	}
 	return s, nil
 }

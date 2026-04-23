@@ -1,5 +1,5 @@
 # Go Jose
-Package go_jose is a set of crypto signer implementations for common algorithms
+A Go implementation of the JOSE suite of specifications — JWS ([RFC 7515](https://www.rfc-editor.org/rfc/rfc7515)), JWA ([RFC 7518](https://www.rfc-editor.org/rfc/rfc7518)), JWK ([RFC 7517](https://www.rfc-editor.org/rfc/rfc7517)), and JWT ([RFC 7519](https://www.rfc-editor.org/rfc/rfc7519)).
 
 ## Requirements
 - Go 1.21 or higher
@@ -68,14 +68,20 @@ The `GetSignerFromPrivateKey` method can also be used. This takes in an algorith
 signer, err := jose.GetSignerFromPrivateKey(model.ES256, privateKey)
 ```
 
-## SignerOpts
-This package includes a SignerOpts implementation as shown below:
+## Signing Contract
+The `Sign` method follows JOSE conventions per RFC 7518 rather than Go's `crypto.Signer` contract. It supports two modes:
+
+- **JOSE mode** (`opts == nil` or `opts.HashFunc() == 0`): pass the raw JWS Signing Input — the signer hashes it internally using the algorithm's designated hash. This is the expected usage for JWS operations.
+- **Pre-hashed mode** (`opts.HashFunc() != 0`): pass an already-hashed digest — the signer skips internal hashing. This supports interoperability with callers following Go's `crypto.Signer` convention.
+
+A `SignerOpts` implementation is provided:
 ```go
 type SignerOpts struct {
 	Hash crypto.Hash
 }
 ```
-This is provided for simplicity and usage is in line with that specified by the `crypto.Signer` interface. If a hash isn't specified, no hashing is assumed as having occured and the signing algorithms will perform their own hashing.
+
+`ValidateSignature` always expects the raw signing input (not pre-hashed) and hashes internally.
 
 ## Validators
 In addition to the packaged signers, a validator type is also included for each algorithm. This can be constructed in one of two ways:
@@ -106,7 +112,7 @@ valid, err := validator.ValidateSignature(digest, signature)
 
 Finally, validators expose their PublicKey with the `Public()` method
 ```go
-validator, err :- jose.GetValidator(model.ES256, publicKey)
+validator, err := jose.GetValidator(model.ES256, publicKey)
 pk := validator.Public()
 ```
 
