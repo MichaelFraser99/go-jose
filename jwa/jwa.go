@@ -22,6 +22,8 @@ const (
 
 func (a Algorithm) String() string {
 	switch a {
+	case Unknown:
+		return ""
 	case ES256:
 		return "ES256"
 	case ES384:
