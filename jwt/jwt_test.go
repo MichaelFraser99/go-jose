@@ -1650,6 +1650,21 @@ func TestValidateClockSkewLeeway(t *testing.T) {
 			expectErr: "exp claim is before current time",
 		},
 		{
+			name:   "a negative leeway does not narrow the window for exp",
+			claims: map[string]any{"exp": time.Now().Add(30 * time.Second).Unix()},
+			opts:   &model.JoseOptions{ClockSkewLeeway: -time.Minute},
+		},
+		{
+			name:   "a negative leeway does not narrow the window for iat",
+			claims: map[string]any{"iat": time.Now().Add(-30 * time.Second).Unix()},
+			opts:   &model.JoseOptions{ClockSkewLeeway: -time.Minute},
+		},
+		{
+			name:   "a negative leeway does not narrow the window for nbf",
+			claims: map[string]any{"nbf": time.Now().Add(-30 * time.Second).Unix()},
+			opts:   &model.JoseOptions{ClockSkewLeeway: -time.Minute},
+		},
+		{
 			name:   "every claim inside the leeway together",
 			claims: map[string]any{"iat": time.Now().Add(30 * time.Second).Unix(), "nbf": time.Now().Add(30 * time.Second).Unix(), "exp": time.Now().Add(-30 * time.Second).Unix()},
 			opts:   &model.JoseOptions{ClockSkewLeeway: time.Minute},
