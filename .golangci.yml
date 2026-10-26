@@ -1,0 +1,7 @@
+version: "2"
+linters:
+  enable:
+    - exhaustive
+  settings:
+    exhaustive:
+      ignore-enum-types: "^crypto/x509\\."
