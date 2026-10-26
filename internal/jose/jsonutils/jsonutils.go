@@ -105,13 +105,17 @@ var (
 	})
 
 	ValidateNoDuplicateSliceValues = Validator[[]any](func(jsonInput map[string]any, s []any) error {
-		seen := make(map[any]struct{}, len(s))
+		seen := make(map[string]struct{}, len(s))
 
 		for _, v := range s {
-			if _, exists := seen[v]; exists {
+			key, err := json.Marshal(v)
+			if err != nil {
+				return fmt.Errorf("%wthe array holds a value that cannot be compared", joseerror.ErrMalformedClaim)
+			}
+			if _, exists := seen[string(key)]; exists {
 				return fmt.Errorf("%wthe array has duplicate values", joseerror.ErrMalformedClaim)
 			}
-			seen[v] = struct{}{}
+			seen[string(key)] = struct{}{}
 		}
 		return nil
 	})
