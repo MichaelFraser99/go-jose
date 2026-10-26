@@ -45,11 +45,16 @@ func Validate(token string, outOfBoundsPublicKey model.Retriever, opts *model.Jo
 		return nil, nil, fmt.Errorf("invalid token")
 	}
 
+	leeway := time.Duration(0)
+	if opts != nil && opts.ClockSkewLeeway > 0 {
+		leeway = opts.ClockSkewLeeway
+	}
+
 	if iat, present := body["iat"]; present {
 		if iatFloat64, ok := iat.(float64); !ok {
 			return nil, nil, fmt.Errorf("iat claim malformed")
 		} else {
-			if time.Now().Unix() < int64(iatFloat64) {
+			if time.Now().Add(leeway).Unix() < int64(iatFloat64) {
 				return nil, nil, fmt.Errorf("iat claim is after current time")
 			}
 		}
@@ -59,17 +64,17 @@ func Validate(token string, outOfBoundsPublicKey model.Retriever, opts *model.Jo
 		if nbfFloat64, ok := nbf.(float64); !ok {
 			return nil, nil, fmt.Errorf("nbf claim malformed")
 		} else {
-			if time.Now().Unix() < int64(nbfFloat64) {
+			if time.Now().Add(leeway).Unix() < int64(nbfFloat64) {
 				return nil, nil, fmt.Errorf("nbf claim is after current time")
 			}
 		}
 	}
 
-	if nbf, present := body["exp"]; present {
-		if expFloat64, ok := nbf.(float64); !ok {
+	if exp, present := body["exp"]; present {
+		if expFloat64, ok := exp.(float64); !ok {
 			return nil, nil, fmt.Errorf("exp claim malformed")
 		} else {
-			if time.Now().Unix() > int64(expFloat64) {
+			if time.Now().Add(-leeway).Unix() > int64(expFloat64) {
 				return nil, nil, fmt.Errorf("exp claim is before current time")
 			}
 		}
