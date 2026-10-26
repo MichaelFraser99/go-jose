@@ -1571,3 +1571,126 @@ func validateBodyContents(t *testing.T, bodyJwtComponent string) {
 		}
 	}
 }
+
+func TestValidateClockSkewLeeway(t *testing.T) {
+	signer, err := rs256.NewSigner(2048)
+	if err != nil {
+		t.Fatalf("no error should be thrown: %s", err.Error())
+	}
+	retriever := func() ([]crypto.PublicKey, error) {
+		return []crypto.PublicKey{signer.Public()}, nil
+	}
+
+	tests := []struct {
+		name      string
+		claims    map[string]any
+		opts      *model.JoseOptions
+		expectErr string
+	}{
+		{
+			name:   "an iat inside the leeway is accepted",
+			claims: map[string]any{"iat": time.Now().Add(30 * time.Second).Unix()},
+			opts:   &model.JoseOptions{ClockSkewLeeway: time.Minute},
+		},
+		{
+			name:      "an iat beyond the leeway is refused",
+			claims:    map[string]any{"iat": time.Now().Add(2 * time.Minute).Unix()},
+			opts:      &model.JoseOptions{ClockSkewLeeway: time.Minute},
+			expectErr: "iat claim is after current time",
+		},
+		{
+			name:      "an iat inside the leeway is refused when none is granted",
+			claims:    map[string]any{"iat": time.Now().Add(30 * time.Second).Unix()},
+			opts:      &model.JoseOptions{},
+			expectErr: "iat claim is after current time",
+		},
+		{
+			name:   "an nbf inside the leeway is accepted",
+			claims: map[string]any{"nbf": time.Now().Add(30 * time.Second).Unix()},
+			opts:   &model.JoseOptions{ClockSkewLeeway: time.Minute},
+		},
+		{
+			name:      "an nbf beyond the leeway is refused",
+			claims:    map[string]any{"nbf": time.Now().Add(2 * time.Minute).Unix()},
+			opts:      &model.JoseOptions{ClockSkewLeeway: time.Minute},
+			expectErr: "nbf claim is after current time",
+		},
+		{
+			name:   "an exp inside the leeway is accepted",
+			claims: map[string]any{"exp": time.Now().Add(-30 * time.Second).Unix()},
+			opts:   &model.JoseOptions{ClockSkewLeeway: time.Minute},
+		},
+		{
+			name:      "an exp beyond the leeway is refused",
+			claims:    map[string]any{"exp": time.Now().Add(-2 * time.Minute).Unix()},
+			opts:      &model.JoseOptions{ClockSkewLeeway: time.Minute},
+			expectErr: "exp claim is before current time",
+		},
+		{
+			name:      "an exp inside the leeway is refused when none is granted",
+			claims:    map[string]any{"exp": time.Now().Add(-30 * time.Second).Unix()},
+			opts:      &model.JoseOptions{},
+			expectErr: "exp claim is before current time",
+		},
+		{
+			name:      "no options grants no leeway",
+			claims:    map[string]any{"exp": time.Now().Add(-30 * time.Second).Unix()},
+			opts:      nil,
+			expectErr: "exp claim is before current time",
+		},
+		{
+			name:   "a negative leeway is treated as none and a valid token still passes",
+			claims: map[string]any{"exp": time.Now().Add(time.Hour).Unix()},
+			opts:   &model.JoseOptions{ClockSkewLeeway: -time.Minute},
+		},
+		{
+			name:      "a negative leeway does not widen the window",
+			claims:    map[string]any{"exp": time.Now().Add(-30 * time.Second).Unix()},
+			opts:      &model.JoseOptions{ClockSkewLeeway: -time.Minute},
+			expectErr: "exp claim is before current time",
+		},
+		{
+			name:   "a negative leeway does not narrow the window for exp",
+			claims: map[string]any{"exp": time.Now().Add(30 * time.Second).Unix()},
+			opts:   &model.JoseOptions{ClockSkewLeeway: -time.Minute},
+		},
+		{
+			name:   "a negative leeway does not narrow the window for iat",
+			claims: map[string]any{"iat": time.Now().Add(-30 * time.Second).Unix()},
+			opts:   &model.JoseOptions{ClockSkewLeeway: -time.Minute},
+		},
+		{
+			name:   "a negative leeway does not narrow the window for nbf",
+			claims: map[string]any{"nbf": time.Now().Add(-30 * time.Second).Unix()},
+			opts:   &model.JoseOptions{ClockSkewLeeway: -time.Minute},
+		},
+		{
+			name:   "every claim inside the leeway together",
+			claims: map[string]any{"iat": time.Now().Add(30 * time.Second).Unix(), "nbf": time.Now().Add(30 * time.Second).Unix(), "exp": time.Now().Add(-30 * time.Second).Unix()},
+			opts:   &model.JoseOptions{ClockSkewLeeway: time.Minute},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			token, err := New(signer, map[string]any{}, tt.claims, Opts{jwa.RS256})
+			if err != nil {
+				t.Fatalf("no error should be thrown: %s", err.Error())
+			}
+
+			_, _, err = Validate(*token, retriever, tt.opts)
+			if tt.expectErr == "" {
+				if err != nil {
+					t.Fatalf("no error should be thrown: %s", err.Error())
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error %q, got none", tt.expectErr)
+			}
+			if err.Error() != tt.expectErr {
+				t.Errorf("expected error %q, got %q", tt.expectErr, err.Error())
+			}
+		})
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
+	"time"
 )
 
 type JoseOptions struct {
@@ -13,6 +14,9 @@ type JoseOptions struct {
 
 	// AllowedSigningAlgorithms defines the list of acceptable algorithms for token signature verification. If not specified, all algorithms are permitted
 	AllowedSigningAlgorithms []jwa.Algorithm
+
+	// ClockSkewLeeway widens the window the iat, nbf and exp claims are judged against, to allow for clock skew between the issuer and this verifier. A value of zero or less grants none. Defaults to 0
+	ClockSkewLeeway time.Duration
 }
 
 type Retriever func() ([]crypto.PublicKey, error)
