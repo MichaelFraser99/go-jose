@@ -3,6 +3,8 @@ package x5
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha1"
+	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
@@ -10,6 +12,8 @@ import (
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"math/big"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -175,4 +179,146 @@ func generateCertificateChain(t *testing.T, numCerts int) ([][]byte, error) {
 	}
 
 	return append([][]byte{rootBytes}, intermediates...), nil
+}
+
+func x5tPair(t *testing.T, cert []byte) (string, string) {
+	t.Helper()
+	sha1Sum := sha1.Sum(cert)
+	sha256Sum := sha256.Sum256(cert)
+	return base64.RawURLEncoding.EncodeToString(sha1Sum[:]), base64.RawURLEncoding.EncodeToString(sha256Sum[:])
+}
+
+func TestInlineCertificate_AcceptsTheThumbprintTheRFCDefines(t *testing.T) {
+	certs, err := generateCertificateChain(t, 1)
+	if err != nil {
+		t.Fatalf("failed to generate certificate chain: %v", err)
+	}
+	cert := certs[0]
+	parsed, err := x509.ParseCertificate(cert)
+	if err != nil {
+		t.Fatalf("failed to parse the generated certificate: %v", err)
+	}
+	x5t, x5ts256 := x5tPair(t, cert)
+
+	tests := map[string]struct {
+		reference string
+		x5t       *string
+		x5ts256   *string
+	}{
+		"neither thumbprint":           {reference: "RFC 7515 4.1.7, 4.1.8"},
+		"the SHA-1 thumbprint alone":   {reference: "RFC 7515 4.1.7", x5t: &x5t},
+		"the SHA-256 thumbprint alone": {reference: "RFC 7515 4.1.8", x5ts256: &x5ts256},
+		"both thumbprints":             {reference: "RFC 7515 4.1.7, 4.1.8", x5t: &x5t, x5ts256: &x5ts256},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			keys, err := InlineCertificate([]string{base64.StdEncoding.EncodeToString(cert)}, tc.x5t, tc.x5ts256, "RS256")()
+			if err != nil {
+				t.Fatalf("[%s] a header carrying the thumbprint this clause defines must be accepted, got %v", tc.reference, err)
+			}
+			if len(keys) != 1 {
+				t.Fatalf("[%s] expected the certificate's key, got %d keys", tc.reference, len(keys))
+			}
+			if !parsed.PublicKey.(*rsa.PublicKey).Equal(keys[0]) {
+				t.Errorf("[%s] the key returned must be the one the certificate carries", tc.reference)
+			}
+		})
+	}
+}
+
+func TestInlineCertificate_RefusesAThumbprintThatDoesNotMatch(t *testing.T) {
+	certs, err := generateCertificateChain(t, 2)
+	if err != nil {
+		t.Fatalf("failed to generate certificate chain: %v", err)
+	}
+	cert, other := certs[0], certs[1]
+	correctX5t, correctX5tS256 := x5tPair(t, cert)
+	otherX5t, otherX5tS256 := x5tPair(t, other)
+	empty := ""
+	legacy := base64.RawURLEncoding.EncodeToString(append(append([]byte{}, cert...), sha256.New().Sum(nil)...))
+
+	tests := map[string]struct {
+		reference string
+		x5t       *string
+		x5ts256   *string
+	}{
+		"a SHA-1 thumbprint of another certificate":   {reference: "RFC 7515 4.1.7", x5t: &otherX5t},
+		"a SHA-256 thumbprint of another certificate": {reference: "RFC 7515 4.1.8", x5ts256: &otherX5tS256},
+		"a SHA-256 thumbprint where SHA-1 belongs":    {reference: "RFC 7515 4.1.7", x5t: &correctX5tS256},
+		"a SHA-1 thumbprint where SHA-256 belongs":    {reference: "RFC 7515 4.1.8", x5ts256: &correctX5t},
+		"an empty SHA-1 thumbprint":                   {reference: "RFC 7515 4.1.7", x5t: &empty},
+		"an empty SHA-256 thumbprint":                 {reference: "RFC 7515 4.1.8", x5ts256: &empty},
+		"the certificate itself":                      {reference: "RFC 7515 4.1.8", x5ts256: &legacy},
+		"a correct SHA-1 beside a wrong SHA-256":      {reference: "RFC 7515 4.1.8", x5t: &correctX5t, x5ts256: &otherX5tS256},
+		"a wrong SHA-1 beside a correct SHA-256":      {reference: "RFC 7515 4.1.7", x5t: &otherX5t, x5ts256: &correctX5tS256},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			keys, err := InlineCertificate([]string{base64.StdEncoding.EncodeToString(cert)}, tc.x5t, tc.x5ts256, "RS256")()
+			if err == nil {
+				t.Fatalf("[%s] a thumbprint that is not this certificate's must be refused, got %d keys", tc.reference, len(keys))
+			}
+			if !errors.Is(err, joseerror.ErrNoKeyIdentifierMatch) {
+				t.Errorf("[%s] the refusal must name the key identifier mismatch, got %v", tc.reference, err)
+			}
+			if len(keys) != 0 {
+				t.Errorf("[%s] no key may be returned when the thumbprint does not match, got %d", tc.reference, len(keys))
+			}
+		})
+	}
+}
+
+func TestRetrieveX5U_HoldsTheCertificateToItsThumbprint(t *testing.T) {
+	certs, err := generateCertificateChain(t, 2)
+	if err != nil {
+		t.Fatalf("failed to generate certificate chain: %v", err)
+	}
+	cert, other := certs[0], certs[1]
+	correctX5t, correctX5tS256 := x5tPair(t, cert)
+	otherX5t, otherX5tS256 := x5tPair(t, other)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if _, err := w.Write(cert); err != nil {
+			t.Errorf("failed to serve the certificate: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	tests := map[string]struct {
+		reference string
+		x5t       *string
+		x5ts256   *string
+		accept    bool
+	}{
+		"the SHA-1 thumbprint":                  {reference: "RFC 7515 4.1.7", x5t: &correctX5t, accept: true},
+		"the SHA-256 thumbprint":                {reference: "RFC 7515 4.1.8", x5ts256: &correctX5tS256, accept: true},
+		"both thumbprints":                      {reference: "RFC 7515 4.1.7, 4.1.8", x5t: &correctX5t, x5ts256: &correctX5tS256, accept: true},
+		"neither thumbprint":                    {reference: "RFC 7515 4.1.7, 4.1.8", accept: true},
+		"another certificate's SHA-1":           {reference: "RFC 7515 4.1.7", x5t: &otherX5t},
+		"another certificate's SHA-256":         {reference: "RFC 7515 4.1.8", x5ts256: &otherX5tS256},
+		"a correct SHA-1 beside a wrong SHA256": {reference: "RFC 7515 4.1.8", x5t: &correctX5t, x5ts256: &otherX5tS256},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			keys, err := RetrieveX5U(server.URL, server.Client(), tc.x5t, tc.x5ts256, "RS256")()
+			if tc.accept {
+				if err != nil {
+					t.Fatalf("[%s] the certificate this URL serves carries that thumbprint, so it must be accepted, got %v", tc.reference, err)
+				}
+				if len(keys) != 1 {
+					t.Errorf("[%s] expected the certificate's key, got %d keys", tc.reference, len(keys))
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("[%s] a thumbprint that is not the served certificate's must be refused, got %d keys", tc.reference, len(keys))
+			}
+			if !errors.Is(err, joseerror.ErrNoKeyIdentifierMatch) {
+				t.Errorf("[%s] the refusal must name the key identifier mismatch, got %v", tc.reference, err)
+			}
+		})
+	}
 }

@@ -6,6 +6,8 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha1"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -14,7 +16,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
-	"github.com/MichaelFraser99/go-jose/internal/jose/x5"
 	"github.com/MichaelFraser99/go-jose/model"
 	"math/big"
 	"net/http"
@@ -176,7 +177,7 @@ func TestValidateHeader(t *testing.T) {
 			protectedHeader: map[string]any{
 				"alg": "RS256",
 				"x5c": []string{encodedCertificates[0]},
-				"x5t": x5.CalculateX5t(certificates[0]),
+				"x5t": headerX5t(certificates[0]),
 			},
 			retrievedKeys: [][]crypto.PublicKey{
 				{certificateKeys[0]},
@@ -186,7 +187,7 @@ func TestValidateHeader(t *testing.T) {
 			protectedHeader: map[string]any{
 				"alg":      "RS256",
 				"x5c":      []string{encodedCertificates[0]},
-				"x5t#S256": x5.CalculateX5tS256(certificates[0]),
+				"x5t#S256": headerX5tS256(certificates[0]),
 			},
 			retrievedKeys: [][]crypto.PublicKey{
 				{certificateKeys[0]},
@@ -196,8 +197,8 @@ func TestValidateHeader(t *testing.T) {
 			protectedHeader: map[string]any{
 				"alg":      "RS256",
 				"x5c":      []string{encodedCertificates[0]},
-				"x5t":      x5.CalculateX5t(certificates[0]),
-				"x5t#S256": x5.CalculateX5tS256(certificates[0]),
+				"x5t":      headerX5t(certificates[0]),
+				"x5t#S256": headerX5tS256(certificates[0]),
 			},
 			retrievedKeys: [][]crypto.PublicKey{
 				{certificateKeys[0]},
@@ -238,8 +239,8 @@ func TestValidateHeader(t *testing.T) {
 				"jku":      fmt.Sprintf("%s/jwks", testServer.URL),
 				"x5c":      []string{encodedCertificates[4]},
 				"x5u":      fmt.Sprintf("%s/certs", testServer.URL),
-				"x5t":      x5.CalculateX5t(certificates[4]),
-				"x5t#S256": x5.CalculateX5tS256(certificates[4]),
+				"x5t":      headerX5t(certificates[4]),
+				"x5t#S256": headerX5tS256(certificates[4]),
 			},
 			client: trustingClient,
 			retrievedKeys: [][]crypto.PublicKey{
@@ -384,4 +385,14 @@ func generateCertificateChain(t *testing.T, numCerts int) ([][]byte, []crypto.Pu
 	}
 
 	return append([][]byte{rootBytes}, intermediates...), keys, nil
+}
+
+func headerX5t(cert []byte) string {
+	sum := sha1.Sum(cert)
+	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+func headerX5tS256(cert []byte) string {
+	sum := sha256.Sum256(cert)
+	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
