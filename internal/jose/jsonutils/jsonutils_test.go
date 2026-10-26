@@ -448,3 +448,44 @@ func validateTestError(t *testing.T, producedError error, expectedMsg string, ex
 		}
 	}
 }
+
+func TestValidateNoDuplicateSliceValuesOnUnhashableValues(t *testing.T) {
+	tests := []struct {
+		name      string
+		values    []any
+		expectErr bool
+	}{
+		{name: "distinct strings", values: []any{"a", "b"}},
+		{name: "duplicate strings", values: []any{"a", "a"}, expectErr: true},
+		{name: "distinct numbers", values: []any{float64(1), float64(2)}},
+		{name: "duplicate numbers", values: []any{float64(1), float64(1)}, expectErr: true},
+		{name: "a nested empty array", values: []any{[]any{}}},
+		{name: "a nested object", values: []any{map[string]any{"a": float64(1)}}},
+		{name: "a nested array of one", values: []any{[]any{"x"}}},
+		{name: "two distinct nested arrays", values: []any{[]any{"x"}, []any{"y"}}},
+		{name: "two equal nested arrays", values: []any{[]any{"x"}, []any{"x"}}, expectErr: true},
+		{name: "two equal nested objects", values: []any{map[string]any{"a": float64(1)}, map[string]any{"a": float64(1)}}, expectErr: true},
+		{name: "two objects differing only in key order", values: []any{map[string]any{"a": float64(1), "b": float64(2)}, map[string]any{"b": float64(2), "a": float64(1)}}, expectErr: true},
+		{name: "a nested array beside an equal string", values: []any{[]any{"x"}, "x"}},
+		{name: "a null beside a string", values: []any{nil, "x"}},
+		{name: "two nulls", values: []any{nil, nil}, expectErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Fatalf("a value decoded from JSON must not panic the validator: %v", recovered)
+				}
+			}()
+
+			err := ValidateNoDuplicateSliceValues(map[string]any{}, tt.values)
+			if tt.expectErr && err == nil {
+				t.Error("expected duplicate values to be reported")
+			}
+			if !tt.expectErr && err != nil {
+				t.Errorf("no error should be thrown: %s", err.Error())
+			}
+		})
+	}
+}
