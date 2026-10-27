@@ -188,8 +188,9 @@ func Test_validateNonEmptySlice(t *testing.T) {
 			errTypes: []error{joseerror.ErrMalformedClaim},
 		},
 		"nil slice": {
-			slice:  nil,
-			errMsg: "the provided slice is empty",
+			slice:    nil,
+			errMsg:   "the provided slice is empty",
+			errTypes: []error{joseerror.ErrMalformedClaim},
 		},
 	}
 
@@ -434,8 +435,12 @@ func validateTestError(t *testing.T, producedError error, expectedMsg string, ex
 		if expectedMsg == "" {
 			t.Fatalf("unexpected error: %v", producedError)
 		}
-		if expectedMsg != producedError.Error() {
-			t.Fatalf("expected error text %s, got %s", expectedMsg, producedError.Error())
+		want := expectedMsg
+		if len(expectedTypes) > 0 {
+			want = expectedTypes[0].Error() + expectedMsg
+		}
+		if want != producedError.Error() {
+			t.Fatalf("expected error text %s, got %s", want, producedError.Error())
 		}
 		for _, errType := range expectedTypes {
 			if !errors.Is(producedError, errType) {

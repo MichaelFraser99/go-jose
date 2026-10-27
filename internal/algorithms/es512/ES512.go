@@ -40,10 +40,10 @@ func NewSigner() (*Signer, error) {
 func NewSignerFromPrivateKey(privateKey crypto.PrivateKey) (*Signer, error) {
 	ecdsaPrivateKey, ok := privateKey.(*ecdsa.PrivateKey)
 	if !ok {
-		return nil, fmt.Errorf("%winvalid key provided - should be instance of `*ecdsa.Privatekey`", joseerror.ErrInvalidPrivateKey)
+		return nil, fmt.Errorf("%wshould be instance of *ecdsa.PrivateKey", joseerror.ErrInvalidPrivateKey)
 	}
 	if ecdsaPrivateKey.Curve.Params().Name != curveName {
-		return nil, fmt.Errorf("%winvalid key provided - curve should be %s, was %s", joseerror.ErrInvalidPrivateKey, curveName, ecdsaPrivateKey.Curve.Params().Name)
+		return nil, fmt.Errorf("%wcurve should be %s, was %s", joseerror.ErrInvalidPrivateKey, curveName, ecdsaPrivateKey.Curve.Params().Name)
 	}
 	return &Signer{
 		alg:        jwa.ES512,
@@ -54,7 +54,7 @@ func NewSignerFromPrivateKey(privateKey crypto.PrivateKey) (*Signer, error) {
 func NewValidator(publicKey crypto.PublicKey) (*Validator, error) {
 	ecdsaPublicKey, ok := publicKey.(*ecdsa.PublicKey)
 	if !ok {
-		return nil, fmt.Errorf("%winvalid key provided - should be instance of `*ecdsa.PublicKey`", joseerror.ErrInvalidPublicKey)
+		return nil, fmt.Errorf("%wshould be instance of *ecdsa.PublicKey", joseerror.ErrInvalidPublicKey)
 	}
 	return &Validator{
 		publicKey: ecdsaPublicKey,
@@ -103,7 +103,7 @@ func (validator *Validator) ValidateSignature(digest, signature []byte) (bool, e
 
 	r, s, err := common.ExtractRSFromSignature(signature, keySize)
 	if err != nil {
-		return false, fmt.Errorf("%winvalid signature", joseerror.ErrInvalidSignature)
+		return false, fmt.Errorf("%w", joseerror.ErrInvalidSignature)
 	}
 
 	return ecdsa.Verify(validator.publicKey, bodyHash[:], r, s), nil
