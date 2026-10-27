@@ -7,6 +7,7 @@ import (
 	"crypto/sha512"
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
+	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
 	"github.com/MichaelFraser99/go-jose/model"
 	"io"
@@ -37,6 +38,10 @@ func (v Validator) Public() crypto.PublicKey {
 	return slices.Clone(v.secret)
 }
 
+// MinimumSecretBytes is the smallest secret HS384 may be keyed with: RFC 7518
+// section 3.2 requires at least the hash output size.
+const MinimumSecretBytes = 48
+
 func NewSigner(secretKey *[]byte) (*Signer, error) {
 	var secret []byte
 	if secretKey != nil {
@@ -49,6 +54,10 @@ func NewSigner(secretKey *[]byte) (*Signer, error) {
 		}
 	}
 
+	if len(secret) < MinimumSecretBytes {
+		return nil, fmt.Errorf("%wa secret of at least %d bytes is required for HS384, got %d", joseerror.ErrInvalidPrivateKey, MinimumSecretBytes, len(secret))
+	}
+
 	return &Signer{
 		alg:    jwa.HS384,
 		secret: slices.Clone(secret),
@@ -57,11 +66,15 @@ func NewSigner(secretKey *[]byte) (*Signer, error) {
 
 func NewValidator(publicKey crypto.PublicKey) (*Validator, error) {
 	if publicKey == nil {
-		return nil, fmt.Errorf("nil public key provided")
+		return nil, fmt.Errorf("%wnil public key provided", joseerror.ErrInvalidPublicKey)
 	} else if _, ok := publicKey.(common.SecretKey); !ok {
-		return nil, fmt.Errorf("invalid public key provided - must be of type `common.SecretKey` for hmac algorithms")
+		return nil, fmt.Errorf("%wthe key for an hmac algorithm is the value returned by Signer.Public, got %T", joseerror.ErrInvalidPublicKey, publicKey)
 	}
 	secret := []byte(publicKey.(common.SecretKey))
+	if len(secret) < MinimumSecretBytes {
+		return nil, fmt.Errorf("%wa secret of at least %d bytes is required for HS384, got %d", joseerror.ErrInvalidPublicKey, MinimumSecretBytes, len(secret))
+	}
+
 	return &Validator{
 		alg:    jwa.HS384,
 		secret: slices.Clone(secret),

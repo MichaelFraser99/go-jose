@@ -19,7 +19,11 @@ func CertificateToJwk(certificate x509.Certificate) (map[string]any, error) {
 	case x509.ECDSA:
 		jwk = common.JwkFromECDSAPublicKey(certificate.PublicKey.(*ecdsa.PublicKey))
 	case x509.Ed25519:
-		jwk = common.JwkFromEdDSAPublicKey(certificate.PublicKey.(*ed25519.PublicKey))
+		var err error
+		jwk, err = common.JwkFromEdDSAPublicKey(certificate.PublicKey.(*ed25519.PublicKey))
+		if err != nil {
+			return nil, err
+		}
 	case x509.DSA:
 		return nil, fmt.Errorf("%wcertificates signed with the DSA algorithm are not supported", joseerror.ErrApplicationError)
 	default:

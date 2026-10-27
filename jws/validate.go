@@ -60,7 +60,10 @@ func GetValidator(alg jwa.Algorithm, publicKey crypto.PublicKey) (model.Validato
 	default:
 		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg.String())
 	}
-	return v, err
+	if err != nil {
+		return nil, err
+	}
+	return v, nil
 }
 
 // GetValidatorFromJwk
@@ -99,5 +102,8 @@ func GetValidatorFromJwk(alg jwa.Algorithm, jwk map[string]any) (model.Validator
 	default:
 		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg.String())
 	}
-	return v, err
+	if err != nil {
+		return nil, err
+	}
+	return v, nil
 }

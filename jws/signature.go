@@ -59,17 +59,17 @@ func GetSigner(alg jwa.Algorithm, opts *model.Opts) (model.Signer, error) {
 		s, err = ps512.NewSigner(size)
 	case jwa.HS256:
 		if opts == nil || opts.SecretKey == nil {
-			return nil, fmt.Errorf("secret key must be specified for HS algorithms")
+			return nil, fmt.Errorf("%wa secret key must be specified for HS algorithms", joseerror.ErrInvalidPrivateKey)
 		}
 		s, err = hs256.NewSigner(opts.SecretKey)
 	case jwa.HS384:
 		if opts == nil || opts.SecretKey == nil {
-			return nil, fmt.Errorf("secret key must be specified for HS algorithms")
+			return nil, fmt.Errorf("%wa secret key must be specified for HS algorithms", joseerror.ErrInvalidPrivateKey)
 		}
 		s, err = hs384.NewSigner(opts.SecretKey)
 	case jwa.HS512:
 		if opts == nil || opts.SecretKey == nil {
-			return nil, fmt.Errorf("secret key must be specified for HS algorithms")
+			return nil, fmt.Errorf("%wa secret key must be specified for HS algorithms", joseerror.ErrInvalidPrivateKey)
 		}
 		s, err = hs512.NewSigner(opts.SecretKey)
 
@@ -79,7 +79,10 @@ func GetSigner(alg jwa.Algorithm, opts *model.Opts) (model.Signer, error) {
 		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg)
 	}
 
-	return s, err
+	if err != nil {
+		return nil, err
+	}
+	return s, nil
 }
 
 // GetSignerFromPrivateKey
@@ -121,5 +124,8 @@ func GetSignerFromPrivateKey(alg jwa.Algorithm, privateKey crypto.PrivateKey) (m
 		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg)
 	}
 
-	return s, err
+	if err != nil {
+		return nil, err
+	}
+	return s, nil
 }

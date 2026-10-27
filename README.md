@@ -26,19 +26,32 @@ Also supported are the following HMAC with SHA2 symmetric algorithms:
 - HS384
 - HS512
 
-Please note `Validator` objects cannot be created for HMAC algorithms. When creating a new Signer an optional secret key can be passed as `[]byte`. If none provided, a random key is instead generated and can be retrieved with the `Public` method. This returns an object of type `SecretKey` defined as so:
+`GetSigner` requires a secret key as `[]byte`, passed in `model.Opts`. With no secret it returns an error: the random-secret path inside each package is not reachable through the public API.
+
+**This is a breaking change:** a secret must be at least as long as the hash output. That is 32 bytes for HS256, 48 for HS384, and 64 for HS512. RFC 7518 section 3.2 makes the rule a MUST, because a shorter secret caps the cost of a forgery at the entropy of the secret instead of the strength of the MAC. `GetSigner` refuses a shorter secret with `ErrInvalidPrivateKey`. Earlier versions accepted a secret of any length, a one-byte secret included, and a nil secret gave a usable validator.
+
+Give your secret at least that many bytes.
+
+**A validator for these algorithms can only be built from a signer.** `GetValidator` accepts what `Signer.Public` returns and nothing else: a raw `[]byte` is refused, and `GetValidatorFromJwk` refuses an `oct` key outright. So to verify an HS token with a secret you were given, construct a signer with that secret first:
+
 ```go
-type SecretKey []byte
+signer, err := jws.GetSigner(jwa.HS256, &model.Opts{SecretKey: &secret})
+validator, err := jws.GetValidator(signer.Alg(), signer.Public())
+```
 
-func (s *SecretKey) Equal(x crypto.PublicKey) bool {
-	secretKey, ok := x.(*SecretKey)
-	if !ok {
-		return false
-	}
+`GetValidator` applies the same length rule and refuses with `ErrInvalidPublicKey`, but a secret that reached it through a signer has already passed the rule, so the refusal is not one you can trigger from outside this library.
 
-	return bytes.Equal(*s, *secretKey)
+`Public` returns a `SecretKey`, which is a `[]byte` defined in an internal package. A consumer cannot name the type, so reach its `Equal` method through an interface:
+
+```go
+if comparer, ok := validator.Public().(interface{ Equal(crypto.PublicKey) bool }); ok {
+	same := comparer.Equal(other.Public())
 }
 ```
+
+`SecretKey.Equal` reports whether two keys hold the same bytes. It compares in constant time, because an early-exit comparison tells a caller who submits guesses how many leading bytes were correct.
+
+Note what `Equal` does not answer. HMAC pads a key shorter than its block size and hashes a longer one, so two different byte strings can key identically. `Equal` compares the bytes and reports such a pair as unequal. `SecretKey` carries no algorithm, and the block size differs between HS256 and the other two, so there is no one canonical form it could compare instead.
 
 Algorithms are represented inside this module with the following type:
 ```go
@@ -183,6 +196,8 @@ A malformed `x5c` is refused whether or not roots are configured, because its sh
 This library includes two methods for converting keys into JWK format
 
 All JWK methods include in the returned map a KID suggestion based on the public key component
+
+**This is a breaking change for Ed25519 keys.** Earlier versions computed the suggestion for an Ed25519 key and then discarded it, so the jwk went out with no `kid` at all. It now carries one, like every other algorithm. Two consequences for a caller: the serialised jwk of an Ed25519 key gains a member, so a pinned fixture of that JSON no longer matches; and `Jwks.Add` with `EnforceUniqueKIDs` now refuses a second copy of one Ed25519 key, where before it had no `kid` to compare and accepted it.
 
 PublicJwk takes in a pointer to a public key and returns a `map[string]string` containing the jwk representation of the provided public key
 ```go

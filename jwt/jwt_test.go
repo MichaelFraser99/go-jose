@@ -1,6 +1,7 @@
 package jwt
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/rand"
 	"encoding/base64"
@@ -374,7 +375,7 @@ func TestNew(t *testing.T) {
 			name: "we can sign a jwt with hs256",
 			signer: func(t *testing.T) model.Signer {
 				t.Helper()
-				signer, err := hs256.NewSigner(&[]byte{'f', 'o', 'o', 'b', 'a', 'r'})
+				signer, err := hs256.NewSigner(&conformingSecret)
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
@@ -397,7 +398,7 @@ func TestNew(t *testing.T) {
 					t.Fatal("a jwt should be returned")
 				}
 
-				signer, err := hs256.NewSigner(&[]byte{'f', 'o', 'o', 'b', 'a', 'r'})
+				signer, err := hs256.NewSigner(&conformingSecret)
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
@@ -429,7 +430,7 @@ func TestNew(t *testing.T) {
 			name: "we can sign a jwt with hs384",
 			signer: func(t *testing.T) model.Signer {
 				t.Helper()
-				signer, err := hs384.NewSigner(&[]byte{'f', 'o', 'o', 'b', 'a', 'r'})
+				signer, err := hs384.NewSigner(&conformingSecret)
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
@@ -452,7 +453,7 @@ func TestNew(t *testing.T) {
 					t.Fatal("a jwt should be returned")
 				}
 
-				signer, err := hs384.NewSigner(&[]byte{'f', 'o', 'o', 'b', 'a', 'r'})
+				signer, err := hs384.NewSigner(&conformingSecret)
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
@@ -484,7 +485,7 @@ func TestNew(t *testing.T) {
 			name: "we can sign a jwt with hs512",
 			signer: func(t *testing.T) model.Signer {
 				t.Helper()
-				signer, err := hs512.NewSigner(&[]byte{'f', 'o', 'o', 'b', 'a', 'r'})
+				signer, err := hs512.NewSigner(&conformingSecret)
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
@@ -507,7 +508,7 @@ func TestNew(t *testing.T) {
 					t.Fatal("a jwt should be returned")
 				}
 
-				signer, err := hs512.NewSigner(&[]byte{'f', 'o', 'o', 'b', 'a', 'r'})
+				signer, err := hs512.NewSigner(&conformingSecret)
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
@@ -1030,7 +1031,7 @@ func TestValidate(t *testing.T) {
 			name: "we can validate a jwt signed with hs256",
 			signer: func(t *testing.T) model.Signer {
 				t.Helper()
-				signer, err := hs256.NewSigner(&[]byte{'f', 'o', 'o', 'b', 'a', 'r'})
+				signer, err := hs256.NewSigner(&conformingSecret)
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
@@ -1078,7 +1079,7 @@ func TestValidate(t *testing.T) {
 			name: "we can validate a jwt signed with hs384",
 			signer: func(t *testing.T) model.Signer {
 				t.Helper()
-				signer, err := hs384.NewSigner(&[]byte{'f', 'o', 'o', 'b', 'a', 'r'})
+				signer, err := hs384.NewSigner(&conformingSecret)
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
@@ -1126,7 +1127,7 @@ func TestValidate(t *testing.T) {
 			name: "we can validate a jwt signed with hs512",
 			signer: func(t *testing.T) model.Signer {
 				t.Helper()
-				signer, err := hs512.NewSigner(&[]byte{'f', 'o', 'o', 'b', 'a', 'r'})
+				signer, err := hs512.NewSigner(&conformingSecret)
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
@@ -1174,14 +1175,14 @@ func TestValidate(t *testing.T) {
 			name: "we can validate a jwt signed with an hs algorithm and pass in the passphrase as a secret key implementation",
 			signer: func(t *testing.T) model.Signer {
 				t.Helper()
-				signer, err := hs256.NewSigner(&[]byte{'f', 'o', 'o', 'b', 'a', 'r'})
+				signer, err := hs256.NewSigner(&conformingSecret)
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
 				return signer
 			},
 			publicKey: func(t *testing.T, signer model.Signer) crypto.PublicKey {
-				return common.SecretKey("foobar")
+				return common.SecretKey(conformingSecret)
 			},
 			jwt: func(t *testing.T, signer crypto.Signer) string {
 				t.Helper()
@@ -1694,3 +1695,5 @@ func TestValidateClockSkewLeeway(t *testing.T) {
 		})
 	}
 }
+
+var conformingSecret = bytes.Repeat([]byte("k"), 64)
