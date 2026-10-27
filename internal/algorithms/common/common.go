@@ -461,7 +461,5 @@ func RsaPSSSign(rand io.Reader, pk rsa.PrivateKey, digest []byte, hash crypto.Ha
 
 func ProduceMac(h hash.Hash, digest []byte) []byte {
 	h.Write(digest)
-	signature := h.Sum(nil)
-	h.Reset()
-	return signature
+	return h.Sum(nil)
 }
