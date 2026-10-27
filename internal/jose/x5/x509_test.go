@@ -59,9 +59,18 @@ func Test_validateCertificateChain(t *testing.T) {
 		},
 		"empty slice": {
 			certificates: []string{},
+			errMsg:       "the 'x5c' array carries no certificate",
+			errTypes:     []error{joseerror.ErrMalformedClaim},
 		},
 		"nil slice": {
 			certificates: nil,
+			errMsg:       "the 'x5c' array carries no certificate",
+			errTypes:     []error{joseerror.ErrMalformedClaim},
+		},
+		"an entry that decodes to no certificate": {
+			certificates: []string{""},
+			errMsg:       "the provided values carry no certificate",
+			errTypes:     []error{joseerror.ErrMalformedClaim},
 		},
 		"broken chain": {
 			certificates: []string{encodedCerts[3], encodedCerts[0]},

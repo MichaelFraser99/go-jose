@@ -17,7 +17,7 @@ import (
 var (
 	ValidateCertificateChain = jsonutils.Validator[[]string](func(jsonInput map[string]any, certificateChain []string) error {
 		if len(certificateChain) == 0 {
-			return nil
+			return fmt.Errorf("%wthe 'x5c' array carries no certificate", joseerror.ErrMalformedClaim)
 		}
 
 		var decodedCertificateStrings []string
@@ -38,6 +38,9 @@ func validateCertificateChain(certificateChain []byte) ([]*x509.Certificate, err
 	certificates, err := x509.ParseCertificates(certificateChain)
 	if err != nil {
 		return nil, fmt.Errorf("%wone or more of the provided values is not a valid certificate: %s", joseerror.ErrMalformedClaim, err.Error())
+	}
+	if len(certificates) == 0 {
+		return nil, fmt.Errorf("%wthe provided values carry no certificate", joseerror.ErrMalformedClaim)
 	}
 
 	rootCertPool := x509.NewCertPool()
@@ -61,7 +64,10 @@ func validateCertificateChain(certificateChain []byte) ([]*x509.Certificate, err
 
 func InlineCertificate(certificateChain []string, x5t, x5ts256 *string, alg string) model.Retriever {
 	return func() ([]crypto.PublicKey, error) {
-		signingCertificate := certificateChain[0] //chain has already been validated
+		if len(certificateChain) == 0 {
+			return nil, fmt.Errorf("%wthe certificate chain carries no certificate", joseerror.ErrMalformedClaim)
+		}
+		signingCertificate := certificateChain[0]
 		decodedCertificate, err := base64.StdEncoding.DecodeString(signingCertificate)
 		if err != nil {
 			return nil, fmt.Errorf("%wfailed to decode certificate base64: %w", joseerror.ErrApplicationError, err)
