@@ -1,7 +1,6 @@
 package hs384
 
 import (
-	"bytes"
 	"crypto"
 	"crypto/hmac"
 	"crypto/rand"
@@ -10,34 +9,32 @@ import (
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
 	"github.com/MichaelFraser99/go-jose/jwa"
 	"github.com/MichaelFraser99/go-jose/model"
-	"hash"
 	"io"
+	"slices"
 )
 
 var (
 	_ model.Signer    = &Signer{}
-	_ model.Validator = &Validator{} //todo: tests
+	_ model.Validator = &Validator{}
 )
 
 type Signer struct {
 	alg    jwa.Algorithm
 	secret common.SecretKey
-	hasher hash.Hash
 }
 
 type Validator struct {
 	alg    jwa.Algorithm
 	secret common.SecretKey
-	hasher hash.Hash
 }
 
 func (v Validator) ValidateSignature(digest, signature []byte) (bool, error) {
-	mac := common.ProduceMac(v.hasher, digest)
-	return bytes.Equal(signature, mac), nil
+	mac := common.ProduceMac(hmac.New(sha512.New384, v.secret), digest)
+	return hmac.Equal(signature, mac), nil
 }
 
 func (v Validator) Public() crypto.PublicKey {
-	return v.secret
+	return slices.Clone(v.secret)
 }
 
 func NewSigner(secretKey *[]byte) (*Signer, error) {
@@ -52,14 +49,9 @@ func NewSigner(secretKey *[]byte) (*Signer, error) {
 		}
 	}
 
-	h := hmac.New(func() hash.Hash {
-		return sha512.New384()
-	}, secret)
-
 	return &Signer{
 		alg:    jwa.HS384,
-		secret: secret,
-		hasher: h,
+		secret: slices.Clone(secret),
 	}, nil
 }
 
@@ -70,14 +62,9 @@ func NewValidator(publicKey crypto.PublicKey) (*Validator, error) {
 		return nil, fmt.Errorf("invalid public key provided - must be of type `common.SecretKey` for hmac algorithms")
 	}
 	secret := []byte(publicKey.(common.SecretKey))
-	h := hmac.New(func() hash.Hash {
-		return sha512.New384()
-	}, secret)
-
 	return &Validator{
 		alg:    jwa.HS384,
-		secret: secret,
-		hasher: h,
+		secret: slices.Clone(secret),
 	}, nil
 }
 
@@ -86,9 +73,9 @@ func (signer *Signer) Alg() jwa.Algorithm {
 }
 
 func (signer *Signer) Public() crypto.PublicKey {
-	return signer.secret
+	return slices.Clone(signer.secret)
 }
 
 func (signer *Signer) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error) {
-	return common.ProduceMac(signer.hasher, digest), nil
+	return common.ProduceMac(hmac.New(sha512.New384, signer.secret), digest), nil
 }
