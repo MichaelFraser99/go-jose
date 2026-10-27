@@ -2,6 +2,7 @@ package jws
 
 import (
 	"crypto"
+	"crypto/x509"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -33,7 +34,12 @@ func VerifyCompactSerialization(compactSerialization string, outOfBoundsPublicKe
 		jwkRetrievers = append(jwkRetrievers, outOfBoundsPublicKey)
 	}
 
-	headerJwkRetrievers, err := header.ValidateHeader(protectedHeader, nil, model.JWS) //todo: sort out http client providing
+	var x509Roots *x509.CertPool
+	if opts != nil {
+		x509Roots = opts.X509Roots
+	}
+
+	headerJwkRetrievers, err := header.ValidateHeader(protectedHeader, nil, model.JWS, x509Roots) //todo: sort out http client providing
 	if err != nil {
 		return nil, nil, fmt.Errorf("%werror validating header: %v", joseerror.ErrMalformedToken, err)
 	}

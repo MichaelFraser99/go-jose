@@ -38,6 +38,15 @@ func TestValidateHeader(t *testing.T) {
 		t.Fatalf("Failed to generate test certificate chain: %s", err)
 	}
 
+	testRoots := x509.NewCertPool()
+	for _, der := range certificates {
+		parsed, err := x509.ParseCertificate(der)
+		if err != nil {
+			t.Fatalf("Failed to parse a certificate for the trust anchors: %s", err)
+		}
+		testRoots.AddCert(parsed)
+	}
+
 	var encodedCertificates []string
 	for _, cert := range certificates {
 		encodedCertificates = append(encodedCertificates, base64.StdEncoding.EncodeToString(cert))
@@ -254,7 +263,7 @@ func TestValidateHeader(t *testing.T) {
 
 	for testName, test := range tests {
 		t.Run(testName, func(t *testing.T) {
-			retrievers, err := ValidateHeader(test.protectedHeader, test.client, model.JWS) //todo extract mode and test for both
+			retrievers, err := ValidateHeader(test.protectedHeader, test.client, model.JWS, testRoots) //todo extract mode and test for both
 			if err != nil {
 				if test.errMsg == "" {
 					t.Fatalf("unexpected error: %v", err)

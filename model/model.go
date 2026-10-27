@@ -2,6 +2,7 @@ package model
 
 import (
 	"crypto"
+	"crypto/x509"
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
@@ -17,6 +18,15 @@ type JoseOptions struct {
 
 	// ClockSkewLeeway widens the window the iat, nbf and exp claims are judged against, to allow for clock skew between the issuer and this verifier. A value of zero or less grants none. Defaults to 0
 	ClockSkewLeeway time.Duration
+
+	// X509Roots holds the trust anchors a certificate chain named by the x5c or x5u
+	// header must validate against. RFC 7515 section 4.1.6 requires a recipient to
+	// validate the chain per RFC 5280, and RFC 5280 path validation takes a trust
+	// anchor as an input, so neither header can be used without one.
+	//
+	// With no roots configured, a token's x5c and x5u headers are ignored: they
+	// contribute no key, and the token verifies only if another source does.
+	X509Roots *x509.CertPool
 }
 
 type Retriever func() ([]crypto.PublicKey, error)
