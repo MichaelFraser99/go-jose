@@ -2,7 +2,6 @@ package jws
 
 import (
 	"crypto"
-	"crypto/x509"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -11,7 +10,6 @@ import (
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
 	"github.com/MichaelFraser99/go-jose/model"
-	"slices"
 	"strings"
 )
 
@@ -34,14 +32,9 @@ func VerifyCompactSerialization(compactSerialization string, outOfBoundsPublicKe
 		jwkRetrievers = append(jwkRetrievers, outOfBoundsPublicKey)
 	}
 
-	var x509Roots *x509.CertPool
-	if opts != nil {
-		x509Roots = opts.X509Roots
-	}
-
-	headerJwkRetrievers, err := header.ValidateHeader(protectedHeader, nil, model.JWS, x509Roots) //todo: sort out http client providing
+	headerJwkRetrievers, err := header.ValidateHeader(protectedHeader, nil, model.JWS, opts) //todo: sort out http client providing
 	if err != nil {
-		return nil, nil, fmt.Errorf("%werror validating header: %v", joseerror.ErrMalformedToken, err)
+		return nil, nil, fmt.Errorf("%werror validating header: %w", joseerror.ErrMalformedToken, err)
 	}
 
 	if opts == nil || opts.UseTokenProvidedKeys {
@@ -63,12 +56,6 @@ func VerifyCompactSerialization(compactSerialization string, outOfBoundsPublicKe
 	}
 
 	algorithm := jwa.GetAlgorithm(protectedHeader["alg"].(string)) //validated to exist and be of correct type earlier
-
-	if opts != nil && len(opts.AllowedSigningAlgorithms) > 0 {
-		if !slices.Contains(opts.AllowedSigningAlgorithms, algorithm) {
-			return nil, nil, fmt.Errorf("%walgorithm not permitted by application-level constraints", joseerror.ErrInvalidSignature)
-		}
-	}
 
 	var noKeyIdentifierErrors []error
 	for _, retriever := range jwkRetrievers {

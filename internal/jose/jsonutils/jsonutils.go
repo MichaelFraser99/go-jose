@@ -8,6 +8,7 @@ import (
 	"github.com/MichaelFraser99/go-jose/jwa"
 	"net/url"
 	"reflect"
+	"slices"
 )
 
 type Validator[T any] func(header map[string]any, retrievedValue T) error
@@ -169,3 +170,24 @@ var (
 		return nil
 	})
 )
+
+// UnderstoodCriticalValues builds a validator refusing any 'crit' entry not named
+// in understood.
+//
+// RFC 7515 section 4.1.11 says a JWS whose 'crit' lists an extension the recipient
+// does not understand MUST be rejected. This library understands no extensions of
+// its own, so with nothing named every entry is refused.
+func UnderstoodCriticalValues(understood []string) Validator[[]any] {
+	return Validator[[]any](func(jsonInput map[string]any, critical []any) error {
+		for _, claim := range critical {
+			name, ok := claim.(string)
+			if !ok {
+				return fmt.Errorf("%wthe 'crit' array contains one or more non-string values", joseerror.ErrMalformedClaim)
+			}
+			if !slices.Contains(understood, name) {
+				return fmt.Errorf("%wthe 'crit' array names %q, which this recipient does not understand", joseerror.ErrMissingCriticalClaim, name)
+			}
+		}
+		return nil
+	})
+}

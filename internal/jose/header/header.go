@@ -1,12 +1,16 @@
 package header
 
 import (
-	"crypto/x509"
+	"fmt"
+	"slices"
+	"strings"
+
 	"errors"
 	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
 	"github.com/MichaelFraser99/go-jose/internal/jose/jwk"
 	"github.com/MichaelFraser99/go-jose/internal/jose/x5"
 	"github.com/MichaelFraser99/go-jose/joseerror"
+	"github.com/MichaelFraser99/go-jose/jwa"
 	"github.com/MichaelFraser99/go-jose/model"
 	"net/http"
 )
@@ -15,11 +19,26 @@ import (
 //
 // On success, a series of Retriever functions are returned which will yield key(s) for validation purposes.
 // On failure, an error object is returned
-func ValidateHeader(header map[string]any, client *http.Client, mode model.Mode, x509Roots *x509.CertPool) ([]model.Retriever, error) {
+func ValidateHeader(header map[string]any, client *http.Client, mode model.Mode, opts *model.JoseOptions) ([]model.Retriever, error) {
+	if opts == nil {
+		opts = &model.JoseOptions{}
+	}
 	//todo: as different considerations must be made between JWS/JWE (think how JWE needs to be aware of the zip parameter if included in the header for further processing, should we return an "additional info" struct?
 	//todo: we haven't allowed for the StringOrURI stipulation some keys have - go back through JWS and JWE and adjust as appropriate
 	alg, err := jsonutils.RetrieveClaim(header, "alg", jsonutils.ValidateAlg)
 	if err != nil {
+		return nil, err
+	}
+
+	if len(opts.AllowedSigningAlgorithms) > 0 && !slices.Contains(opts.AllowedSigningAlgorithms, jwa.GetAlgorithm(*alg)) {
+		return nil, fmt.Errorf("%w'%s' is not permitted by application-level constraints", joseerror.ErrUnsupportedAlgorithm, *alg)
+	}
+
+	if err := validateExpectedType(header, opts.AcceptedTypes); err != nil {
+		return nil, err
+	}
+
+	if err := validateKeyIdentifierRequirement(header, opts.RequireKeyIdentifier); err != nil {
 		return nil, err
 	}
 
@@ -81,7 +100,7 @@ func ValidateHeader(header map[string]any, client *http.Client, mode model.Mode,
 	// typ isn't processed as jws applications are instructed to ignore
 	// cty isn't processed as jws applications are instructed to ignore
 
-	critValidators := []jsonutils.Validator[[]any]{jsonutils.ValidateNonEmptySlice, jsonutils.ValidateNoDuplicateSliceValues, jsonutils.ValidateNoBannedCriticalValues, jsonutils.ValidateCriticalValuesPresent}
+	critValidators := []jsonutils.Validator[[]any]{jsonutils.ValidateNonEmptySlice, jsonutils.ValidateNoDuplicateSliceValues, jsonutils.ValidateNoBannedCriticalValues, jsonutils.ValidateCriticalValuesPresent, jsonutils.UnderstoodCriticalValues(opts.UnderstoodCriticalHeaders)}
 	if mode == model.JWE {
 		critValidators = append(critValidators, jsonutils.ValidateNoBannedCriticalJWEValues)
 	}
@@ -95,15 +114,64 @@ func ValidateHeader(header map[string]any, client *http.Client, mode model.Mode,
 	if includedJwk != nil { // prefer an in-line jwk
 		jwkRetrievers = append(jwkRetrievers, jwk.InlineJWK(*includedJwk, kid, *alg))
 	}
-	if x5c != nil && x509Roots != nil { // then try an in-line certificate, if a trust anchor is configured for it
-		jwkRetrievers = append(jwkRetrievers, x5.InlineCertificate(*x5c, x5t, x5ts256, *alg, x509Roots))
+	if x5c != nil && opts.X509Roots != nil { // then try an in-line certificate, if a trust anchor is configured for it
+		jwkRetrievers = append(jwkRetrievers, x5.InlineCertificate(*x5c, x5t, x5ts256, *alg, opts.X509Roots))
 	}
 	if jku != nil { // check for specified keystore
 		jwkRetrievers = append(jwkRetrievers, jwk.RetrieveJKU(*jku, client, kid, *alg))
 	}
-	if x5u != nil && x509Roots != nil { // check for specified remote certificate chain, if a trust anchor is configured for it
-		jwkRetrievers = append(jwkRetrievers, x5.RetrieveX5U(*x5u, client, x5t, x5ts256, *alg, x509Roots))
+	if x5u != nil && opts.X509Roots != nil { // check for specified remote certificate chain, if a trust anchor is configured for it
+		jwkRetrievers = append(jwkRetrievers, x5.RetrieveX5U(*x5u, client, x5t, x5ts256, *alg, opts.X509Roots))
 	}
 
 	return jwkRetrievers, nil
+}
+
+func validateExpectedType(header map[string]any, accepted []string) error {
+	if len(accepted) == 0 {
+		return nil
+	}
+
+	raw, present := header["typ"]
+	if !present {
+		return fmt.Errorf("%wthe 'typ' header is required and names one of %v", joseerror.ErrMissingClaim, accepted)
+	}
+	typ, ok := raw.(string)
+	if !ok {
+		return fmt.Errorf("%wthe 'typ' header must be a string", joseerror.ErrMalformedClaim)
+	}
+
+	for _, candidate := range accepted {
+		if mediaTypesMatch(typ, candidate) {
+			return nil
+		}
+	}
+	return fmt.Errorf("%wthe 'typ' header names %q, which is not one of %v", joseerror.ErrMalformedClaim, typ, accepted)
+}
+
+func mediaTypesMatch(declared, accepted string) bool {
+	return strings.EqualFold(qualifyMediaType(declared), qualifyMediaType(accepted))
+}
+
+func qualifyMediaType(value string) string {
+	if strings.Contains(value, "/") {
+		return value
+	}
+	return "application/" + value
+}
+
+func validateKeyIdentifierRequirement(header map[string]any, required bool) error {
+	if !required {
+		return nil
+	}
+
+	raw, present := header["kid"]
+	if !present {
+		return fmt.Errorf("%wthe 'kid' header is required", joseerror.ErrMissingClaim)
+	}
+	kid, ok := raw.(string)
+	if !ok || kid == "" {
+		return fmt.Errorf("%wthe 'kid' header must be a non-empty string", joseerror.ErrMalformedClaim)
+	}
+	return nil
 }

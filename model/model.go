@@ -19,6 +19,27 @@ type JoseOptions struct {
 	// ClockSkewLeeway widens the window the iat, nbf and exp claims are judged against, to allow for clock skew between the issuer and this verifier. A value of zero or less grants none. Defaults to 0
 	ClockSkewLeeway time.Duration
 
+	// AcceptedTypes lists the media types the 'typ' header may name. They are
+	// compared as RFC 7515 section 4.1.9 requires: case-insensitively, with
+	// "application/" treated as prepended to any value containing no "/".
+	//
+	// With none listed, 'typ' is not checked.
+	AcceptedTypes []string
+
+	// RequireKeyIdentifier refuses a token whose 'kid' header is absent or is not a
+	// non-empty string. RFC 7517 section 4.5 leaves 'kid' optional, so this is off by
+	// default; a profile that pins a key by identifier will want it on.
+	RequireKeyIdentifier bool
+
+	// UnderstoodCriticalHeaders names the extension header parameters this caller
+	// understands. RFC 7515 section 4.1.11 says a JWS whose 'crit' lists anything the
+	// recipient does not understand MUST be rejected, so an entry not named here is
+	// refused. Names are compared exactly, since a header parameter name is.
+	//
+	// With none named, any 'crit' is refused, because this library understands no
+	// extensions of its own.
+	UnderstoodCriticalHeaders []string
+
 	// X509Roots holds the trust anchors a certificate chain named by the x5c or x5u
 	// header must validate against. RFC 7515 section 4.1.6 requires a recipient to
 	// validate the chain per RFC 5280, and RFC 5280 path validation takes a trust

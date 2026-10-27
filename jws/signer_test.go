@@ -528,3 +528,20 @@ func TestGetSigner_AnUnsetAlgorithmIsRefused(t *testing.T) {
 		})
 	}
 }
+
+func TestVerifyCompactSerialization_ADeclinedAlgorithmNamesTheAlgorithmFault(t *testing.T) {
+	token := "eyJhbGciOiJSUzI1NiJ9.eyJhIjoiYiJ9.c2ln"
+
+	_, _, err := VerifyCompactSerialization(token, nil, &model.JoseOptions{
+		AllowedSigningAlgorithms: []jwa.Algorithm{jwa.ES256},
+	})
+	if err == nil {
+		t.Fatal("[RFC 8725 3.1] an algorithm the caller has not permitted must be refused")
+	}
+	if !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) {
+		t.Errorf("the signature was never examined, so a caller must be able to tell this from a bad signature with errors.Is, got %v", err)
+	}
+	if errors.Is(err, joseerror.ErrInvalidSignature) {
+		t.Errorf("a declined algorithm is not an invalid signature, got %v", err)
+	}
+}

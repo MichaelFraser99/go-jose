@@ -118,6 +118,29 @@ A JOSE header can name the key that signed the token, through `jwk`, `jku`, `x5c
 head, body, err := jwt.Validate(token, nil, &model.JoseOptions{UseTokenProvidedKeys: false})
 ```
 
+### Stating what you expect of a header
+
+Most JOSE profiles pin their own `typ`, many require a `kid`, and RFC 7515 section 4.1.11 says a JWS whose `crit` lists an extension the recipient does not understand **MUST** be rejected. Rather than decoding the header yourself to check those, say what you expect:
+
+```go
+head, body, err := jwt.Validate(token, retriever, &model.JoseOptions{
+    AcceptedTypes:             []string{"example+jwt"},
+    RequireKeyIdentifier:      true,
+    UnderstoodCriticalHeaders: []string{"x-example"},
+    AllowedSigningAlgorithms:  []jwa.Algorithm{jwa.ES256, jwa.RS256},
+})
+```
+
+Each is off when unset, so none of this changes what an existing caller sees — except `crit`, below.
+
+`AcceptedTypes` compares as RFC 7515 section 4.1.9 requires: case-insensitively, with `application/` treated as prepended to any value containing no `/`. So naming `example+jwt` accepts `application/example+jwt` and `Example+JWT`, and refuses `x-example+jwt`.
+
+`RequireKeyIdentifier` refuses a `kid` that is absent or is not a non-empty string. RFC 7517 section 4.5 leaves `kid` optional, which is why it is off by default.
+
+`UnderstoodCriticalHeaders` names the extensions you handle. **This one is a breaking change:** this library understands no extensions of its own, so with nothing named, any `crit` is now refused. Previously a `crit` listing an unknown extension was accepted, which section 4.1.11 forbids. A caller that handles an extension names it; a caller that handles none needs no change, because a token carrying `crit` was never safe for them to accept.
+
+`AllowedSigningAlgorithms` is refused during header validation rather than at signature verification, so a declined algorithm stops before any `jku` or `x5u` is fetched on that header's behalf. It reports `ErrUnsupportedAlgorithm`: the signature was never examined, so a caller can tell this from a bad signature with `errors.Is`.
+
 ### x5c and x5u need trust anchors
 
 The two certificate headers are different, and they do nothing unless you configure roots for them. RFC 7515 section 4.1.6 says a recipient:
