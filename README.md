@@ -112,11 +112,28 @@ pk := validator.Public()
 
 ## Keys a token carries
 
-A JOSE header can name the key that signed the token, through `jwk`, `jku`, `x5c` or `x5u`. `jwt.Validate` and `jws.VerifyCompactSerialization` will use those keys, which is what `JoseOptions.UseTokenProvidedKeys` governs. It defaults to true, so a token carrying its own key verifies against it unless you turn that off:
+A JOSE header can name the key that signed the token, through `jwk`, `jku`, `x5c` or `x5u`. `jwt.Validate` and `jws.VerifyCompactSerialization` use those keys by default. A caller wanting only its own key material opts out:
 
 ```go
-head, body, err := jwt.Validate(token, nil, &model.JoseOptions{UseTokenProvidedKeys: false})
+head, body, err := jwt.Validate(token, retriever, &model.JoseOptions{IgnoreTokenProvidedKeys: true})
 ```
+
+The sense is negative so the zero value is the default, which matters because a caller setting any other option constructs the struct. The field this replaced read `UseTokenProvidedKeys` and documented itself as defaulting to true — and that held only while you passed no options at all. Setting anything else zeroed it and silently turned every header key source off.
+
+### jku and x5u need a client
+
+The two remote headers name a URL this library fetches. Supply the client it should use:
+
+```go
+head, body, err := jwt.Validate(token, nil, &model.JoseOptions{
+    HttpClient: &http.Client{Timeout: 10 * time.Second, Transport: yourGuardedTransport},
+    X509Roots:  roots,
+})
+```
+
+Both URLs come from the header of the token being verified, so this library makes an outbound request to an address a peer chose, before the signature is checked. Give the client a transport that rejects the destinations your deployment will not allow — private, loopback, link-local and other reserved ranges — and a timeout. The body is capped at 4 MiB whatever client you supply.
+
+With no client, `jku` and `x5u` contribute no key. `jku` must be `https`, as RFC 7515 section 4.1.2 requires integrity protection, and an `x5u` resource is read as the PEM encoding section 4.1.5 requires, falling back to raw DER for a server that sends that instead.
 
 ### Stating what you expect of a header
 

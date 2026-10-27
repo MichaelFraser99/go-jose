@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/joseerror"
@@ -479,6 +480,66 @@ func TestCertificateChainStrings_BothArrayShapesAreRead(t *testing.T) {
 			}
 			if len(chain) != 2 || chain[0] != first || chain[1] != second {
 				t.Errorf("[%s] expected the two entries in order, got %v", tc.reference, chain)
+			}
+		})
+	}
+}
+
+func TestRetrieveX5U_ReadsThePemEncodingTheClauseRequires(t *testing.T) {
+	certs, err := generateCertificateChain(t, 3)
+	if err != nil {
+		t.Fatalf("failed to generate certificate chain: %v", err)
+	}
+	roots := poolOf(t, certs[0])
+
+	pemChain := func(order ...int) []byte {
+		var out []byte
+		for _, i := range order {
+			out = append(out, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certs[i]})...)
+		}
+		return out
+	}
+	derChain := func(order ...int) []byte {
+		var out []byte
+		for _, i := range order {
+			out = append(out, certs[i]...)
+		}
+		return out
+	}
+
+	tests := map[string]struct {
+		reference string
+		body      []byte
+		accept    bool
+	}{
+		"PEM, leaf first, as the clause requires": {reference: "RFC 7515 4.1.5", body: pemChain(2, 1, 0), accept: true},
+		"PEM with the leaf alone":                 {reference: "RFC 7515 4.1.5", body: pemChain(0), accept: true},
+		"DER, which some servers send anyway":     {reference: "RFC 7515 4.1.5", body: derChain(2, 1, 0), accept: true},
+		"PEM carrying no certificate block":       {reference: "RFC 7515 4.1.5", body: []byte("-----BEGIN PRIVATE KEY-----\nAA==\n-----END PRIVATE KEY-----\n")},
+		"a body that is neither":                  {reference: "RFC 7515 4.1.5", body: []byte("not a certificate at all")},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if _, err := w.Write(tc.body); err != nil {
+					return
+				}
+			}))
+			defer server.Close()
+
+			keys, err := RetrieveX5U(server.URL, server.Client(), nil, nil, "RS256", roots)()
+			if tc.accept {
+				if err != nil {
+					t.Fatalf("[%s] the clause requires the resource be PEM-encoded, so %s must be read, got %v", tc.reference, name, err)
+				}
+				if len(keys) != 1 {
+					t.Errorf("[%s] expected the signing certificate's key, got %d", tc.reference, len(keys))
+				}
+				return
+			}
+			if err == nil {
+				t.Errorf("[%s] %s names no certificate, so it must be refused, got %d keys", tc.reference, name, len(keys))
 			}
 		})
 	}

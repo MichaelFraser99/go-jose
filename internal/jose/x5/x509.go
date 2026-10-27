@@ -4,6 +4,7 @@ import (
 	"crypto"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/pem"
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/internal/httputils"
 	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
@@ -85,9 +86,45 @@ func parseCertificateChain(certificateChain []string) ([]*x509.Certificate, erro
 	return certificates, nil
 }
 
+// derFromPem reads the PEM encoding RFC 7515 section 4.1.5 requires of an x5u
+// resource, returning the concatenated DER of every CERTIFICATE block.
+//
+// A body carrying no PEM block at all is returned unchanged, so a server sending
+// raw DER is still read. One carrying PEM blocks but no certificate among them is
+// an error: it is a PEM document about something other than certificates.
+func derFromPem(body []byte) ([]byte, error) {
+	var der []byte
+	var sawBlock bool
+	rest := body
+	for {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		sawBlock = true
+		if block.Type == "CERTIFICATE" {
+			der = append(der, block.Bytes...)
+		}
+	}
+
+	if !sawBlock {
+		return body, nil
+	}
+	if len(der) == 0 {
+		return nil, fmt.Errorf("%wthe retrieved resource carries no PEM certificate block", joseerror.ErrMalformedClaim)
+	}
+	return der, nil
+}
+
 func validateCertificateChain(certificateChain []byte, roots *x509.CertPool) ([]*x509.Certificate, error) {
 	if roots == nil {
 		return nil, fmt.Errorf("%wno x509 trust anchors are configured, so a certificate chain cannot be validated", joseerror.ErrKeystoreError)
+	}
+
+	certificateChain, err := derFromPem(certificateChain)
+	if err != nil {
+		return nil, err
 	}
 
 	certificates, err := x509.ParseCertificates(certificateChain)
