@@ -2,9 +2,13 @@ package jwa
 
 type Algorithm int
 
+// Unknown is the zero value, so an Algorithm a caller never set names no
+// algorithm rather than aliasing a real one.
+//
 // todo: finish this list
 const (
-	ES256 Algorithm = iota
+	Unknown Algorithm = iota
+	ES256
 	ES384
 	ES512
 	RS256
@@ -17,7 +21,6 @@ const (
 	HS384
 	HS512
 	EdDSA //todo: this needs validator & signer implementations
-	Unknown
 )
 
 func (a Algorithm) String() string {

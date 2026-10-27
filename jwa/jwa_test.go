@@ -144,3 +144,50 @@ func TestGetAlgorithm(t *testing.T) {
 		})
 	}
 }
+
+func TestAlgorithm_UnknownIsTheZeroValue(t *testing.T) {
+	if Algorithm(0) != Unknown {
+		t.Errorf("the zero value of Algorithm must be Unknown, so a caller who leaves it unset is refused rather than silently given a real algorithm, got %q", Algorithm(0).String())
+	}
+
+	var unset Algorithm
+	if unset != Unknown {
+		t.Errorf("a declared but unassigned Algorithm must be Unknown, got %q", unset.String())
+	}
+}
+
+func TestAlgorithm_EveryNamedAlgorithmRoundTripsAndNoneIsTheZeroValue(t *testing.T) {
+	named := []Algorithm{ES256, ES384, ES512, RS256, RS384, RS512, PS256, PS384, PS512, HS256, HS384, HS512, EdDSA}
+
+	for _, alg := range named {
+		t.Run(alg.String(), func(t *testing.T) {
+			if alg == Unknown {
+				t.Fatalf("%q must not equal Unknown", alg.String())
+			}
+			if alg == 0 {
+				t.Errorf("%q must not be the zero value, or an unset Algorithm would mean this algorithm", alg.String())
+			}
+			if got := GetAlgorithm(alg.String()); got != alg {
+				t.Errorf("GetAlgorithm(%q) must round trip, got %q", alg.String(), got.String())
+			}
+		})
+	}
+}
+
+func TestGetAlgorithm_AnUnrecognisedNameIsUnknown(t *testing.T) {
+	tests := map[string]string{
+		"an empty name":          "",
+		"a lowercase name":       "es256",
+		"a name with whitespace": " ES256",
+		"an algorithm of none":   "none",
+		"an unregistered name":   "ES999",
+	}
+
+	for name, alg := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := GetAlgorithm(alg); got != Unknown {
+				t.Errorf("%q names no algorithm this library supports, so it must map to Unknown, got %q", alg, got.String())
+			}
+		})
+	}
+}
