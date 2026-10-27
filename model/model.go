@@ -35,13 +35,14 @@ type Jwks struct {
 	} `json:"-"`
 }
 
-// RetrieveByKeyID
+// RetrieveByKeyID returns every jwk in the key set whose kid matches the one given,
+// in the order the set holds them.
 //
-// # Returns a jwk from the key-set by provided key ID
-//
-// If no match is found or multiple entries exist for a given key ID, an error is thrown.
-// Any keys with malformed kid claims are ignored
-func (j *Jwks) RetrieveByKeyID(kid string) (map[string]any, error) {
+// RFC 7517 section 4.5 does not require a kid to be unique within a key set, so a
+// set may legitimately carry more than one key under one kid, as an issuer mid key
+// rotation does. An error is returned only when no key carries the kid. Keys with
+// an absent or non-string kid are ignored.
+func (j *Jwks) RetrieveByKeyID(kid string) ([]map[string]any, error) {
 	var keys []map[string]any
 	for _, key := range j.Keys {
 		if keyKid, ok := key["kid"]; ok {
@@ -55,10 +56,7 @@ func (j *Jwks) RetrieveByKeyID(kid string) (map[string]any, error) {
 	if len(keys) == 0 {
 		return nil, fmt.Errorf("%wno matching key found for provided key ID", joseerror.ErrKeystoreError)
 	}
-	if len(keys) > 1 {
-		return nil, fmt.Errorf("%wmultiple keys found for provided key ID", joseerror.ErrKeystoreError)
-	}
-	return keys[0], nil
+	return keys, nil
 }
 
 func (j *Jwks) Add(jwk map[string]any) error {
@@ -66,7 +64,7 @@ func (j *Jwks) Add(jwk map[string]any) error {
 		if sKid, ok := kid.(string); !ok {
 			return fmt.Errorf("%w malformed key ID found for JWK", joseerror.ErrKeystoreError)
 		} else {
-			if existing, _ := j.RetrieveByKeyID(sKid); existing != nil {
+			if existing, _ := j.RetrieveByKeyID(sKid); len(existing) > 0 {
 				return fmt.Errorf("%w provided jwk has kid value matching a value already present in the keyset", joseerror.ErrKeystoreError)
 			}
 		}
