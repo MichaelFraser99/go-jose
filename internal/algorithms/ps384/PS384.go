@@ -39,7 +39,7 @@ func NewSigner(size int) (*Signer, error) {
 func NewSignerFromPrivateKey(privateKey crypto.PrivateKey) (*Signer, error) {
 	rsaPrivateKey, ok := privateKey.(*rsa.PrivateKey)
 	if !ok {
-		return nil, fmt.Errorf("%winvalid key provided - should be instance of `*rsa.Privatekey`", joseerror.ErrInvalidPrivateKey)
+		return nil, fmt.Errorf("%wshould be instance of *rsa.PrivateKey", joseerror.ErrInvalidPrivateKey)
 	}
 	return &Signer{
 		alg:        jwa.PS384,
@@ -50,7 +50,7 @@ func NewSignerFromPrivateKey(privateKey crypto.PrivateKey) (*Signer, error) {
 func NewValidator(publicKey crypto.PublicKey) (*Validator, error) {
 	rsaPublicKey, ok := publicKey.(*rsa.PublicKey)
 	if !ok {
-		return nil, fmt.Errorf("%winvalid key provided - should be instance of `*rsa.PublicKey`", joseerror.ErrInvalidPublicKey)
+		return nil, fmt.Errorf("%wshould be instance of *rsa.PublicKey", joseerror.ErrInvalidPublicKey)
 	}
 	return &Validator{
 		alg:       jwa.PS384,
@@ -106,7 +106,7 @@ func (validator *Validator) ValidateSignature(digest, signature []byte) (bool, e
 	err := rsa.VerifyPSS(validator.publicKey, crypto.SHA384, hashedDigest[:], signature, opts)
 
 	if err != nil {
-		return false, fmt.Errorf("%winvalid signature: %s", joseerror.ErrInvalidSignature, err.Error())
+		return false, fmt.Errorf("%w%s", joseerror.ErrInvalidSignature, err.Error())
 	}
 
 	return true, nil

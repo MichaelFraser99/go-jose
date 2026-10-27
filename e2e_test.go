@@ -271,7 +271,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 				if err == nil {
 					t.Fatal("error should be thrown when wrong key provided")
 				}
-				if err.Error() != "invalid key provided - should be instance of `*ecdsa.Privatekey`" {
+				if err.Error() != "invalid private key: should be instance of *ecdsa.PrivateKey" {
 					t.Errorf("wrong error returned: %s", err.Error())
 				}
 			},
@@ -284,7 +284,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 				if err == nil {
 					t.Fatal("error should be thrown when wrong key provided")
 				}
-				if err.Error() != "invalid key provided - curve should be P-256, was P-521" {
+				if err.Error() != "invalid private key: curve should be P-256, was P-521" {
 					t.Errorf("wrong error returned: %s", err.Error())
 				}
 			},
@@ -297,7 +297,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 				if err == nil {
 					t.Fatal("error should be thrown when wrong key provided")
 				}
-				if err.Error() != "invalid key provided - should be instance of `*ecdsa.Privatekey`" {
+				if err.Error() != "invalid private key: should be instance of *ecdsa.PrivateKey" {
 					t.Errorf("wrong error returned: %s", err.Error())
 				}
 			},
@@ -310,7 +310,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 				if err == nil {
 					t.Fatal("error should be thrown when wrong key provided")
 				}
-				if err.Error() != "invalid key provided - curve should be P-384, was P-521" {
+				if err.Error() != "invalid private key: curve should be P-384, was P-521" {
 					t.Errorf("wrong error returned: %s", err.Error())
 				}
 			},
@@ -323,7 +323,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 				if err == nil {
 					t.Fatal("error should be thrown when wrong key provided")
 				}
-				if err.Error() != "invalid key provided - should be instance of `*ecdsa.Privatekey`" {
+				if err.Error() != "invalid private key: should be instance of *ecdsa.PrivateKey" {
 					t.Errorf("wrong error returned: %s", err.Error())
 				}
 			},
@@ -336,7 +336,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 				if err == nil {
 					t.Fatal("error should be thrown when wrong key provided")
 				}
-				if err.Error() != "invalid key provided - curve should be P-521, was P-256" {
+				if err.Error() != "invalid private key: curve should be P-521, was P-256" {
 					t.Errorf("wrong error returned: %s", err.Error())
 				}
 			},
@@ -349,7 +349,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 				if err == nil {
 					t.Fatal("error should be thrown when wrong key provided")
 				}
-				if err.Error() != "invalid key provided - should be instance of `*rsa.Privatekey`" {
+				if err.Error() != "invalid private key: should be instance of *rsa.PrivateKey" {
 					t.Errorf("wrong error returned: %s", err.Error())
 				}
 			},
@@ -362,7 +362,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 				if err == nil {
 					t.Fatal("error should be thrown when wrong key provided")
 				}
-				if err.Error() != "invalid key provided - should be instance of `*rsa.Privatekey`" {
+				if err.Error() != "invalid private key: should be instance of *rsa.PrivateKey" {
 					t.Errorf("wrong error returned: %s", err.Error())
 				}
 			},
@@ -375,7 +375,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 				if err == nil {
 					t.Fatal("error should be thrown when wrong key provided")
 				}
-				if err.Error() != "invalid key provided - should be instance of `*rsa.Privatekey`" {
+				if err.Error() != "invalid private key: should be instance of *rsa.PrivateKey" {
 					t.Errorf("wrong error returned: %s", err.Error())
 				}
 			},
@@ -388,7 +388,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 				if err == nil {
 					t.Fatal("error should be thrown when wrong key provided")
 				}
-				if err.Error() != "invalid key provided - should be instance of `*rsa.Privatekey`" {
+				if err.Error() != "invalid private key: should be instance of *rsa.PrivateKey" {
 					t.Errorf("wrong error returned: %s", err.Error())
 				}
 			},
@@ -401,7 +401,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 				if err == nil {
 					t.Fatal("error should be thrown when wrong key provided")
 				}
-				if err.Error() != "invalid key provided - should be instance of `*rsa.Privatekey`" {
+				if err.Error() != "invalid private key: should be instance of *rsa.PrivateKey" {
 					t.Errorf("wrong error returned: %s", err.Error())
 				}
 			},
@@ -414,7 +414,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 				if err == nil {
 					t.Fatal("error should be thrown when wrong key provided")
 				}
-				if err.Error() != "invalid key provided - should be instance of `*rsa.Privatekey`" {
+				if err.Error() != "invalid private key: should be instance of *rsa.PrivateKey" {
 					t.Errorf("wrong error returned: %s", err.Error())
 				}
 			},
@@ -427,7 +427,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 				if err == nil {
 					t.Fatal("error should be thrown when wrong key provided")
 				}
-				if err.Error() != "HMAC Signers cannot be created this way - please use GetSigner and specify the secret key using the Opts function" {
+				if err.Error() != "unsupported algorithm: HMAC Signers cannot be created this way - please use GetSigner and specify the secret key using the Opts function" {
 					t.Errorf("wrong error returned: %s", err.Error())
 				}
 			},
@@ -440,7 +440,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 				if err == nil {
 					t.Fatal("error should be thrown when wrong key provided")
 				}
-				if err.Error() != "HMAC Signers cannot be created this way - please use GetSigner and specify the secret key using the Opts function" {
+				if err.Error() != "unsupported algorithm: HMAC Signers cannot be created this way - please use GetSigner and specify the secret key using the Opts function" {
 					t.Errorf("wrong error returned: %s", err.Error())
 				}
 			},
@@ -453,7 +453,7 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 				if err == nil {
 					t.Fatal("error should be thrown when wrong key provided")
 				}
-				if err.Error() != "HMAC Signers cannot be created this way - please use GetSigner and specify the secret key using the Opts function" {
+				if err.Error() != "unsupported algorithm: HMAC Signers cannot be created this way - please use GetSigner and specify the secret key using the Opts function" {
 					t.Errorf("wrong error returned: %s", err.Error())
 				}
 			},
