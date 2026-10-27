@@ -1,6 +1,8 @@
 package jws
 
 import (
+	"errors"
+	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
 	"github.com/MichaelFraser99/go-jose/model"
 	"testing"
@@ -493,6 +495,36 @@ func TestGetSigner(t *testing.T) {
 		t.Run(tt.algorithm.String(), func(t *testing.T) {
 			signer, err := GetSigner(tt.algorithm, tt.opts)
 			tt.verify(t, signer, err)
+		})
+	}
+}
+
+func TestGetSigner_AnUnsetAlgorithmIsRefused(t *testing.T) {
+	secret := []byte("a-secret-for-the-unset-algorithm-test")
+
+	tests := map[string]jwa.Algorithm{
+		"the zero value":      jwa.Algorithm(0),
+		"Unknown by name":     jwa.Unknown,
+		"a value off the end": jwa.Algorithm(9999),
+	}
+
+	for name, alg := range tests {
+		t.Run(name, func(t *testing.T) {
+			signer, err := GetSigner(alg, &model.Opts{SecretKey: &secret})
+			if err == nil {
+				t.Fatalf("an Algorithm naming nothing must not produce a signer, got %T", signer)
+			}
+			if !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) {
+				t.Errorf("the refusal must name the algorithm as unsupported, got %v", err)
+			}
+
+			validator, verr := GetValidator(alg, secret)
+			if verr == nil {
+				t.Fatalf("an Algorithm naming nothing must not produce a validator, got %T", validator)
+			}
+			if !errors.Is(verr, joseerror.ErrUnsupportedAlgorithm) {
+				t.Errorf("the refusal must name the algorithm as unsupported, got %v", verr)
+			}
 		})
 	}
 }
