@@ -6,12 +6,28 @@ import (
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
+	"net/http"
 	"time"
 )
 
 type JoseOptions struct {
-	// UseTokenProvidedKeys determines if cryptographic keys provided in the token header should be used for verification. Defaults to true
-	UseTokenProvidedKeys bool
+	// IgnoreTokenProvidedKeys stops the keys a token carries in its own header — jwk,
+	// jku, x5c and x5u — from being used for verification. They are used by default,
+	// so a caller wanting only its own key material opts out here.
+	//
+	// The sense is negative so that the zero value is the default. The field this
+	// replaced read UseTokenProvidedKeys and documented itself as defaulting to true,
+	// which held only while a caller passed no options at all: constructing the struct
+	// to set anything else zeroed it and silently turned every header key source off.
+	IgnoreTokenProvidedKeys bool
+
+	// HttpClient fetches the resources a token's jku and x5u headers name. Both URLs
+	// come from the header of the token being verified, so this library makes an
+	// outbound request to an address a peer chose: supply a client whose transport
+	// rejects the destinations your deployment will not allow.
+	//
+	// With no client, jku and x5u contribute no key.
+	HttpClient *http.Client
 
 	// AllowedSigningAlgorithms defines the list of acceptable algorithms for token signature verification. If not specified, all algorithms are permitted
 	AllowedSigningAlgorithms []jwa.Algorithm

@@ -10,6 +10,7 @@ import (
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
 	"github.com/MichaelFraser99/go-jose/model"
+	"net/http"
 	"strings"
 )
 
@@ -32,12 +33,17 @@ func VerifyCompactSerialization(compactSerialization string, outOfBoundsPublicKe
 		jwkRetrievers = append(jwkRetrievers, outOfBoundsPublicKey)
 	}
 
-	headerJwkRetrievers, err := header.ValidateHeader(protectedHeader, nil, model.JWS, opts) //todo: sort out http client providing
+	var client *http.Client
+	if opts != nil {
+		client = opts.HttpClient
+	}
+
+	headerJwkRetrievers, err := header.ValidateHeader(protectedHeader, client, model.JWS, opts)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%werror validating header: %w", joseerror.ErrMalformedToken, err)
 	}
 
-	if opts == nil || opts.UseTokenProvidedKeys {
+	if opts == nil || !opts.IgnoreTokenProvidedKeys {
 		jwkRetrievers = append(jwkRetrievers, headerJwkRetrievers...)
 	}
 
