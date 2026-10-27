@@ -103,7 +103,11 @@ func RetrieveJKU(jku string, client *http.Client, kid *string, alg string) model
 
 func PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error) {
 	if kty, present := jwk["kty"]; present {
-		switch kty.(string) {
+		ktyString, ok := kty.(string)
+		if !ok {
+			return nil, fmt.Errorf("%wthe 'kty' claim must be a string", joseerror.ErrInvalidPrivateKey)
+		}
+		switch ktyString {
 		case "EC":
 			return common.ECDSAPrivateKeyFromJwk(jwk)
 		case "RSA":
@@ -111,7 +115,7 @@ func PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error) {
 		case "OKP":
 			return common.EdDSAPrivateKeyFromJwk(jwk)
 		default:
-			return nil, fmt.Errorf("%wunsupported kty: %s", joseerror.ErrUnsupportedAlgorithm, kty.(string))
+			return nil, fmt.Errorf("%wunsupported kty: %s", joseerror.ErrUnsupportedAlgorithm, ktyString)
 		}
 	} else {
 		return nil, fmt.Errorf("no kty claim present in jwk, cannot infer type of private key to return")
@@ -120,7 +124,11 @@ func PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error) {
 
 func PublicFromJwk(jwk map[string]any) (crypto.PublicKey, error) {
 	if kty, present := jwk["kty"]; present {
-		switch kty.(string) {
+		ktyString, ok := kty.(string)
+		if !ok {
+			return nil, fmt.Errorf("%wthe 'kty' claim must be a string", joseerror.ErrInvalidPublicKey)
+		}
+		switch ktyString {
 		case "EC":
 			return common.ECDSAPublicKeyFromJwk(jwk)
 		case "RSA":
@@ -128,7 +136,7 @@ func PublicFromJwk(jwk map[string]any) (crypto.PublicKey, error) {
 		case "OKP":
 			return common.EdDSAPublicKeyFromJwk(jwk)
 		default:
-			return nil, fmt.Errorf("%wunsupported kty: %s", joseerror.ErrUnsupportedAlgorithm, kty.(string))
+			return nil, fmt.Errorf("%wunsupported kty: %s", joseerror.ErrUnsupportedAlgorithm, ktyString)
 		}
 	} else {
 		return nil, fmt.Errorf("no kty claim present in jwk, cannot infer type of public key to return")
