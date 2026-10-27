@@ -70,7 +70,10 @@ func ECDSAPublicKeyFromJwk(jwk map[string]any) (*ecdsa.PublicKey, error) {
 }
 
 func extractECDSACurveFromJwk(jwk map[string]any) (elliptic.Curve, error) {
-	curveName := jwk["crv"].(string)
+	curveName, ok := jwk["crv"].(string)
+	if !ok {
+		return nil, fmt.Errorf("%wthe 'crv' claim must be a string naming a registered curve", jose_errors.ErrInvalidPublicKey)
+	}
 	var curve elliptic.Curve
 	switch curveName {
 	case "P-256":
