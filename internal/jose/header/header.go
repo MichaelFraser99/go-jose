@@ -1,6 +1,7 @@
 package header
 
 import (
+	"crypto/x509"
 	"errors"
 	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
 	"github.com/MichaelFraser99/go-jose/internal/jose/jwk"
@@ -14,7 +15,7 @@ import (
 //
 // On success, a series of Retriever functions are returned which will yield key(s) for validation purposes.
 // On failure, an error object is returned
-func ValidateHeader(header map[string]any, client *http.Client, mode model.Mode) ([]model.Retriever, error) {
+func ValidateHeader(header map[string]any, client *http.Client, mode model.Mode, x509Roots *x509.CertPool) ([]model.Retriever, error) {
 	//todo: as different considerations must be made between JWS/JWE (think how JWE needs to be aware of the zip parameter if included in the header for further processing, should we return an "additional info" struct?
 	//todo: we haven't allowed for the StringOrURI stipulation some keys have - go back through JWS and JWE and adjust as appropriate
 	alg, err := jsonutils.RetrieveClaim(header, "alg", jsonutils.ValidateAlg)
@@ -55,9 +56,16 @@ func ValidateHeader(header map[string]any, client *http.Client, mode model.Mode)
 		return nil, err
 	}
 
-	x5c, err := jsonutils.RetrieveClaim[[]string](header, "x5c", x5.ValidateCertificateChain)
-	if err != nil && !errors.Is(err, joseerror.ErrMissingClaim) { //optional claim
-		return nil, err
+	var x5c *[]string
+	if rawX5c, present := header["x5c"]; present { //optional claim
+		chain, err := x5.CertificateChainStrings(rawX5c)
+		if err != nil {
+			return nil, err
+		}
+		if err := x5.ValidateCertificateChain(header, chain); err != nil {
+			return nil, err
+		}
+		x5c = &chain
 	}
 
 	x5t, err := jsonutils.RetrieveClaim(header, "x5t", jsonutils.ValidateBase64Url)
@@ -87,14 +95,14 @@ func ValidateHeader(header map[string]any, client *http.Client, mode model.Mode)
 	if includedJwk != nil { // prefer an in-line jwk
 		jwkRetrievers = append(jwkRetrievers, jwk.InlineJWK(*includedJwk, kid, *alg))
 	}
-	if x5c != nil { // then try an in-line certificate
-		jwkRetrievers = append(jwkRetrievers, x5.InlineCertificate(*x5c, x5t, x5ts256, *alg))
+	if x5c != nil && x509Roots != nil { // then try an in-line certificate, if a trust anchor is configured for it
+		jwkRetrievers = append(jwkRetrievers, x5.InlineCertificate(*x5c, x5t, x5ts256, *alg, x509Roots))
 	}
 	if jku != nil { // check for specified keystore
 		jwkRetrievers = append(jwkRetrievers, jwk.RetrieveJKU(*jku, client, kid, *alg))
 	}
-	if x5u != nil { // check for specified remote certificate chain
-		jwkRetrievers = append(jwkRetrievers, x5.RetrieveX5U(*x5u, client, x5t, x5ts256, *alg))
+	if x5u != nil && x509Roots != nil { // check for specified remote certificate chain, if a trust anchor is configured for it
+		jwkRetrievers = append(jwkRetrievers, x5.RetrieveX5U(*x5u, client, x5t, x5ts256, *alg, x509Roots))
 	}
 
 	return jwkRetrievers, nil

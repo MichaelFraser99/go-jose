@@ -72,10 +72,8 @@ func Test_validateCertificateChain(t *testing.T) {
 			errMsg:       "the provided values carry no certificate",
 			errTypes:     []error{joseerror.ErrMalformedClaim},
 		},
-		"broken chain": {
+		"a chain whose links do not join still parses": {
 			certificates: []string{encodedCerts[3], encodedCerts[0]},
-			errMsg:       "one or more of the provided values is not a valid certificate chain: x509: certificate signed by unknown authority",
-			errTypes:     []error{joseerror.ErrMalformedClaim},
 		},
 	}
 
@@ -226,7 +224,7 @@ func TestInlineCertificate_AcceptsTheThumbprintTheRFCDefines(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			keys, err := InlineCertificate([]string{base64.StdEncoding.EncodeToString(cert)}, tc.x5t, tc.x5ts256, "RS256")()
+			keys, err := InlineCertificate([]string{base64.StdEncoding.EncodeToString(cert)}, tc.x5t, tc.x5ts256, "RS256", poolOf(t, cert))()
 			if err != nil {
 				t.Fatalf("[%s] a header carrying the thumbprint this clause defines must be accepted, got %v", tc.reference, err)
 			}
@@ -269,7 +267,7 @@ func TestInlineCertificate_RefusesAThumbprintThatDoesNotMatch(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			keys, err := InlineCertificate([]string{base64.StdEncoding.EncodeToString(cert)}, tc.x5t, tc.x5ts256, "RS256")()
+			keys, err := InlineCertificate([]string{base64.StdEncoding.EncodeToString(cert)}, tc.x5t, tc.x5ts256, "RS256", poolOf(t, cert))()
 			if err == nil {
 				t.Fatalf("[%s] a thumbprint that is not this certificate's must be refused, got %d keys", tc.reference, len(keys))
 			}
@@ -316,7 +314,7 @@ func TestRetrieveX5U_HoldsTheCertificateToItsThumbprint(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			keys, err := RetrieveX5U(server.URL, server.Client(), tc.x5t, tc.x5ts256, "RS256")()
+			keys, err := RetrieveX5U(server.URL, server.Client(), tc.x5t, tc.x5ts256, "RS256", poolOf(t, cert))()
 			if tc.accept {
 				if err != nil {
 					t.Fatalf("[%s] the certificate this URL serves carries that thumbprint, so it must be accepted, got %v", tc.reference, err)
@@ -331,6 +329,156 @@ func TestRetrieveX5U_HoldsTheCertificateToItsThumbprint(t *testing.T) {
 			}
 			if !errors.Is(err, joseerror.ErrNoKeyIdentifierMatch) {
 				t.Errorf("[%s] the refusal must name the key identifier mismatch, got %v", tc.reference, err)
+			}
+		})
+	}
+}
+
+func poolOf(t *testing.T, der ...[]byte) *x509.CertPool {
+	t.Helper()
+	pool := x509.NewCertPool()
+	for _, d := range der {
+		parsed, err := x509.ParseCertificate(d)
+		if err != nil {
+			t.Fatalf("failed to parse a certificate for the pool: %v", err)
+		}
+		pool.AddCert(parsed)
+	}
+	return pool
+}
+
+func TestInlineCertificate_AChainIsValidatedAgainstTheConfiguredRootsNotItself(t *testing.T) {
+	certs, err := generateCertificateChain(t, 5)
+	if err != nil {
+		t.Fatalf("failed to generate certificate chain: %v", err)
+	}
+	encoded := make([]string, len(certs))
+	for i, c := range certs {
+		encoded[i] = base64.StdEncoding.EncodeToString(c)
+	}
+
+	tests := map[string]struct {
+		reference string
+		chain     []string
+		roots     *x509.CertPool
+		accept    bool
+	}{
+		"a full chain reaching the configured root": {
+			reference: "RFC 7515 4.1.6",
+			chain:     []string{encoded[4], encoded[3], encoded[2], encoded[1], encoded[0]},
+			roots:     poolOf(t, certs[0]),
+			accept:    true,
+		},
+		"a chain whose links do not join": {
+			reference: "RFC 5280 6.1",
+			chain:     []string{encoded[3], encoded[0]},
+			roots:     poolOf(t, certs[0]),
+		},
+		"a chain reaching a root that is not configured": {
+			reference: "RFC 5280 6.1",
+			chain:     []string{encoded[4], encoded[3], encoded[2], encoded[1], encoded[0]},
+			roots:     x509.NewCertPool(),
+		},
+		"a leaf alone, with its own issuer not configured": {
+			reference: "RFC 5280 6.1",
+			chain:     []string{encoded[4]},
+			roots:     x509.NewCertPool(),
+		},
+		"a self-signed root alone, not configured as a root": {
+			reference: "RFC 5280 6.1",
+			chain:     []string{encoded[0]},
+			roots:     x509.NewCertPool(),
+		},
+		"no roots configured at all": {
+			reference: "RFC 7515 4.1.6",
+			chain:     []string{encoded[4], encoded[3], encoded[2], encoded[1], encoded[0]},
+			roots:     nil,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			keys, err := InlineCertificate(tc.chain, nil, nil, "RS256", tc.roots)()
+			if tc.accept {
+				if err != nil {
+					t.Fatalf("[%s] a chain that validates to a configured trust anchor must yield its key, got %v", tc.reference, err)
+				}
+				if len(keys) != 1 {
+					t.Errorf("[%s] expected the signing certificate's key, got %d", tc.reference, len(keys))
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("[%s] path validation takes the trust anchor as an input, so a chain that does not reach a configured one must not yield a key, got %d", tc.reference, len(keys))
+			}
+			if len(keys) != 0 {
+				t.Errorf("[%s] no key may be returned, got %d", tc.reference, len(keys))
+			}
+		})
+	}
+}
+
+func TestCertificateChainStrings_EveryShapeThatIsNotAnArrayOfStringsIsRefused(t *testing.T) {
+	tests := map[string]struct {
+		reference string
+		raw       any
+	}{
+		"a null claim":                {reference: "RFC 7515 4.1.6", raw: nil},
+		"a bare string":               {reference: "RFC 7515 4.1.6", raw: ""},
+		"a non-empty bare string":     {reference: "RFC 7515 4.1.6", raw: "AA"},
+		"an object":                   {reference: "RFC 7515 4.1.6", raw: map[string]any{}},
+		"a number":                    {reference: "RFC 7515 4.1.6", raw: 7},
+		"a boolean":                   {reference: "RFC 7515 4.1.6", raw: true},
+		"an array holding null":       {reference: "RFC 7515 4.1.6", raw: []any{nil}},
+		"an array holding a number":   {reference: "RFC 7515 4.1.6", raw: []any{7}},
+		"an array holding an object":  {reference: "RFC 7515 4.1.6", raw: []any{map[string]any{}}},
+		"a nested array":              {reference: "RFC 7515 4.1.6", raw: []any{[]any{"AA"}}},
+		"an empty array of any":       {reference: "RFC 7515 4.1.6", raw: []any{}},
+		"an empty array of string":    {reference: "RFC 7515 4.1.6", raw: []string{}},
+		"a nil array of string":       {reference: "RFC 7515 4.1.6", raw: []string(nil)},
+		"an array holding only empty": {reference: "RFC 7515 4.1.6", raw: []any{""}},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			chain, err := CertificateChainStrings(tc.raw)
+			if err != nil {
+				if !errors.Is(err, joseerror.ErrMalformedClaim) {
+					t.Errorf("[%s] a claim shape the peer chose is the peer's fault, got %v", tc.reference, err)
+				}
+				return
+			}
+			if err := ValidateCertificateChain(map[string]any{}, chain); err == nil {
+				t.Errorf("[%s] %s names no certificate, so it must be refused by conversion or by validation, got %d accepted entries", tc.reference, name, len(chain))
+			}
+		})
+	}
+}
+
+func TestCertificateChainStrings_BothArrayShapesAreRead(t *testing.T) {
+	certs, err := generateCertificateChain(t, 2)
+	if err != nil {
+		t.Fatalf("failed to generate certificate chain: %v", err)
+	}
+	first := base64.StdEncoding.EncodeToString(certs[0])
+	second := base64.StdEncoding.EncodeToString(certs[1])
+
+	tests := map[string]struct {
+		reference string
+		raw       any
+	}{
+		"the []any a JSON decode produces":  {reference: "RFC 7515 4.1.6", raw: []any{first, second}},
+		"the []string a Go caller may hold": {reference: "RFC 7515 4.1.6", raw: []string{first, second}},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			chain, err := CertificateChainStrings(tc.raw)
+			if err != nil {
+				t.Fatalf("[%s] %s must be readable, got %v", tc.reference, name, err)
+			}
+			if len(chain) != 2 || chain[0] != first || chain[1] != second {
+				t.Errorf("[%s] expected the two entries in order, got %v", tc.reference, chain)
 			}
 		})
 	}

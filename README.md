@@ -110,6 +110,35 @@ validator, err :- jose.GetValidator(jwa.ES256, publicKey)
 pk := validator.Public()
 ```
 
+## Keys a token carries
+
+A JOSE header can name the key that signed the token, through `jwk`, `jku`, `x5c` or `x5u`. `jwt.Validate` and `jws.VerifyCompactSerialization` will use those keys, which is what `JoseOptions.UseTokenProvidedKeys` governs. It defaults to true, so a token carrying its own key verifies against it unless you turn that off:
+
+```go
+head, body, err := jwt.Validate(token, nil, &model.JoseOptions{UseTokenProvidedKeys: false})
+```
+
+### x5c and x5u need trust anchors
+
+The two certificate headers are different, and they do nothing unless you configure roots for them. RFC 7515 section 4.1.6 says a recipient:
+
+> MUST validate the certificate chain according to RFC 5280 and consider the certificate or certificate chain to be invalid if any validation failure occurs.
+
+RFC 5280 path validation takes a trust anchor as an **input**. A chain cannot vouch for itself, so without an anchor there is nothing to validate against and the header cannot be used:
+
+```go
+roots := x509.NewCertPool()
+roots.AppendCertsFromPEM(issuerRootPEM)
+
+head, body, err := jwt.Validate(token, nil, &model.JoseOptions{X509Roots: roots})
+```
+
+With no `X509Roots` configured, a token's `x5c` and `x5u` headers contribute no key. They are not an error — section 4.1.6 makes use of the header OPTIONAL — so the token still verifies if another key source does, and fails with `no cyptographic material provided for signature validation` if none does.
+
+A malformed `x5c` is refused whether or not roots are configured, because its shape is a property of the claim rather than of your trust configuration. An array that is not an array of strings, an empty array, or an entry that is not base64-encoded DER is `ErrMalformedClaim`.
+
+`jwk` and `jku` are deliberately left alone by this. Neither carries a validation MUST, and an inline `jwk` is transparently "here is my key, check against it" — a caller reading the header knows no trust is being conferred. An `x5c` chain looks like PKI, which is why it is the one that needs the anchor made explicit.
+
 ## Jwks
 This library includes two methods for converting keys into JWK format
 
