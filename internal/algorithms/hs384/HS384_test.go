@@ -275,3 +275,70 @@ func TestValidator_RefusesAMacThatIsNotTheRightOne(t *testing.T) {
 		t.Errorf("[RFC 2104] the correct mac must still be accepted, got valid=%v err=%v", valid, err)
 	}
 }
+
+func TestSigner_DoesNotTakeItsKeyFromTheCallersSlice(t *testing.T) {
+	tests := map[string]func(signer *Signer, supplied []byte){
+		"the slice the caller supplied": func(_ *Signer, supplied []byte) { supplied[0] = 'X' },
+		"the value Public returns": func(signer *Signer, _ []byte) {
+			returned, ok := signer.Public().(common.SecretKey)
+			if !ok {
+				panic("Public did not return a common.SecretKey")
+			}
+			returned[0] = 'X'
+		},
+	}
+
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			secret := []byte("a-secret-the-caller-still-holds")
+			signer, err := NewSigner(&secret)
+			if err != nil {
+				t.Fatalf("failed to build the signer: %v", err)
+			}
+
+			input := []byte("the signing input")
+			before, err := signer.Sign(nil, input, nil)
+			if err != nil {
+				t.Fatalf("failed to sign: %v", err)
+			}
+
+			mutate(signer, secret)
+
+			after, err := signer.Sign(nil, input, nil)
+			if err != nil {
+				t.Fatalf("failed to sign after the mutation: %v", err)
+			}
+			if !bytes.Equal(before, after) {
+				t.Errorf("[RFC 2104] a signer's key is fixed when it is built, so writing to %s must not change the mac it produces", name)
+			}
+		})
+	}
+}
+
+func TestValidator_DoesNotTakeItsKeyFromTheCallersSlice(t *testing.T) {
+	secret := []byte("a-secret-the-caller-still-holds")
+	signer, err := NewSigner(&secret)
+	if err != nil {
+		t.Fatalf("failed to build the signer: %v", err)
+	}
+	input := []byte("the signing input")
+	signature, err := signer.Sign(nil, input, nil)
+	if err != nil {
+		t.Fatalf("failed to sign: %v", err)
+	}
+
+	supplied := common.SecretKey(bytes.Clone(secret))
+	validator, err := NewValidator(supplied)
+	if err != nil {
+		t.Fatalf("failed to build the validator: %v", err)
+	}
+	supplied[0] = 'X'
+
+	valid, err := validator.ValidateSignature(input, signature)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !valid {
+		t.Errorf("[RFC 2104] a validator's key is fixed when it is built, so writing to the caller's slice afterwards must not change what it accepts")
+	}
+}

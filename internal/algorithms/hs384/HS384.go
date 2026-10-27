@@ -10,6 +10,7 @@ import (
 	"github.com/MichaelFraser99/go-jose/jwa"
 	"github.com/MichaelFraser99/go-jose/model"
 	"io"
+	"slices"
 )
 
 var (
@@ -33,7 +34,7 @@ func (v Validator) ValidateSignature(digest, signature []byte) (bool, error) {
 }
 
 func (v Validator) Public() crypto.PublicKey {
-	return v.secret
+	return slices.Clone(v.secret)
 }
 
 func NewSigner(secretKey *[]byte) (*Signer, error) {
@@ -50,7 +51,7 @@ func NewSigner(secretKey *[]byte) (*Signer, error) {
 
 	return &Signer{
 		alg:    jwa.HS384,
-		secret: secret,
+		secret: slices.Clone(secret),
 	}, nil
 }
 
@@ -63,7 +64,7 @@ func NewValidator(publicKey crypto.PublicKey) (*Validator, error) {
 	secret := []byte(publicKey.(common.SecretKey))
 	return &Validator{
 		alg:    jwa.HS384,
-		secret: secret,
+		secret: slices.Clone(secret),
 	}, nil
 }
 
@@ -72,7 +73,7 @@ func (signer *Signer) Alg() jwa.Algorithm {
 }
 
 func (signer *Signer) Public() crypto.PublicKey {
-	return signer.secret
+	return slices.Clone(signer.secret)
 }
 
 func (signer *Signer) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error) {
