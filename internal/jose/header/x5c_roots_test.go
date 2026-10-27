@@ -43,7 +43,7 @@ func TestValidateHeader_AnX5cSurvivesTheJsonBoundary(t *testing.T) {
 
 	head := jsonDecodedHeader(t, map[string]any{"alg": "RS256", "x5c": encoded})
 
-	retrievers, err := ValidateHeader(head, nil, model.JWS, roots)
+	retrievers, err := ValidateHeader(head, nil, model.JWS, &model.JoseOptions{X509Roots: roots})
 	if err != nil {
 		t.Fatalf("[RFC 7515 4.1.6] a header carrying x5c must be readable after a JSON decode, got %v", err)
 	}
@@ -64,7 +64,7 @@ func TestValidateHeader_AnX5cEntryThatIsNotAStringIsRefused(t *testing.T) {
 	for name, x5c := range tests {
 		t.Run(name, func(t *testing.T) {
 			head := jsonDecodedHeader(t, map[string]any{"alg": "RS256", "x5c": x5c})
-			if _, err := ValidateHeader(head, nil, model.JWS, roots); err == nil {
+			if _, err := ValidateHeader(head, nil, model.JWS, &model.JoseOptions{X509Roots: roots}); err == nil {
 				t.Errorf("[RFC 7515 4.1.6] each entry is a base64-encoded DER string, so %s must be refused", name)
 			}
 		})
@@ -102,7 +102,7 @@ func TestValidateHeader_AMalformedX5cIsRefusedWhetherOrNotRootsAreConfigured(t *
 	for name, roots := range pools {
 		t.Run(name, func(t *testing.T) {
 			head := jsonDecodedHeader(t, map[string]any{"alg": "RS256", "x5c": []any{"!!!not base64!!!"}})
-			_, err := ValidateHeader(head, nil, model.JWS, roots)
+			_, err := ValidateHeader(head, nil, model.JWS, &model.JoseOptions{X509Roots: roots})
 			if err == nil {
 				t.Fatal("[RFC 7515 4.1.6] an entry that is not base64 is malformed regardless of trust configuration")
 			}
@@ -136,7 +136,7 @@ func TestValidateHeader_AChainThatDoesNotReachTheConfiguredRootsIsNotTrusted(t *
 	}
 	head := jsonDecodedHeader(t, map[string]any{"alg": "RS256", "x5c": encoded})
 
-	retrievers, err := ValidateHeader(head, nil, model.JWS, roots)
+	retrievers, err := ValidateHeader(head, nil, model.JWS, &model.JoseOptions{X509Roots: roots})
 	if err == nil && len(retrievers) > 0 {
 		for _, retrieve := range retrievers {
 			if keys, rerr := retrieve(); rerr == nil && len(keys) > 0 {
