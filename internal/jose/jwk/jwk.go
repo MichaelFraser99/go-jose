@@ -66,6 +66,9 @@ func RetrieveJKU(jku string, client *http.Client, kid *string, alg string) model
 		if err != nil {
 			return nil, fmt.Errorf("%wfailed to close jku response: %w", joseerror.ErrApplicationError, err)
 		}
+		if int64(len(responseBytes)) > httputils.MaxBodyBytes {
+			return nil, fmt.Errorf("%wjku response exceeded the %d byte limit", joseerror.ErrApplicationError, httputils.MaxBodyBytes)
+		}
 
 		var returnedKeystore model.Jwks
 		err = json.Unmarshal(responseBytes, &returnedKeystore)
