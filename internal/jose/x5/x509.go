@@ -119,6 +119,9 @@ func RetrieveX5U(x5u string, client *http.Client, x5t, x5ts256 *string, alg stri
 		if err != nil {
 			return nil, fmt.Errorf("%wfailed to close x5u response: %w", joseerror.ErrApplicationError, err)
 		}
+		if int64(len(responseBytes)) > httputils.MaxBodyBytes {
+			return nil, fmt.Errorf("%wx5u response exceeded the %d byte limit", joseerror.ErrApplicationError, httputils.MaxBodyBytes)
+		}
 
 		certificates, err := validateCertificateChain(responseBytes)
 		if err != nil {
