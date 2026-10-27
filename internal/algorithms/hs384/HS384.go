@@ -15,7 +15,7 @@ import (
 
 var (
 	_ model.Signer    = &Signer{}
-	_ model.Validator = &Validator{} //todo: tests
+	_ model.Validator = &Validator{}
 )
 
 type Signer struct {
