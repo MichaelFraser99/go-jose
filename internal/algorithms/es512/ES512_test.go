@@ -94,7 +94,13 @@ func TestES512_Sign(t *testing.T) {
 		t.Error("signature is not valid")
 	}
 
-	val2, err := NewValidatorFromJwk(jwkBytes)
+	var jwkMap map[string]any
+	err = json.Unmarshal(jwkBytes, &jwkMap)
+	if err != nil {
+		t.Fatal("no error should be thrown marshalling jwk bytws to a map:", err)
+	}
+
+	val2, err := NewValidatorFromJwk(jwkMap)
 	if err != nil {
 		t.Fatalf("failed to create validator from public key jwk: %s", err.Error())
 	}

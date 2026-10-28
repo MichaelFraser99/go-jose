@@ -7,16 +7,40 @@ import (
 	"crypto/sha512"
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
+	"github.com/MichaelFraser99/go-jose/joseerror"
+	"github.com/MichaelFraser99/go-jose/jwa"
 	"github.com/MichaelFraser99/go-jose/model"
-	"hash"
 	"io"
+	"slices"
+)
+
+var (
+	_ model.Signer    = &Signer{}
+	_ model.Validator = &Validator{}
 )
 
 type Signer struct {
-	alg    model.Algorithm
+	alg    jwa.Algorithm
 	secret common.SecretKey
-	hasher hash.Hash
 }
+
+type Validator struct {
+	alg    jwa.Algorithm
+	secret common.SecretKey
+}
+
+func (v Validator) ValidateSignature(digest, signature []byte) (bool, error) {
+	mac := common.ProduceMac(hmac.New(sha512.New, v.secret), digest)
+	return hmac.Equal(signature, mac), nil
+}
+
+func (v Validator) Public() crypto.PublicKey {
+	return slices.Clone(v.secret)
+}
+
+// MinimumSecretBytes is the smallest secret HS512 may be keyed with: RFC 7518
+// section 3.2 requires at least the hash output size.
+const MinimumSecretBytes = 64
 
 func NewSigner(secretKey *[]byte) (*Signer, error) {
 	var secret []byte
@@ -30,29 +54,41 @@ func NewSigner(secretKey *[]byte) (*Signer, error) {
 		}
 	}
 
-	h := hmac.New(func() hash.Hash {
-		return sha512.New()
-	}, secret)
+	if len(secret) < MinimumSecretBytes {
+		return nil, fmt.Errorf("%wa secret of at least %d bytes is required for HS512, got %d", joseerror.ErrInvalidPrivateKey, MinimumSecretBytes, len(secret))
+	}
 
 	return &Signer{
-		alg:    model.HS512,
-		secret: secret,
-		hasher: h,
+		alg:    jwa.HS512,
+		secret: slices.Clone(secret),
 	}, nil
 }
 
-func (signer *Signer) Alg() model.Algorithm {
+func NewValidator(publicKey crypto.PublicKey) (*Validator, error) {
+	if publicKey == nil {
+		return nil, fmt.Errorf("%wnil public key provided", joseerror.ErrInvalidPublicKey)
+	} else if _, ok := publicKey.(common.SecretKey); !ok {
+		return nil, fmt.Errorf("%wthe key for an hmac algorithm is the value returned by Signer.Public, got %T", joseerror.ErrInvalidPublicKey, publicKey)
+	}
+	secret := []byte(publicKey.(common.SecretKey))
+	if len(secret) < MinimumSecretBytes {
+		return nil, fmt.Errorf("%wa secret of at least %d bytes is required for HS512, got %d", joseerror.ErrInvalidPublicKey, MinimumSecretBytes, len(secret))
+	}
+
+	return &Validator{
+		alg:    jwa.HS512,
+		secret: slices.Clone(secret),
+	}, nil
+}
+
+func (signer *Signer) Alg() jwa.Algorithm {
 	return signer.alg
 }
 
 func (signer *Signer) Public() crypto.PublicKey {
-	return signer.secret
+	return slices.Clone(signer.secret)
 }
 
 func (signer *Signer) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error) {
-	signer.hasher.Write(digest)
-	signature = signer.hasher.Sum(nil)
-	signer.hasher.Reset()
-
-	return signature, nil
+	return common.ProduceMac(hmac.New(sha512.New, signer.secret), digest), nil
 }
