@@ -83,7 +83,7 @@ func PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error) {
 			}
 			return key, nil
 		default:
-			return nil, fmt.Errorf("%wunsupported kty: %s", joseerror.ErrUnsupportedAlgorithm, ktyString)
+			return nil, fmt.Errorf("%wthe 'kty' claim is not one of EC, RSA and OKP", joseerror.ErrUnsupportedAlgorithm)
 		}
 	} else {
 		return nil, fmt.Errorf("no kty claim present in jwk, cannot infer type of private key to return")
@@ -116,7 +116,7 @@ func PublicFromJwk(jwk map[string]any) (crypto.PublicKey, error) {
 			}
 			return key, nil
 		default:
-			return nil, fmt.Errorf("%wunsupported kty: %s", joseerror.ErrUnsupportedAlgorithm, ktyString)
+			return nil, fmt.Errorf("%wthe 'kty' claim is not one of EC, RSA and OKP", joseerror.ErrUnsupportedAlgorithm)
 		}
 	} else {
 		return nil, fmt.Errorf("no kty claim present in jwk, cannot infer type of public key to return")
