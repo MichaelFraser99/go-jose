@@ -49,15 +49,15 @@ func TestPublicFromJwk_RefusesAnEd25519KeyOfTheWrongLength(t *testing.T) {
 			key, err := PublicFromJwk(ed25519Jwk(t, test.x, -1))
 			if test.accept {
 				if err != nil {
-					t.Fatalf("[RFC 8037 2] a 32 byte 'x' must be accepted, got %v", err)
+					t.Fatalf("[RFC 8032 5.1.5] a 32 byte 'x' must be accepted, got %v", err)
 				}
 				return
 			}
 			if err == nil {
-				t.Fatalf("[RFC 8037 2] 'x' is 32 octets, so a %d byte key must be refused, got %T", test.x, key)
+				t.Fatalf("[RFC 8032 5.1.5] 'x' is 32 octets, so a %d byte key must be refused, got %T", test.x, key)
 			}
 			if !errors.Is(err, joseerror.ErrInvalidPublicKey) {
-				t.Errorf("[RFC 8037 2] the refusal must carry the key error class, got %v", err)
+				t.Errorf("[RFC 8032 5.1.5] the refusal must carry the key error class, got %v", err)
 			}
 			if key != nil {
 				t.Error("no key may be returned alongside the refusal")
@@ -86,15 +86,15 @@ func TestPrivateFromJwk_RefusesAnEd25519KeyOfTheWrongLength(t *testing.T) {
 			key, err := PrivateFromJwk(ed25519Jwk(t, test.x, test.d))
 			if test.accept {
 				if err != nil {
-					t.Fatalf("[RFC 8037 2] a 32 byte 'x' and 'd' must be accepted, got %v", err)
+					t.Fatalf("[RFC 8032 5.1.5] a 32 byte 'x' and 'd' must be accepted, got %v", err)
 				}
 				return
 			}
 			if err == nil {
-				t.Fatalf("[RFC 8037 2] 'x' and 'd' are 32 octets each, so x=%d d=%d must be refused, got %T", test.x, test.d, key)
+				t.Fatalf("[RFC 8032 5.1.5] 'x' and 'd' are 32 octets each, so x=%d d=%d must be refused, got %T", test.x, test.d, key)
 			}
 			if !errors.Is(err, joseerror.ErrInvalidPrivateKey) {
-				t.Errorf("[RFC 8037 2] the refusal must carry the key error class, got %v", err)
+				t.Errorf("[RFC 8032 5.1.5] the refusal must carry the key error class, got %v", err)
 			}
 			if key != nil {
 				t.Error("no key may be returned alongside the refusal")

@@ -212,8 +212,9 @@ func JwkFromECDSAPrivateKey(privateKey *ecdsa.PrivateKey) map[string]any {
 
 // JwkFromEdDSAPublicKey builds the jwk of an Ed25519 public key.
 //
-// RFC 8037 section 2 fixes "x" at 32 octets, so a key of any other length is
-// refused rather than encoded into a buffer sized for 32.
+// RFC 8032 section 5.1.5 makes an Ed25519 public key 32 octets, and RFC 8037
+// section 2 carries it as "x", so a key of any other length is refused rather
+// than encoded into a buffer sized for 32.
 func JwkFromEdDSAPublicKey(publicKey *ed25519.PublicKey) (map[string]any, error) {
 	if publicKey == nil || len(*publicKey) != ed25519.PublicKeySize {
 		return nil, fmt.Errorf("%wan Ed25519 public key is %d bytes, got %d", jose_errors.ErrInvalidPublicKey, ed25519.PublicKeySize, len(*publicKey))
@@ -234,8 +235,9 @@ func JwkFromEdDSAPublicKey(publicKey *ed25519.PublicKey) (map[string]any, error)
 
 // JwkFromEdDSAPrivateKey builds the jwk of an Ed25519 private key.
 //
-// RFC 8037 section 2 fixes "d" at 32 octets and "x" at the 32 octet public key,
-// which is the second half of an ed25519.PrivateKey.
+// RFC 8032 section 5.1.5 makes an Ed25519 private key 32 octets and its public
+// key 32 octets. RFC 8037 section 2 carries them as "d" and "x", the two halves
+// of an ed25519.PrivateKey.
 func JwkFromEdDSAPrivateKey(privateKey *ed25519.PrivateKey) (map[string]any, error) {
 	if privateKey == nil || len(*privateKey) != ed25519.PrivateKeySize {
 		return nil, fmt.Errorf("%wan Ed25519 private key is %d bytes, got %d", jose_errors.ErrInvalidPrivateKey, ed25519.PrivateKeySize, len(*privateKey))
