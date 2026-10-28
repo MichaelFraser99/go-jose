@@ -126,6 +126,11 @@ func extractECDSACoordinatesFromJwk(jwk map[string]any) (*big.Int, *big.Int, *bi
 	}
 }
 
+// JwkFromECDSAPublicKey builds the jwk of an ECDSA public key.
+//
+// RFC 7518 sections 6.2.1.2 and 6.2.1.3 fix "x" and "y" at the full coordinate
+// size of the curve, so a point that is not on its curve is refused rather than
+// encoded.
 func JwkFromECDSAPublicKey(publicKey *ecdsa.PublicKey) (map[string]any, error) {
 	if err := checkECDSAPublicKey(publicKey, jose_errors.ErrInvalidPublicKey); err != nil {
 		return nil, err
@@ -150,14 +155,21 @@ func checkECDSAPublicKey(publicKey *ecdsa.PublicKey, class error) error {
 	if publicKey == nil || publicKey.Curve == nil || publicKey.X == nil || publicKey.Y == nil {
 		return fmt.Errorf("%wan ECDSA key needs a curve and a point", class)
 	}
-	switch publicKey.Curve.Params().Name {
-	case "P-256", "P-384", "P-521":
-		return nil
+	switch publicKey.Curve {
+	case elliptic.P256(), elliptic.P384(), elliptic.P521():
 	default:
 		return fmt.Errorf("%wthe curve of an EC jwk is one of P-256, P-384 and P-521", class)
 	}
+	if _, err := publicKey.ECDH(); err != nil {
+		return fmt.Errorf("%wthe point of an ECDSA key is not on its curve: %w", class, err)
+	}
+	return nil
 }
 
+// JwkFromECDSAPrivateKey builds the jwk of an ECDSA private key.
+//
+// RFC 7518 section 6.2.2.1 fixes "d" at the length of the curve order n, so a
+// d outside [1, n-1] is refused rather than encoded.
 func JwkFromECDSAPrivateKey(privateKey *ecdsa.PrivateKey) (map[string]any, error) {
 	if privateKey == nil {
 		return nil, fmt.Errorf("%wan ECDSA key needs a curve and a point", jose_errors.ErrInvalidPrivateKey)
@@ -167,6 +179,9 @@ func JwkFromECDSAPrivateKey(privateKey *ecdsa.PrivateKey) (map[string]any, error
 	}
 	if privateKey.D == nil {
 		return nil, fmt.Errorf("%wan ECDSA private key needs its scalar d", jose_errors.ErrInvalidPrivateKey)
+	}
+	if privateKey.D.Sign() <= 0 || privateKey.D.Cmp(privateKey.Params().N) >= 0 {
+		return nil, fmt.Errorf("%wan ECDSA private key's scalar d is in [1, n-1]", jose_errors.ErrInvalidPrivateKey)
 	}
 
 	jwk, err := JwkFromECDSAPublicKey(&privateKey.PublicKey)
@@ -307,8 +322,8 @@ func RSAPrivateKeyFromJwk(jwk map[string]any) (*rsa.PrivateKey, error) {
 	}
 	if pBytes != nil && qBytes != nil {
 		privateKey.Primes = []*big.Int{new(big.Int).SetBytes(pBytes), new(big.Int).SetBytes(qBytes)}
+		privateKey.Precompute()
 	}
-	privateKey.Precompute()
 
 	return &privateKey, nil
 }
@@ -355,9 +370,13 @@ func checkRSAPublicKey(publicKey *rsa.PublicKey, class error) error {
 	return nil
 }
 
-// JwkFromRSAPrivateKey builds the jwk of a two-prime RSA private key.
+// JwkFromRSAPrivateKey builds the jwk of an RSA private key with either no
+// primes or exactly two.
 //
-// RFC 7518 section 6.3.2.7 says a consumer without multi-prime support MUST NOT
+// RFC 7518 section 6.3.2 makes "d" the only required private member, so a key
+// with no primes is encoded as "n", "e" and "d". A two-prime key also carries
+// "p", "q", "dp", "dq" and "qi", which that section says producers SHOULD
+// include. Section 6.3.2.7 says a consumer without multi-prime support MUST NOT
 // use a key carrying "oth". The readers here have none, so a key with more than
 // two primes is refused rather than produced.
 func JwkFromRSAPrivateKey(privateKey *rsa.PrivateKey) (map[string]any, error) {
@@ -367,14 +386,8 @@ func JwkFromRSAPrivateKey(privateKey *rsa.PrivateKey) (map[string]any, error) {
 	if err := checkRSAPublicKey(&privateKey.PublicKey, jose_errors.ErrInvalidPrivateKey); err != nil {
 		return nil, err
 	}
-	if privateKey.D == nil || len(privateKey.Primes) != 2 || privateKey.Primes[0] == nil || privateKey.Primes[1] == nil {
-		return nil, fmt.Errorf("%wan RSA private key needs d and exactly two primes", jose_errors.ErrInvalidPrivateKey)
-	}
-
-	precomputed := *privateKey
-	precomputed.Precompute()
-	if precomputed.Precomputed.Dp == nil || precomputed.Precomputed.Dq == nil || precomputed.Precomputed.Qinv == nil {
-		return nil, fmt.Errorf("%wthe CRT values of the RSA private key cannot be computed", jose_errors.ErrInvalidPrivateKey)
+	if privateKey.D == nil || privateKey.D.Sign() <= 0 || privateKey.D.Cmp(privateKey.N) >= 0 {
+		return nil, fmt.Errorf("%wan RSA private key needs d with 0 < d < n", jose_errors.ErrInvalidPrivateKey)
 	}
 
 	jwk, err := JwkFromRSAPublicKey(&privateKey.PublicKey)
@@ -383,6 +396,22 @@ func JwkFromRSAPrivateKey(privateKey *rsa.PrivateKey) (map[string]any, error) {
 	}
 	encode := func(i *big.Int) string { return base64.RawURLEncoding.EncodeToString(i.Bytes()) }
 	jwk["d"] = encode(privateKey.D)
+	if len(privateKey.Primes) == 0 {
+		return jwk, nil
+	}
+
+	if len(privateKey.Primes) != 2 || privateKey.Primes[0] == nil || privateKey.Primes[1] == nil {
+		return nil, fmt.Errorf("%wan RSA private key has no primes or exactly two", jose_errors.ErrInvalidPrivateKey)
+	}
+	precomputed := rsa.PrivateKey{PublicKey: privateKey.PublicKey, D: privateKey.D, Primes: privateKey.Primes}
+	if err := precomputed.Validate(); err != nil {
+		return nil, fmt.Errorf("%wthe RSA private key is inconsistent: %w", jose_errors.ErrInvalidPrivateKey, err)
+	}
+	precomputed.Precompute()
+	if precomputed.Precomputed.Dp == nil || precomputed.Precomputed.Dq == nil || precomputed.Precomputed.Qinv == nil {
+		return nil, fmt.Errorf("%wthe CRT values of the RSA private key cannot be computed", jose_errors.ErrInvalidPrivateKey)
+	}
+
 	jwk["p"] = encode(privateKey.Primes[0])
 	jwk["q"] = encode(privateKey.Primes[1])
 	jwk["dp"] = encode(precomputed.Precomputed.Dp)
