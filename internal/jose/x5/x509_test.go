@@ -293,7 +293,7 @@ func TestRetrieveX5U_HoldsTheCertificateToItsThumbprint(t *testing.T) {
 	correctX5t, correctX5tS256 := x5tPair(t, cert)
 	otherX5t, otherX5tS256 := x5tPair(t, other)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		if _, err := w.Write(cert); err != nil {
 			t.Errorf("failed to serve the certificate: %v", err)
 		}

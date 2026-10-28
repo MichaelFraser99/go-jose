@@ -23,7 +23,7 @@ func serveKeySet(t *testing.T, keys ...map[string]any) *httptest.Server {
 	if err != nil {
 		t.Fatalf("failed to encode the key set: %v", err)
 	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if _, err := w.Write(raw); err != nil {
 			return
