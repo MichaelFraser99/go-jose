@@ -15,12 +15,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
+	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
 	"github.com/MichaelFraser99/go-jose/jws"
 	"github.com/MichaelFraser99/go-jose/model"
 	"maps"
 	"math/big"
+	"reflect"
 	"strings"
 )
 
@@ -34,17 +36,31 @@ type Opts struct {
 //
 // The "alg" header is the algorithm that signs, as RFC 7515 section 4.1.1 requires: a
 // model.Signer's own Alg, otherwise opts.Algorithm or an "alg" the head names. A head
-// or opts naming any other algorithm is refused with ErrUnsupportedAlgorithm. A nil
-// head is an empty header and a nil body an empty claims set.
+// or opts naming any other algorithm, or an algorithm with no name, is refused with
+// ErrUnsupportedAlgorithm. A nil head is an empty header and a nil body an empty claims
+// set. A nil signer, or a nil pointer, is refused with ErrInvalidPrivateKey.
+//
+// The header must keep the producer rules of RFC 7515 section 4.1.11: a "crit" that is
+// not a non-empty array of distinct names, each present in the header and none defined
+// by RFC 7515, is refused with ErrMalformedClaim, or ErrMissingCriticalClaim for a name
+// the header does not hold. A "b64" of false is refused with ErrMissingCriticalClaim:
+// RFC 7797 section 3 then signs the payload unencoded, and New always encodes it.
 //
 // A model.Signer is called in JOSE mode, with the whole JWS Signing Input.
+//
+// An *ecdsa.PrivateKey, *rsa.PrivateKey, ed25519.PrivateKey or *ed25519.PrivateKey is
+// used, and refused, as jws.GetSignerFromPrivateKey uses it.
 //
 // Any other crypto.Signer is called as Go's crypto.Signer contract defines. Its ASN.1
 // DER ECDSA output becomes R||S (RFC 7518 section 3.4), each of R and S in [1, n-1]
 // (FIPS 186-5 section 6.4.1). A PS algorithm requests RSASSA-PSS with a salt the size
-// of the hash (RFC 7518 section 3.5). Its public key must suit the algorithm, and it
-// cannot sign an HS algorithm.
+// of the hash (RFC 7518 section 3.5). The public key it returns must pass the checks a
+// validator of the algorithm applies, so an RS or PS key needs a modulus of 2048 bits
+// or more (RFC 7518 sections 3.3 and 3.5). It cannot sign an HS algorithm.
 func New(signer crypto.Signer, head, body map[string]any, opts Opts) (*string, error) {
+	if isNil(signer) {
+		return nil, fmt.Errorf("%wa signer is required, got none", joseerror.ErrInvalidPrivateKey)
+	}
 	h := maps.Clone(head)
 	if h == nil {
 		h = map[string]any{}
@@ -56,6 +72,10 @@ func New(signer crypto.Signer, head, body map[string]any, opts Opts) (*string, e
 	if err != nil {
 		return nil, err
 	}
+	signer, err = standardLibrarySigner(signer, alg)
+	if err != nil {
+		return nil, err
+	}
 	h["alg"] = alg.String()
 	return newJwt(signer, h, body, alg)
 }
@@ -63,13 +83,20 @@ func New(signer crypto.Signer, head, body map[string]any, opts Opts) (*string, e
 // Validate verifies a token's structure, signature and registered claims, returning its
 // header and body.
 //
+// A token of other than three segments is refused with ErrMalformedToken (RFC 7515
+// section 7.1), except that one of five, a JWE (RFC 7516 section 9), is refused with
+// ErrUnsupportedAlgorithm.
+//
 // iss, sub and jti must be strings and aud a string or an array of strings (RFC 7519
 // section 4.1), else ErrMalformedClaim. iat, nbf and exp must be numbers (RFC 7519
-// section 2, NumericDate), compared with the current time at full precision and widened
-// by ClockSkewLeeway. The current time must be before exp (RFC 7519 section 4.1.4), else
-// ErrExpired, and at or after nbf (section 4.1.5), else ErrNotYetValid. An iat after the
-// current time is also refused with ErrNotYetValid: RFC 7519 section 4.1.6 sets no such
-// rule, but a token issued in the future signals a clock fault or a forged timestamp.
+// section 2, NumericDate). Each is compared with the current time as float64 seconds,
+// which resolves the current time to within a microsecond, and widened by
+// ClockSkewLeeway. A number beyond the float64 range, anywhere in the claims set, is
+// refused with ErrMalformedToken, as RFC 8259 section 6 permits. The current time must
+// be before exp (RFC 7519 section 4.1.4), else ErrExpired, and at or after nbf (section
+// 4.1.5), else ErrNotYetValid. An iat after the current time is also refused with
+// ErrNotYetValid: RFC 7519 section 4.1.6 sets no such rule, but a token issued in the
+// future signals a clock fault or a forged timestamp.
 // When opts.ExpectedAudience is set, aud must name one of its values (section 4.1.3).
 // Options whose ExpectedAudience holds an empty string are refused with
 // ErrInvalidOptions, whatever the token.
@@ -85,9 +112,9 @@ func Validate(ctx context.Context, token string, outOfBoundsPublicKey model.Retr
 		}
 	} else if len(segments) == 5 {
 		//todo jwe
-		return nil, nil, fmt.Errorf("jwe not yet supported")
+		return nil, nil, fmt.Errorf("%wthe token has the five segments of a JWE, which this library does not support", joseerror.ErrUnsupportedAlgorithm)
 	} else {
-		return nil, nil, fmt.Errorf("invalid token")
+		return nil, nil, fmt.Errorf("%wa JWS has three segments, got %d", joseerror.ErrMalformedToken, len(segments))
 	}
 
 	if err := validateClaims(body, opts); err != nil {
@@ -115,10 +142,48 @@ func signingAlgorithm(signer crypto.Signer, head map[string]any, opts Opts) (jwa
 	if alg == jwa.EdDSA {
 		return jwa.Unknown, fmt.Errorf("%wEdDSA is accepted only for verification: RFC 9864 section 4.1.2 deprecates it, so sign with Ed25519", joseerror.ErrUnsupportedAlgorithm)
 	}
-	if alg == jwa.Unknown {
+	if alg.String() == "" {
 		return jwa.Unknown, fmt.Errorf("%wno algorithm to sign with: name one in opts or in the 'alg' header", joseerror.ErrUnsupportedAlgorithm)
 	}
 	return alg, nil
+}
+
+func isNil(signer crypto.Signer) bool {
+	if signer == nil {
+		return true
+	}
+	value := reflect.ValueOf(signer)
+	return value.Kind() == reflect.Pointer && value.IsNil()
+}
+
+func standardLibrarySigner(signer crypto.Signer, alg jwa.Algorithm) (crypto.Signer, error) {
+	switch signer.(type) {
+	case *ecdsa.PrivateKey, *rsa.PrivateKey, ed25519.PrivateKey, *ed25519.PrivateKey:
+	default:
+		return signer, nil
+	}
+	if alg == jwa.HS256 || alg == jwa.HS384 || alg == jwa.HS512 {
+		return nil, fmt.Errorf("%wonly a signer from this library can sign %s", joseerror.ErrInvalidPrivateKey, alg)
+	}
+	librarySigner, err := jws.GetSignerFromPrivateKey(alg, signer)
+	if err != nil {
+		return nil, err
+	}
+	return librarySigner, nil
+}
+
+func checkProducerHeader(headBytes []byte) error {
+	var emitted map[string]any
+	_ = json.Unmarshal(headBytes, &emitted)
+	if _, present := emitted["crit"]; present {
+		if _, err := jsonutils.RetrieveClaim[[]any](emitted, "crit", jsonutils.ValidateNonEmptySlice, jsonutils.ValidateNoDuplicateSliceValues, jsonutils.ValidateNoBannedCriticalValues, jsonutils.ValidateCriticalValuesPresent); err != nil {
+			return err
+		}
+	}
+	if emitted["b64"] == false {
+		return fmt.Errorf("%wthe 'b64' header is false, but the payload is always base64url-encoded", joseerror.ErrMissingCriticalClaim)
+	}
+	return nil
 }
 
 func signingHash(alg jwa.Algorithm) crypto.Hash {
@@ -142,6 +207,9 @@ func newJwt(signer crypto.Signer, head, body map[string]any, alg jwa.Algorithm) 
 
 	headBytes, err := json.Marshal(head)
 	if err != nil {
+		return nil, err
+	}
+	if err := checkProducerHeader(headBytes); err != nil {
 		return nil, err
 	}
 	bodyBytes, err := json.Marshal(body)
@@ -180,10 +248,10 @@ func signWithCryptoSigner(signer crypto.Signer, alg jwa.Algorithm, signingInput 
 	}
 	switch alg {
 	case jwa.ES256, jwa.ES384, jwa.ES512:
-		curves := map[jwa.Algorithm]string{jwa.ES256: "P-256", jwa.ES384: "P-384", jwa.ES512: "P-521"}
-		public, ok := signer.Public().(*ecdsa.PublicKey)
-		if !ok || public.Curve.Params().Name != curves[alg] {
-			return nil, fmt.Errorf("%w%s needs an ecdsa key on %s", joseerror.ErrInvalidPrivateKey, alg, curves[alg])
+		curves := map[jwa.Algorithm]elliptic.Curve{jwa.ES256: elliptic.P256(), jwa.ES384: elliptic.P384(), jwa.ES512: elliptic.P521()}
+		public, _ := signer.Public().(*ecdsa.PublicKey)
+		if err := common.CheckECDSAPublicKey(public, curves[alg], joseerror.ErrInvalidPrivateKey); err != nil {
+			return nil, err
 		}
 		der, err := signer.Sign(rand.Reader, digest, hash)
 		if err != nil {
@@ -191,22 +259,23 @@ func signWithCryptoSigner(signer crypto.Signer, alg jwa.Algorithm, signingInput 
 		}
 		return concatenatedRS(der, public.Params())
 	case jwa.RS256, jwa.RS384, jwa.RS512, jwa.PS256, jwa.PS384, jwa.PS512:
-		if _, ok := signer.Public().(*rsa.PublicKey); !ok {
-			return nil, fmt.Errorf("%w%s needs an rsa key", joseerror.ErrInvalidPrivateKey, alg)
+		public, _ := signer.Public().(*rsa.PublicKey)
+		if err := common.CheckRSAPublicKey(public, joseerror.ErrInvalidPrivateKey); err != nil {
+			return nil, err
 		}
 		if alg == jwa.PS256 || alg == jwa.PS384 || alg == jwa.PS512 {
 			return signer.Sign(rand.Reader, digest, &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthEqualsHash, Hash: hash})
 		}
 		return signer.Sign(rand.Reader, digest, hash)
 	case jwa.Ed25519:
-		if _, ok := signer.Public().(ed25519.PublicKey); !ok {
-			return nil, fmt.Errorf("%w%s needs an ed25519 key", joseerror.ErrInvalidPrivateKey, alg)
+		if public, _ := signer.Public().(ed25519.PublicKey); len(public) != ed25519.PublicKeySize {
+			return nil, fmt.Errorf("%w%s needs an ed25519 public key of %d octets", joseerror.ErrInvalidPrivateKey, alg, ed25519.PublicKeySize)
 		}
 		return signer.Sign(rand.Reader, digest, crypto.Hash(0))
 	case jwa.MLDSA44, jwa.MLDSA65, jwa.MLDSA87:
-		public, ok := signer.Public().(*mldsa.PublicKey)
+		public, _ := signer.Public().(*mldsa.PublicKey)
 		params, _ := common.MLDSAParameters(alg.String())
-		if _, err := common.UsableMLDSAPublicKey(public, params, joseerror.ErrInvalidPrivateKey); !ok || err != nil {
+		if _, err := common.UsableMLDSAPublicKey(public, params, joseerror.ErrInvalidPrivateKey); err != nil {
 			return nil, fmt.Errorf("%w%s needs an %s key", joseerror.ErrInvalidPrivateKey, alg, alg)
 		}
 		return signer.Sign(rand.Reader, signingInput, crypto.Hash(0))
