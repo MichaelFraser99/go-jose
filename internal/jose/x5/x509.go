@@ -126,11 +126,15 @@ func namesNoExtendedKeyUsage(certificate *x509.Certificate) bool {
 	return hasExtension(certificate, oidExtensionExtendedKeyUsage) && len(certificate.ExtKeyUsage) == 0 && len(certificate.UnknownExtKeyUsage) == 0
 }
 
-func intermediatesNamePurposes(chain []*x509.Certificate) bool {
+func cannotIssue(certificate *x509.Certificate) bool {
+	return namesNoExtendedKeyUsage(certificate) || hasExtension(certificate, oidExtensionKeyUsage) && certificate.KeyUsage&x509.KeyUsageCertSign == 0
+}
+
+func intermediatesCanIssue(chain []*x509.Certificate) bool {
 	if len(chain) < 3 {
 		return true
 	}
-	return !slices.ContainsFunc(chain[1:len(chain)-1], namesNoExtendedKeyUsage)
+	return !slices.ContainsFunc(chain[1:len(chain)-1], cannotIssue)
 }
 
 func namesAnyExtendedKeyUsage(certificate *x509.Certificate) bool {
@@ -171,8 +175,8 @@ func validateCertificateChain(certificates []*x509.Certificate, roots *x509.Cert
 	if namesNoExtendedKeyUsage(signingCertificate) {
 		return fmt.Errorf("%wthe signing certificate's extended key usage extension names no purpose", joseerror.ErrNoKeyIdentifierMatch)
 	}
-	if !slices.ContainsFunc(chains, intermediatesNamePurposes) {
-		return fmt.Errorf("%wevery chain to a configured trust anchor passes through an intermediate whose extended key usage extension names no purpose", joseerror.ErrNoKeyIdentifierMatch)
+	if !slices.ContainsFunc(chains, intermediatesCanIssue) {
+		return fmt.Errorf("%wevery chain to a configured trust anchor passes through an intermediate whose extended key usage names no purpose or whose key usage does not assert keyCertSign", joseerror.ErrNoKeyIdentifierMatch)
 	}
 	if len(extKeyUsages) == 0 && hasExtension(signingCertificate, oidExtensionExtendedKeyUsage) && !namesAnyExtendedKeyUsage(signingCertificate) {
 		return fmt.Errorf("%wthe signing certificate's extended key usage names no purpose the caller accepts", joseerror.ErrNoKeyIdentifierMatch)

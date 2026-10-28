@@ -331,6 +331,71 @@ func TestKeyFromValidatedChain_AKeyUsageMustAllowVerifyingASignature(t *testing.
 			chain: leafOf(leafTemplate(x509.KeyUsageKeyEncipherment | x509.KeyUsageDataEncipherment | x509.KeyUsageKeyAgreement |
 				x509.KeyUsageCRLSign | x509.KeyUsageEncipherOnly | x509.KeyUsageDecipherOnly)),
 		},
+		"a leaf under an intermediate whose key usage asserts no bit": {
+			reference: "RFC 5280 6.1.4(n)",
+			chain: func(t *testing.T, root *issued) []*issued {
+				intermediate := issueCertificate(t, withExtension(caTemplate("intermediate", 0), emptyKeyUsage), root)
+				return []*issued{issueCertificate(t, leafTemplate(x509.KeyUsageDigitalSignature), intermediate), intermediate}
+			},
+		},
+		"a leaf under an intermediate whose key usage asserts no bit, when the caller named a purpose": {
+			reference:    "RFC 5280 6.1.4(n)",
+			extKeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageCodeSigning},
+			chain: func(t *testing.T, root *issued) []*issued {
+				intermediate := issueCertificate(t, withExtension(caTemplate("intermediate", 0), emptyKeyUsage), root)
+				return []*issued{issueCertificate(t, leafTemplate(x509.KeyUsageDigitalSignature, x509.ExtKeyUsageCodeSigning), intermediate), intermediate}
+			},
+		},
+		"a leaf under an intermediate asserting only digitalSignature": {
+			reference: "RFC 5280 6.1.4(n)",
+			chain: func(t *testing.T, root *issued) []*issued {
+				intermediate := issueCertificate(t, caTemplate("intermediate", x509.KeyUsageDigitalSignature), root)
+				return []*issued{issueCertificate(t, leafTemplate(x509.KeyUsageDigitalSignature), intermediate), intermediate}
+			},
+		},
+		"a leaf under an intermediate with no key usage extension": {
+			reference: "RFC 5280 4.2.1.3",
+			chain: func(t *testing.T, root *issued) []*issued {
+				intermediate := issueCertificate(t, caTemplate("intermediate", 0), root)
+				if hasExtension(intermediate.cert, oidExtensionKeyUsage) {
+					t.Fatal("the intermediate must carry no key usage extension")
+				}
+				return []*issued{issueCertificate(t, leafTemplate(x509.KeyUsageDigitalSignature), intermediate), intermediate}
+			},
+			accept: true,
+		},
+		"a leaf under an intermediate asserting keyCertSign": {
+			reference: "RFC 5280 6.1.4(n)",
+			chain: func(t *testing.T, root *issued) []*issued {
+				intermediate := issueCertificate(t, caTemplate("intermediate", x509.KeyUsageCertSign), root)
+				return []*issued{issueCertificate(t, leafTemplate(x509.KeyUsageDigitalSignature), intermediate), intermediate}
+			},
+			accept: true,
+		},
+		"a leaf under two intermediates of one key, only one asserting no key usage bit": {
+			reference: "RFC 5280 6.1",
+			chain: func(t *testing.T, root *issued) []*issued {
+				clean, empty := sameKeyIntermediates(t, root, emptyKeyUsage)
+				return []*issued{issueCertificate(t, leafTemplate(x509.KeyUsageDigitalSignature), clean), empty, clean}
+			},
+			accept: true,
+		},
+		"a leaf offered only through the one of two intermediates asserting no key usage bit": {
+			reference: "RFC 5280 6.1.4(n)",
+			chain: func(t *testing.T, root *issued) []*issued {
+				clean, empty := sameKeyIntermediates(t, root, emptyKeyUsage)
+				return []*issued{issueCertificate(t, leafTemplate(x509.KeyUsageDigitalSignature), clean), empty}
+			},
+		},
+		"a leaf under a clean intermediate and a trust anchor whose key usage asserts no bit": {
+			reference:  "RFC 5280 6.1.1",
+			rootExtras: []pkix.Extension{emptyKeyUsage},
+			chain: func(t *testing.T, root *issued) []*issued {
+				intermediate := issueCertificate(t, caTemplate("intermediate", x509.KeyUsageCertSign), root)
+				return []*issued{issueCertificate(t, leafTemplate(x509.KeyUsageDigitalSignature), intermediate), intermediate}
+			},
+			accept: true,
+		},
 		"an intermediate CA asserting only keyCertSign as the first certificate": {
 			reference: "RFC 5280 4.2.1.3",
 			chain: func(t *testing.T, root *issued) []*issued {
@@ -353,6 +418,8 @@ func TestKeyFromValidatedChain_AKeyUsageMustAllowVerifyingASignature(t *testing.
 		},
 	})
 }
+
+var emptyKeyUsage = pkix.Extension{Id: asn1.ObjectIdentifier{2, 5, 29, 15}, Critical: true, Value: []byte{0x03, 0x01, 0x00}}
 
 func sameKeyIntermediates(t *testing.T, root *issued, extension pkix.Extension) (clean, withExtra *issued) {
 	t.Helper()
