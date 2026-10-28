@@ -262,3 +262,28 @@ func TestNewValidator_DoesNotShareTheCallersKey(t *testing.T) {
 		t.Errorf("[RFC 8037 A.5] zeroing the caller's key after building a validator must not change what it verifies with, got %v and %v", valid, err)
 	}
 }
+
+func TestSameAlgorithm_MatchesTheTwoEd25519IdentifiersAndNothingElse(t *testing.T) {
+	tests := []struct {
+		member, alg string
+		same        bool
+	}{
+		{"EdDSA", "Ed25519", true},
+		{"Ed25519", "EdDSA", true},
+		{"EdDSA", "EdDSA", true},
+		{"Ed25519", "Ed25519", true},
+		{"ES256", "ES256", true},
+		{"ES256", "EdDSA", false},
+		{"EdDSA", "ES256", false},
+		{"Ed448", "EdDSA", false},
+		{"EdDSA", "Ed448", false},
+		{"eddsa", "Ed25519", false},
+		{"", "Ed25519", false},
+		{"Ed25519", "", false},
+	}
+	for _, tc := range tests {
+		if got := SameAlgorithm(tc.member, tc.alg); got != tc.same {
+			t.Errorf("[RFC 8725 3.1] SameAlgorithm(%q, %q) = %v, want %v", tc.member, tc.alg, got, tc.same)
+		}
+	}
+}

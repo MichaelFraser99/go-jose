@@ -20,6 +20,10 @@ const (
 	HS256
 	HS384
 	HS512
+	// EdDSA is accepted for verification only, and only with an Ed25519 key.
+	// RFC 9864 section 4.1.2 deprecates it in favour of Ed25519, so this library
+	// does not sign with it.
+	EdDSA
 	// Ed25519 is EdDSA with the Ed25519 parameters of RFC 8032 section 5.1, as
 	// RFC 9864 section 4.1.1 registers it.
 	Ed25519
@@ -53,6 +57,8 @@ func (a Algorithm) String() string {
 		return "HS384"
 	case HS512:
 		return "HS512"
+	case EdDSA:
+		return "EdDSA"
 	case Ed25519:
 		return "Ed25519"
 	default:
@@ -88,6 +94,8 @@ func GetAlgorithm(alg string) Algorithm {
 		return HS384
 	case "HS512":
 		return HS512
+	case "EdDSA":
+		return EdDSA
 	case "Ed25519":
 		return Ed25519
 	default:

@@ -21,6 +21,8 @@ import (
 	"github.com/MichaelFraser99/go-jose/model"
 )
 
+var errSignWithEdDSA = fmt.Errorf("%wEdDSA is accepted only for verification: RFC 9864 section 4.1.2 deprecates it, so sign with Ed25519", joseerror.ErrUnsupportedAlgorithm)
+
 // GetSigner
 //
 // # Returns a Signer implementation for the given algorithm complete with generated keypair
@@ -76,6 +78,8 @@ func GetSigner(alg jwa.Algorithm, opts *model.Opts) (model.Signer, error) {
 	case jwa.Ed25519:
 		s, err = eddsa.NewSigner()
 
+	case jwa.EdDSA:
+		return nil, errSignWithEdDSA
 	case jwa.Unknown:
 		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg)
 	default:
@@ -123,6 +127,8 @@ func GetSignerFromPrivateKey(alg jwa.Algorithm, privateKey crypto.PrivateKey) (m
 	case jwa.Ed25519:
 		s, err = eddsa.NewSignerFromPrivateKey(privateKey)
 
+	case jwa.EdDSA:
+		return nil, errSignWithEdDSA
 	case jwa.Unknown:
 		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg)
 	default:

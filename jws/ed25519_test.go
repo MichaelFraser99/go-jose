@@ -9,7 +9,12 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"maps"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/MichaelFraser99/go-jose/joseerror"
@@ -75,25 +80,86 @@ func TestGetSignerFromPrivateKey_ReproducesTheRFC8037Ed25519Signature(t *testing
 	}
 }
 
-func TestVerify_ATokenNamingTheDeprecatedEdDSAIsRefusedBeforeAnyKeyIsSought(t *testing.T) {
-	if alg := jwa.GetAlgorithm("EdDSA"); alg != jwa.Unknown {
-		t.Errorf("[RFC 9864 4.1.2] EdDSA is deprecated and this library implements Ed25519 in its place, so the name must map to Unknown, got %s", alg)
-	}
+func TestVerify_TheRFC8037ExampleJWSNamingTheDeprecatedEdDSA(t *testing.T) {
 	public, err := jwk.PublicFromJwk(rfc8037PublicJwk())
 	if err != nil {
 		t.Fatal(err)
 	}
-	called := false
-	retriever := func() ([]crypto.PublicKey, error) {
-		called = true
-		return []crypto.PublicKey{public}, nil
+	head, payload, err := jws.Verify(context.Background(), rfc8037Compact, retrieving(public), nil)
+	if err != nil {
+		t.Fatalf("[RFC 9864 4.4] a deprecated identifier is to be avoided by new producers, not refused by verifiers, so the RFC 8037 A.5 example must verify under its own key, got %v", err)
 	}
-	_, _, err = jws.Verify(context.Background(), rfc8037Compact, retriever, nil)
-	if !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) {
-		t.Errorf("[RFC 9864 4.1.2] the RFC 8037 example JWS names EdDSA, so it must be refused with ErrUnsupportedAlgorithm even under its own key, got %v", err)
+	if head["alg"] != "EdDSA" || string(payload) != "Example of Ed25519 signing" {
+		t.Errorf("[RFC 8037 A.4] the example's header and payload must come back as signed, got %v and %q", head, payload)
 	}
-	if called {
-		t.Error("[RFC 7515 5.2 step 5] a token whose alg is not supported must be refused before any key is sought")
+
+	validator, err := jws.GetValidatorFromJwk(jwa.EdDSA, rfc8037PublicJwk())
+	if err != nil {
+		t.Fatal(err)
+	}
+	signature, err := base64.RawURLEncoding.DecodeString(rfc8037SigB64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if valid, err := validator.ValidateSignature([]byte(rfc8037Input), signature); !valid || err != nil {
+		t.Errorf("[RFC 8037 A.5] an EdDSA validator from the example jwk must accept the example signature, got %v and %v", valid, err)
+	}
+
+	tampered := rfc8037Input + "." + "AAAA" + rfc8037SigB64[4:]
+	if _, _, err := jws.Verify(context.Background(), tampered, retrieving(public), nil); err == nil {
+		t.Error("[RFC 7515 5.2 step 8] an altered EdDSA signature must not verify")
+	}
+}
+
+func TestGetSigner_RefusesToSignWithTheDeprecatedEdDSA(t *testing.T) {
+	for name, build := range map[string]func() (model.Signer, error){
+		"GetSigner":               func() (model.Signer, error) { return jws.GetSigner(jwa.EdDSA, nil) },
+		"GetSignerFromPrivateKey": func() (model.Signer, error) { return jws.GetSignerFromPrivateKey(jwa.EdDSA, rfc8037PrivateKey(t)) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			signer, err := build()
+			if !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || signer != nil {
+				t.Errorf("[RFC 9864 4.1.2] new producers SHOULD use Ed25519 in place of the deprecated EdDSA, so %s must refuse it with ErrUnsupportedAlgorithm and no signer, got %#v and %v", name, signer, err)
+			}
+			if err != nil && !strings.Contains(err.Error(), "sign with Ed25519") {
+				t.Errorf("[RFC 9864 4.1.2] the refusal must name Ed25519 as the replacement, got %v", err)
+			}
+		})
+	}
+}
+
+func TestVerify_AnAllowListNamingOneEdDSAIdentifierRefusesTheOther(t *testing.T) {
+	signer, err := jws.GetSigner(jwa.Ed25519, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"Ed25519"}`))
+	input := head + "." + base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"test"}`))
+	signature, err := signer.Sign(rand.Reader, []byte(input), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ed25519Token := input + "." + base64.RawURLEncoding.EncodeToString(signature)
+	public, err := jwk.PublicFromJwk(rfc8037PublicJwk())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := map[string]struct {
+		token   string
+		key     crypto.PublicKey
+		allowed jwa.Algorithm
+	}{
+		"an Ed25519 token with only EdDSA allowed": {ed25519Token, signer.Public(), jwa.EdDSA},
+		"an EdDSA token with only Ed25519 allowed": {rfc8037Compact, public, jwa.Ed25519},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, _, err := jws.Verify(context.Background(), tc.token, retrieving(tc.key), &model.JoseOptions{AllowedSigningAlgorithms: []jwa.Algorithm{tc.allowed}})
+			if !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) {
+				t.Errorf("[RFC 7515 4.1.1] EdDSA and Ed25519 are distinct alg values, so a caller allowing only one must not be handed a token naming the other, got %v", err)
+			}
+		})
 	}
 }
 
@@ -120,7 +186,7 @@ func TestGetSigner_SignsAnEd25519TokenItsValidatorAccepts(t *testing.T) {
 	}
 }
 
-func TestGetValidatorFromJwk_BindsAnOKPKeyToEd25519(t *testing.T) {
+func TestGetValidatorFromJwk_BindsAnOKPKeyToEitherEdDSAIdentifier(t *testing.T) {
 	ecdsaKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -134,6 +200,8 @@ func TestGetValidatorFromJwk_BindsAnOKPKeyToEd25519(t *testing.T) {
 		key[member] = value
 		return key
 	}
+	ecNamedEdDSA := maps.Clone(*ecJwk)
+	ecNamedEdDSA["alg"] = "EdDSA"
 
 	tests := map[string]struct {
 		alg    jwa.Algorithm
@@ -141,12 +209,17 @@ func TestGetValidatorFromJwk_BindsAnOKPKeyToEd25519(t *testing.T) {
 		want   error
 		clause string
 	}{
-		"a key for EdDSA asked for Ed25519": {jwa.Ed25519, with("alg", "EdDSA"), joseerror.ErrInvalidPublicKey, "RFC 8725 3.1"},
-		"an X25519 key":                     {jwa.Ed25519, with("crv", "X25519"), joseerror.ErrUnsupportedAlgorithm, "RFC 9864 4.1.1"},
-		"an Ed448 key":                      {jwa.Ed25519, with("crv", "Ed448"), joseerror.ErrUnsupportedAlgorithm, "RFC 9864 4.1.1"},
-		"an EC key":                         {jwa.Ed25519, *ecJwk, joseerror.ErrInvalidPublicKey, "RFC 9864 4.1.1"},
-		"an Ed25519 key asked for ES256":    {jwa.ES256, rfc8037PublicJwk(), joseerror.ErrInvalidPublicKey, "RFC 7518 3.4"},
-		"an Ed25519 key asked for RS256":    {jwa.RS256, rfc8037PublicJwk(), joseerror.ErrInvalidPublicKey, "RFC 7518 3.3"},
+		"an X25519 key for Ed25519":            {jwa.Ed25519, with("crv", "X25519"), joseerror.ErrUnsupportedAlgorithm, "RFC 9864 4.1.1"},
+		"an X25519 key for EdDSA":              {jwa.EdDSA, with("crv", "X25519"), joseerror.ErrUnsupportedAlgorithm, "RFC 8037 3.1"},
+		"an Ed448 key for Ed25519":             {jwa.Ed25519, with("crv", "Ed448"), joseerror.ErrUnsupportedAlgorithm, "RFC 9864 4.1.1"},
+		"an Ed448 key for EdDSA":               {jwa.EdDSA, with("crv", "Ed448"), joseerror.ErrUnsupportedAlgorithm, "RFC 8037 3.1"},
+		"an EC key for Ed25519":                {jwa.Ed25519, *ecJwk, joseerror.ErrInvalidPublicKey, "RFC 9864 4.1.1"},
+		"an EC key for EdDSA":                  {jwa.EdDSA, *ecJwk, joseerror.ErrInvalidPublicKey, "RFC 8037 3.1"},
+		"an EC key whose alg is EdDSA":         {jwa.Ed25519, ecNamedEdDSA, joseerror.ErrInvalidPublicKey, "RFC 8037 3.1"},
+		"an Ed25519 key for EdDSA named ES256": {jwa.EdDSA, with("alg", "ES256"), joseerror.ErrInvalidPublicKey, "RFC 8725 3.1"},
+		"an Ed25519 key for ES256":             {jwa.ES256, rfc8037PublicJwk(), joseerror.ErrInvalidPublicKey, "RFC 7518 3.4"},
+		"an Ed25519 key for ES256 named EdDSA": {jwa.ES256, with("alg", "EdDSA"), joseerror.ErrInvalidPublicKey, "RFC 8725 3.1"},
+		"an Ed25519 key for RS256":             {jwa.RS256, rfc8037PublicJwk(), joseerror.ErrInvalidPublicKey, "RFC 7518 3.3"},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -160,8 +233,16 @@ func TestGetValidatorFromJwk_BindsAnOKPKeyToEd25519(t *testing.T) {
 		})
 	}
 
-	if _, err := jws.GetValidatorFromJwk(jwa.Ed25519, with("alg", "Ed25519")); err != nil {
-		t.Errorf("[RFC 8725 3.1] a key whose alg names Ed25519 must build an Ed25519 validator, got %v", err)
+	for _, alg := range []jwa.Algorithm{jwa.EdDSA, jwa.Ed25519} {
+		for _, member := range []any{nil, "EdDSA", "Ed25519"} {
+			key := rfc8037PublicJwk()
+			if member != nil {
+				key["alg"] = member
+			}
+			if _, err := jws.GetValidatorFromJwk(alg, key); err != nil {
+				t.Errorf("[RFC 9864 4.1.1] EdDSA with this library's one curve and Ed25519 name the same algorithm, so an Ed25519 key whose alg is %v must build a %s validator, got %v", member, alg, err)
+			}
+		}
 	}
 }
 
@@ -176,6 +257,7 @@ func TestGetValidator_RefusesAKeyOfAnotherFamilyForEd25519(t *testing.T) {
 		key crypto.PublicKey
 	}{
 		"an rsa key for Ed25519":   {jwa.Ed25519, &rsaKey.PublicKey},
+		"an rsa key for EdDSA":     {jwa.EdDSA, &rsaKey.PublicKey},
 		"an ed25519 key for ES256": {jwa.ES256, edPublic},
 		"an ed25519 key for PS256": {jwa.PS256, edPublic},
 	}
@@ -202,6 +284,55 @@ func TestVerify_AnEd25519KeyTheTokenCarriesIsUsedOnlyWhenOptedIn(t *testing.T) {
 	}
 	if _, _, err := jws.Verify(context.Background(), token, nil, nil); err == nil {
 		t.Error("[RFC 7515 10.3] the token's own key authenticates nothing, so it must not verify unless the caller opts in")
+	}
+}
+
+func TestVerify_AJkuMemberNamingEitherEdDSAIdentifierVerifiesATokenNamingTheOther(t *testing.T) {
+	key := newEd25519Key(t)
+	publicJwk, err := jwk.PublicJwk(key.Public())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := map[string]struct {
+		memberAlg, tokenAlg string
+		verifies            bool
+	}{
+		"a member for EdDSA and an Ed25519 token": {"EdDSA", "Ed25519", true},
+		"a member for Ed25519 and an EdDSA token": {"Ed25519", "EdDSA", true},
+		"a member for EdDSA and an EdDSA token":   {"EdDSA", "EdDSA", true},
+		"a member for ES256 and an Ed25519 token": {"ES256", "Ed25519", false},
+		"a member for ES256 and an EdDSA token":   {"ES256", "EdDSA", false},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			member := maps.Clone(*publicJwk)
+			member["alg"] = tc.memberAlg
+			document, err := json.Marshal(map[string]any{"keys": []map[string]any{member}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write(document)
+			}))
+			defer server.Close()
+
+			head, err := json.Marshal(map[string]any{"alg": tc.tokenAlg, "jku": server.URL})
+			if err != nil {
+				t.Fatal(err)
+			}
+			input := base64.RawURLEncoding.EncodeToString(head) + "." + base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"test"}`))
+			token := input + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(key, []byte(input)))
+
+			_, _, err = jws.Verify(context.Background(), token, nil, &model.JoseOptions{UseTokenProvidedKeys: true, HttpClient: server.Client()})
+			if tc.verifies && err != nil {
+				t.Errorf("[RFC 9864 4.1.1] EdDSA with an Ed25519 key and Ed25519 name one algorithm, so a member for %s must verify a %s token, got %v", tc.memberAlg, tc.tokenAlg, err)
+			}
+			if !tc.verifies && err == nil {
+				t.Errorf("[RFC 8725 3.1] a member for %s must not verify a %s token", tc.memberAlg, tc.tokenAlg)
+			}
+		})
 	}
 }
 

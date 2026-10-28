@@ -37,7 +37,13 @@ Currently, the module supports the following asymmetric algorithms:
 - PS512
 - Ed25519
 
-Ed25519 is EdDSA with the Ed25519 parameters of RFC 8032 section 5.1, as RFC 9864 section 4.1.1 registers it. RFC 9864 section 4.1.2 deprecates the `EdDSA` identifier, and this library does not support it. A token whose `alg` is `EdDSA` is refused with `ErrUnsupportedAlgorithm`. Ed448 is not supported.
+Ed25519 is EdDSA with the Ed25519 parameters of RFC 8032 section 5.1, as RFC 9864 section 4.1.1 registers it. Ed448 is not supported.
+
+`EdDSA` is accepted for verification only, and only with an Ed25519 key. RFC 9864 section 4.1.2 deprecates `EdDSA` in favour of `Ed25519`. Section 4.4 tells new producers to prefer the replacement, but it does not tell verifiers to refuse the old identifier. So:
+
+- A token whose `alg` is `EdDSA` verifies under an Ed25519 key, as RFC 8037 defines it.
+- `GetSigner`, `GetSignerFromPrivateKey` and `jwt.New` refuse `EdDSA` with `ErrUnsupportedAlgorithm`. Sign with `Ed25519`.
+- `EdDSA` and `Ed25519` are separate values of `jwa.Algorithm`. To refuse `EdDSA` tokens, set `AllowedSigningAlgorithms` to `jwa.Ed25519` without `jwa.EdDSA`.
 
 Also supported are the following HMAC with SHA2 symmetric algorithms:
 - HS256
@@ -143,7 +149,7 @@ signer, err := jws.GetSigner(jwa.ES256, nil)
 validator, err := jws.GetValidator(signer.Alg(), signer.Public())
 ```
 
-`jws.GetValidatorFromJwk` builds a validator from a jwk, decoded as a `map[string]any` rather than raw bytes. It reads the key by its `kty`, as `jwk.PublicFromJwk` does, so a jwk without a `kty`, or whose `kty` does not match its algorithm, is refused. RFC 8725 section 3.1 requires each key to be used with exactly one algorithm, so a jwk that carries an `alg` member is refused with `ErrInvalidPublicKey` unless that member is the algorithm you asked for. It refuses the HMAC algorithms, because an `oct` key cannot be reached this way. The example below builds a validator for ES256:
+`jws.GetValidatorFromJwk` builds a validator from a jwk, decoded as a `map[string]any` rather than raw bytes. It reads the key by its `kty`, as `jwk.PublicFromJwk` does, so a jwk without a `kty`, or whose `kty` does not match its algorithm, is refused. RFC 8725 section 3.1 requires each key to be used with exactly one algorithm, so a jwk that carries an `alg` member is refused with `ErrInvalidPublicKey` unless that member is the algorithm you asked for. `EdDSA` and `Ed25519` count as the same algorithm here, because this library supports only the Ed25519 curve for `EdDSA`. It refuses the HMAC algorithms, because an `oct` key cannot be reached this way. The example below builds a validator for ES256:
 ```go
 // Construct a validator from a jwk public key
 validator, err := jws.GetValidatorFromJwk(jwa.ES256, publicKeyMap)
@@ -243,7 +249,7 @@ With no client, `jku` and `x5u` contribute no key. Each member of a `jku` set is
 A key from a `jwk` header, or a member of a `jku` set, verifies the token only when all of these hold:
 
 - Its `kid` is absent or equals the header's `kid`. RFC 7515 section 4.1.4 calls the header's `kid` a hint, and RFC 7517 section 4.5 makes a jwk's `kid` optional, so a key that names no `kid` stays a candidate.
-- Its `alg` is absent or equals the header's `alg`. RFC 8725 section 3.1 says "each key MUST be used with exactly one algorithm". A key that names no `alg` stays a candidate, since RFC 7517 section 4.4 makes `alg` optional. Such a key verifies under any algorithm its key type allows, so pin `AllowedSigningAlgorithms` to bind it to one.
+- Its `alg` is absent or equals the header's `alg`. RFC 8725 section 3.1 says "each key MUST be used with exactly one algorithm". `EdDSA` and `Ed25519` count as equal, because with an Ed25519 key they name the same algorithm. A key that names no `alg` stays a candidate, since RFC 7517 section 4.4 makes `alg` optional. Such a key verifies under any algorithm its key type allows, so pin `AllowedSigningAlgorithms` to bind it to one.
 - Its `use` is absent or `"sig"`, and its `key_ops` is absent or includes `"verify"`. RFC 7517 sections 4.2 and 4.3 let a publisher mark a key as not for verifying signatures.
 
 A `jku` set is never used whole because nothing in it matched. When no member qualifies, the set contributes no key and the `jku` retriever's error matches `ErrNoKeyIdentifierMatch`. `VerifyCompactSerialization` then tries the next key source, and if no key verifies it reports `ErrInvalidSignature`, naming the retriever's error only in its message. A `kid`, `alg`, `use` or `key_ops` of the wrong JSON type disqualifies a `jku` member, and refuses an inline `jwk` with `ErrMalformedClaim`, whatever the header holds.
@@ -523,7 +529,8 @@ Every change below is a compile error or a silent behaviour change for a consume
 - A protected header or JWT claims set with a string that holds an unpaired UTF-16 surrogate escape, such as `"\ud800"`, is refused. Previously the escape became U+FFFD. A U+FFFD that is in the signed bytes, raw or as `\ufffd`, is still accepted.
 - A JWT claims set of `null` is refused. `jwt.Validate` and `jws.VerifyCompactSerialization` previously returned a nil body and no error.
 - A `b64` header of `false` is refused, even when `UnderstoodCriticalHeaders` names `b64`.
-- `jwa.EdDSA` is removed, and `jwa.GetAlgorithm("EdDSA")` returns `Unknown`. RFC 9864 section 4.1.2 deprecates `EdDSA`. Use the new `jwa.Ed25519`, which has a signer and a validator. A token whose `alg` is `EdDSA` is refused with `ErrUnsupportedAlgorithm` before any key is sought. v0.10.0 refused it with `ErrInvalidSignature`, after any `jku` fetch. `jwt.New` refuses a head whose `alg` is `EdDSA` with `ErrUnsupportedAlgorithm`.
+- `jwa.Ed25519` is new, with a signer and a validator. A token whose `alg` is `EdDSA` now verifies under an Ed25519 key. v0.10.0 refused it with `ErrInvalidSignature`.
+- `jwt.New` refuses `EdDSA` with `ErrUnsupportedAlgorithm`, whether `Opts.Algorithm` or the head's `alg` names it. v0.10.0 signed an `EdDSA` token with an `ed25519.PrivateKey`. Name `jwa.Ed25519` instead. A verifier that does not yet know `Ed25519` will refuse the token, so make sure that your verifiers support it first.
 - A token whose `cty` is `JWT` is refused by `jws.VerifyCompactSerialization` and `jwt.Validate` with a message naming nested JWTs. Media-type parameters on the `cty` are ignored.
 - Header errors that echo a token value now use double quotes, not single quotes, and cut the value at 64 characters. Match errors with `errors.Is`, not their text.
 - `jws.Verify` is new. It returns the payload as octets, for a JWS whose payload is not a JSON object.

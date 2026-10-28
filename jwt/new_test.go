@@ -484,7 +484,7 @@ func TestNew_ANilBodyIsAnEmptyClaimsSet(t *testing.T) {
 	}
 }
 
-func TestNew_RefusesAHeadNamingTheDeprecatedEdDSA(t *testing.T) {
+func TestNew_RefusesToSignWithTheDeprecatedEdDSA(t *testing.T) {
 	_, edKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -493,12 +493,39 @@ func TestNew_RefusesAHeadNamingTheDeprecatedEdDSA(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, given := range map[string]crypto.Signer{"an ed25519.PrivateKey": edKey, "an Ed25519 signer of this library": signer} {
+	tests := map[string]struct {
+		signer           crypto.Signer
+		head             map[string]any
+		opts             Opts
+		namesReplacement bool
+	}{
+		"an ed25519.PrivateKey with a head naming EdDSA":             {edKey, map[string]any{"alg": "EdDSA"}, Opts{}, true},
+		"an ed25519.PrivateKey with opts naming EdDSA":               {edKey, map[string]any{}, Opts{Algorithm: jwa.EdDSA}, true},
+		"an Ed25519 signer of this library with a head naming EdDSA": {signer, map[string]any{"alg": "EdDSA"}, Opts{}, false},
+		"an Ed25519 signer of this library with opts naming EdDSA":   {signer, map[string]any{}, Opts{Algorithm: jwa.EdDSA}, false},
+	}
+	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			token, err := New(given, map[string]any{"alg": "EdDSA"}, map[string]any{}, Opts{})
+			token, err := New(tc.signer, tc.head, map[string]any{}, tc.opts)
 			if !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || token != nil {
-				t.Errorf("[RFC 9864 4.1.2] EdDSA is deprecated and not supported here, so a head naming it must be refused with ErrUnsupportedAlgorithm and no token, got %v and %v", token, err)
+				t.Errorf("[RFC 9864 4.1.2] new producers SHOULD use Ed25519 in place of the deprecated EdDSA, so this must be refused with ErrUnsupportedAlgorithm and no token, got %v and %v", token, err)
+			}
+			if tc.namesReplacement && (err == nil || !strings.Contains(err.Error(), "sign with Ed25519")) {
+				t.Errorf("[RFC 9864 4.1.2] the refusal must name Ed25519 as the replacement, got %v", err)
 			}
 		})
+	}
+}
+
+func TestValidate_AcceptsATokenSignedUnderTheDeprecatedEdDSA(t *testing.T) {
+	public, edKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"JWT"}`)) + "." + base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"test"}`))
+	token := input + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(edKey, []byte(input)))
+	_, body, err := Validate(context.Background(), token, newTestRetriever(public), nil)
+	if err != nil || body["sub"] != "test" {
+		t.Errorf("[RFC 9864 4.4] a deprecated identifier is to be avoided by new producers, not refused by verifiers, so an EdDSA token under an Ed25519 key must validate, got %v and %v", body, err)
 	}
 }

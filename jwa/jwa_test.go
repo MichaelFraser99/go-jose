@@ -57,6 +57,10 @@ func TestAlgorithm_String(t *testing.T) {
 			expected:  "HS512",
 		},
 		{
+			algorithm: EdDSA,
+			expected:  "EdDSA",
+		},
+		{
 			algorithm: Ed25519,
 			expected:  "Ed25519",
 		},
@@ -126,6 +130,10 @@ func TestGetAlgorithm(t *testing.T) {
 			expected:  HS512,
 		},
 		{
+			algString: "EdDSA",
+			expected:  EdDSA,
+		},
+		{
 			algString: "Ed25519",
 			expected:  Ed25519,
 		},
@@ -157,7 +165,7 @@ func TestAlgorithm_UnknownIsTheZeroValue(t *testing.T) {
 }
 
 func TestAlgorithm_EveryNamedAlgorithmRoundTripsAndNoneIsTheZeroValue(t *testing.T) {
-	named := []Algorithm{ES256, ES384, ES512, RS256, RS384, RS512, PS256, PS384, PS512, HS256, HS384, HS512, Ed25519}
+	named := []Algorithm{ES256, ES384, ES512, RS256, RS384, RS512, PS256, PS384, PS512, HS256, HS384, HS512, EdDSA, Ed25519}
 
 	for _, alg := range named {
 		t.Run(alg.String(), func(t *testing.T) {
@@ -183,7 +191,6 @@ func TestGetAlgorithm_AnUnrecognisedNameIsUnknown(t *testing.T) {
 		"an unregistered name":   "ES999",
 		"a lowercase Ed25519":    "ed25519",
 		"Ed448, not supported":   "Ed448",
-		"EdDSA, deprecated":      "EdDSA",
 	}
 
 	for name, alg := range tests {

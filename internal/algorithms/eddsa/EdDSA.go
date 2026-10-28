@@ -96,3 +96,18 @@ func (validator *Validator) ValidateSignature(digest, signature []byte) (bool, e
 func (validator *Validator) Public() crypto.PublicKey {
 	return validator.publicKey
 }
+
+// SameAlgorithm reports whether a jwk's "alg" member names the algorithm alg
+// names. EdDSA with Ed25519, the one curve this library supports, and Ed25519
+// name the same algorithm, so RFC 8725 section 3.1 holds when the two are
+// matched with each other.
+func SameAlgorithm(member, alg string) bool {
+	if member == alg {
+		return true
+	}
+	return isEd25519Identifier(member) && isEd25519Identifier(alg)
+}
+
+func isEd25519Identifier(name string) bool {
+	return name == jwa.EdDSA.String() || name == jwa.Ed25519.String()
+}
