@@ -102,6 +102,10 @@ func ValidateHeader(ctx context.Context, header map[string]any, client *http.Cli
 	// typ isn't processed as jws applications are instructed to ignore
 	// cty isn't processed as jws applications are instructed to ignore
 
+	if b64, present := header["b64"]; present && b64 == false {
+		return nil, fmt.Errorf("%wthe 'b64' header is false, and this library always base64url-decodes the payload", joseerror.ErrMissingCriticalClaim)
+	}
+
 	critValidators := []jsonutils.Validator[[]any]{jsonutils.ValidateNonEmptySlice, jsonutils.ValidateNoDuplicateSliceValues, jsonutils.ValidateNoBannedCriticalValues, jsonutils.ValidateCriticalValuesPresent, jsonutils.UnderstoodCriticalValues(opts.UnderstoodCriticalHeaders)}
 	if mode == model.JWE {
 		critValidators = append(critValidators, jsonutils.ValidateNoBannedCriticalJWEValues)
@@ -148,7 +152,19 @@ func validateExpectedType(header map[string]any, accepted []string) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("%wthe 'typ' header names %q, which is not one of %v", joseerror.ErrMalformedClaim, typ, accepted)
+	return fmt.Errorf("%wthe 'typ' header names %s, which is not one of %v", joseerror.ErrMalformedClaim, jsonutils.QuoteBounded(typ), accepted)
+}
+
+// NamesNestedJWT reports whether the header's cty is "JWT", which RFC 7519
+// section 5.2 requires of a Nested JWT. The comparison follows RFC 7515 section
+// 4.1.10: case-insensitive, with "application/" prepended to a value without a '/'.
+// Media-type parameters (RFC 9110 section 8.3.1) are ignored.
+func NamesNestedJWT(header map[string]any) bool {
+	cty, _ := header["cty"].(string)
+	if i := strings.IndexByte(cty, ';'); i >= 0 {
+		cty = strings.TrimRight(cty[:i], " \t")
+	}
+	return mediaTypesMatch(cty, "JWT")
 }
 
 func mediaTypesMatch(declared, accepted string) bool {

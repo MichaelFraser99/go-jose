@@ -3,7 +3,6 @@ package jws
 import (
 	"context"
 	"crypto"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/internal/jose/header"
@@ -17,15 +16,38 @@ import (
 
 //todo: should we consider json serialization? - no-one really uses it
 
+// Verify verifies a JWS Compact Serialization as RFC 7515 section 5.2 describes
+// and returns its protected header and its payload octets. The payload is not
+// parsed: section 2 lets it be an arbitrary sequence of octets.
+func Verify(ctx context.Context, compactSerialization string, outOfBoundsPublicKey model.Retriever, opts *model.JoseOptions) (protectedHeader map[string]any, payload []byte, err error) {
+	protectedHeader, payload, _, err = verify(ctx, compactSerialization, outOfBoundsPublicKey, opts, false)
+	return protectedHeader, payload, err
+}
+
+// VerifyCompactSerialization verifies a JWS Compact Serialization as Verify does,
+// and also requires the payload to be a UTF-8 JSON object, as RFC 7519 section
+// 7.2 step 10 requires of a JWT Claims Set. A cty of "JWT" marks a Nested JWT
+// (RFC 7519 section 5.2), which is refused as unsupported before any key is sought.
 func VerifyCompactSerialization(ctx context.Context, compactSerialization string, outOfBoundsPublicKey model.Retriever, opts *model.JoseOptions) (protectedHeader, body map[string]any, err error) {
+	protectedHeader, _, body, err = verify(ctx, compactSerialization, outOfBoundsPublicKey, opts, true)
+	return protectedHeader, body, err
+}
+
+func verify(ctx context.Context, compactSerialization string, outOfBoundsPublicKey model.Retriever, opts *model.JoseOptions, payloadIsJSONObject bool) (protectedHeader map[string]any, payload []byte, body map[string]any, err error) {
 	components := strings.Split(compactSerialization, ".")
 	if len(components) != 3 {
-		return nil, nil, fmt.Errorf("%winvalid compact serialization format", joseerror.ErrMalformedToken)
+		return nil, nil, nil, fmt.Errorf("%winvalid compact serialization format", joseerror.ErrMalformedToken)
 	}
 
 	protectedHeader, err = jsonutils.DecodeBase64urlMap(components[0])
 	if err != nil {
-		return nil, nil, fmt.Errorf("%werror processing protected header: %v", joseerror.ErrMalformedToken, err)
+		return nil, nil, nil, fmt.Errorf("%werror processing protected header: %v", joseerror.ErrMalformedToken, err)
+	}
+
+	if name, ok := protectedHeader["alg"].(string); ok {
+		if alg := jwa.GetAlgorithm(name); alg != jwa.Unknown && !hasValidator(alg) {
+			return nil, nil, nil, fmt.Errorf("%werror validating header: %w%q has no validator in this library", joseerror.ErrMalformedToken, joseerror.ErrUnsupportedAlgorithm, alg.String())
+		}
 	}
 
 	var jwkRetrievers []model.Retriever
@@ -41,23 +63,33 @@ func VerifyCompactSerialization(ctx context.Context, compactSerialization string
 
 	headerJwkRetrievers, err := header.ValidateHeader(ctx, protectedHeader, client, model.JWS, opts)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%werror validating header: %w", joseerror.ErrMalformedToken, err)
+		return nil, nil, nil, fmt.Errorf("%werror validating header: %w", joseerror.ErrMalformedToken, err)
+	}
+
+	if payloadIsJSONObject && header.NamesNestedJWT(protectedHeader) {
+		return nil, nil, nil, fmt.Errorf("%wnested JWTs are not supported: the 'cty' header names JWT", joseerror.ErrMalformedToken)
 	}
 
 	jwkRetrievers = append(jwkRetrievers, headerJwkRetrievers...)
 
 	if len(jwkRetrievers) == 0 {
-		return nil, nil, fmt.Errorf("%wno cyptographic material provided for signature validation", joseerror.ErrMalformedToken)
+		return nil, nil, nil, fmt.Errorf("%wno cyptographic material provided for signature validation", joseerror.ErrMalformedToken)
 	}
 
-	body, err = jsonutils.DecodeBase64urlMap(components[1])
+	payload, err = jsonutils.DecodeBase64url(components[1])
 	if err != nil {
-		return nil, nil, fmt.Errorf("%werror processing body: %v", joseerror.ErrMalformedToken, err)
+		return nil, nil, nil, fmt.Errorf("%werror decoding payload: %v", joseerror.ErrMalformedToken, err)
+	}
+	if payloadIsJSONObject {
+		body, err = jsonutils.DecodeJSONObject(payload)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("%werror processing body: %v", joseerror.ErrMalformedToken, err)
+		}
 	}
 
-	signature, err := base64.RawURLEncoding.DecodeString(components[2])
+	signature, err := jsonutils.DecodeBase64url(components[2])
 	if err != nil {
-		return nil, nil, fmt.Errorf("%werror decoding signature: %v", joseerror.ErrMalformedToken, err)
+		return nil, nil, nil, fmt.Errorf("%werror decoding signature: %v", joseerror.ErrMalformedToken, err)
 	}
 
 	algorithm := jwa.GetAlgorithm(protectedHeader["alg"].(string)) //validated to exist and be of correct type earlier
@@ -68,7 +100,7 @@ func VerifyCompactSerialization(ctx context.Context, compactSerialization string
 		publicKeys, err = retriever()
 		if err != nil {
 			if !errors.Is(err, joseerror.ErrNoKeyIdentifierMatch) {
-				return nil, nil, err
+				return nil, nil, nil, err
 			} else {
 				//if error is 'no key identifier', we ignore failure and store for later reporting
 				noKeyIdentifierErrors = append(noKeyIdentifierErrors, err)
@@ -88,13 +120,13 @@ func VerifyCompactSerialization(ctx context.Context, compactSerialization string
 			}
 
 			if valid {
-				return protectedHeader, body, nil
+				return protectedHeader, payload, body, nil
 			}
 		}
 	}
 
 	if len(noKeyIdentifierErrors) > 0 {
-		return nil, nil, fmt.Errorf("%wunable to validate jws signature - possibly due to the following errors encountered retrieving cryptographic material: %v", joseerror.ErrInvalidSignature, noKeyIdentifierErrors)
+		return nil, nil, nil, fmt.Errorf("%wunable to validate jws signature - possibly due to the following errors encountered retrieving cryptographic material: %v", joseerror.ErrInvalidSignature, noKeyIdentifierErrors)
 	}
-	return nil, nil, fmt.Errorf("%wunable to validate jws signature", joseerror.ErrInvalidSignature)
+	return nil, nil, nil, fmt.Errorf("%wunable to validate jws signature", joseerror.ErrInvalidSignature)
 }

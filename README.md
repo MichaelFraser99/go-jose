@@ -166,6 +166,28 @@ RFC 8725 section 3.1 requires each key to be used with exactly one algorithm. A 
 
 A jwk can carry its own `alg`, and `GetValidatorFromJwk` and a token's `jwk` header both enforce it.
 
+## Verifying a JWS
+
+`jws.Verify` checks a JWS Compact Serialization and returns its protected header and its payload as the signed octets. RFC 7515 section 2 lets a payload be "an arbitrary sequence of octets", so `Verify` does not parse it. Text, binary data and an empty payload all verify:
+
+```go
+head, payload, err := jws.Verify(ctx, token, retriever, opts)
+```
+
+`jws.VerifyCompactSerialization` does the same checks and also parses the payload as a JSON object, which is what a JWT carries. It refuses any other payload, including `null`. `jwt.Validate` is built on it.
+
+Both apply the same rules to the token:
+
+- Each segment must be base64url exactly as RFC 7515 section 2 defines it. A segment holding a line break, whitespace, `=` padding or any other character outside `A-Z a-z 0-9 - _` is refused, as section 5.2 steps 2, 6 and 7 require. A final character whose unused low bits are not zero is refused too, as RFC 4648 section 3.5 permits. So each segment has exactly one accepted encoding.
+- The protected header must be a UTF-8 JSON object, as section 5.2 step 3 and RFC 8725 section 3.7 require. `VerifyCompactSerialization` holds the payload to the same rule.
+- A JSON string in the protected header must not hold an unpaired UTF-16 surrogate escape, such as `"\ud800"`. RFC 8259 section 8.2 calls the behaviour of a receiver of such a string unpredictable. Go would turn it into U+FFFD, so different signed bytes would give the same value. `VerifyCompactSerialization` holds the payload to the same rule.
+
+One message can still have more than one valid token. ECDSA signatures are malleable: for an `ES256`, `ES384` or `ES512` token, anyone can replace the signature's `S` with `n - S` and get a second token that verifies. This needs no key. So do not key a replay or deduplication cache on the raw token string. Key it on a claim such as `jti` instead.
+- An `alg` this library has no validator for is refused with `ErrUnsupportedAlgorithm` before any key is sought, so no `jku` or `x5u` is fetched for it.
+- A `b64` header of `false` is refused with `ErrMissingCriticalClaim`, even when you name `b64` in `UnderstoodCriticalHeaders`. RFC 7797 section 3 says such a payload is not base64url-encoded, and this library always decodes it.
+
+`VerifyCompactSerialization` refuses a nested JWT with `ErrMalformedToken`, before any key is sought. RFC 7519 section 5.2 marks one with a `cty` of `JWT`, compared as RFC 7515 section 4.1.10 describes: case-insensitively, with `application/` treated as prepended. Media-type parameters are ignored, so `application/jwt; charset=utf-8` is a nested JWT too. `Verify` does not look at `cty`, because section 4.1.10 says JWS implementations ignore it. To unwrap a nested JWT yourself, call `Verify` and verify the payload it returns.
+
 ## Keys a token carries
 
 A JOSE header can name the key that signed the token, through `jwk`, `jku`, `x5c` or `x5u`. RFC 7515 section 10.3 says the technique used to get a public key "must authenticate the origin of the key". The four headers differ in whether anything authenticates the key, so each has its own switch:
@@ -204,7 +226,7 @@ Both URLs come from the header of the token being verified, so this library make
 
 Every request a fetch makes must use `https`, including each redirect hop. RFC 7515 sections 4.1.2 and 4.1.5 say an HTTP GET to retrieve the resource MUST use TLS, so a redirect to plain `http` is refused before the request is sent, whatever transport you supply. Your client's own redirect policy still applies. When it sets no `CheckRedirect`, Go's default stops after 10 redirects.
 
-Each fetch is also bounded in time, provided your client's transport honours the request's context. `JoseOptions.FetchTimeout` covers the whole fetch, from sending the request to reading the last byte of the body. When it is zero, the limit is 10 seconds. A deadline or cancellation on the `ctx` you pass to `jwt.Validate` or `jws.VerifyCompactSerialization` also stops the fetch. The limit applies to each fetch, so a token naming both `jku` and `x5u` can take two of them. Use `ctx` to bound the whole call.
+Each fetch is also bounded in time, provided your client's transport honours the request's context. `JoseOptions.FetchTimeout` covers the whole fetch, from sending the request to reading the last byte of the body. When it is zero, the limit is 10 seconds. A deadline or cancellation on the `ctx` you pass to `jwt.Validate`, `jws.Verify` or `jws.VerifyCompactSerialization` also stops the fetch. The limit applies to each fetch, so a token naming both `jku` and `x5u` can take two of them. Use `ctx` to bound the whole call.
 
 A fetch stopped by either limit returns an error that matches `ErrApplicationError` and `context.DeadlineExceeded`. One stopped by cancelling `ctx` matches `context.Canceled`.
 
@@ -387,11 +409,11 @@ Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 | `ErrInvalidPrivateKey` | The private key or secret given cannot be used for this algorithm |
 | `ErrInvalidSignature` | The signature does not verify against the signing input |
 | `ErrDecryptionFailed` | Reserved for JWE. Nothing returns it: the `jwe` package is a stub and exports nothing |
-| `ErrUnsupportedAlgorithm` | The algorithm named is not supported, or not permitted by the options given |
+| `ErrUnsupportedAlgorithm` | The algorithm named is not supported, has no validator in this library, or is not permitted by the options given |
 | `ErrSigningError` | Signing failed |
 | `ErrMalformedClaim` | A claim is present but its type or value is wrong |
 | `ErrMissingClaim` | A required claim is absent |
-| `ErrMissingCriticalClaim` | A header named in `crit` is absent, or names an extension this library does not understand |
+| `ErrMissingCriticalClaim` | A header named in `crit` is absent, or names an extension this library does not understand, or `b64` is `false` |
 | `ErrNoKeyIdentifierMatch` | No key could be selected. The `kid` matches nothing, a `jku` set holds no usable key that matches the header, a certificate chain does not reach a configured root, or an `x5t` thumbprint does not match the chain |
 | `ErrKeystoreError` | A `model.Jwks` lookup or addition failed, a document decoded into `model.Jwks` is not a JWK Set, or the configuration needed to use a key source is absent, such as `X509Roots` for a certificate chain |
 | `ErrApplicationError` | Key material a header named could not be obtained, decoded or used. Covers a failed `jku` or `x5u` fetch, a local decode of what one returned, and an inline `jwk` of a key type or curve this library does not support. A fetch that ran out of time also matches `context.DeadlineExceeded`, and one cancelled through `ctx` matches `context.Canceled` |
@@ -404,6 +426,8 @@ fmt.Errorf("%wshould be an instance of *ecdsa.PrivateKey", joseerror.ErrInvalidP
 ```
 
 That reads `invalid private key: should be an instance of *ecdsa.PrivateKey`, and `errors.Is` still matches.
+
+When a header check echoes a value from the token in its error, the value is quoted with Go escaping and cut to its first 64 characters, with `...` marking the cut. A peer cannot put a raw line break or kilobytes of text into your logs this way.
 
 ## Upgrading from 0.10.x
 
@@ -439,6 +463,15 @@ Every change below is a compile error or a silent behaviour change for a consume
 - `PublicFromJwk` and `PrivateFromJwk` refuse an RSA `e` that is even, below 3 or above 2^31-1. An `e` of more than 8 octets used to be read as its low 64 bits.
 - `PrivateFromJwk` reports a bad `n` or `e` in an RSA private jwk with `ErrInvalidPrivateKey`, as it already did for an EC private jwk. The error still matches the class of the inner fault, such as `ErrInvalidPublicKey` for a refused `e`.
 - An EC jwk with an unsupported `crv` is now refused with `ErrUnsupportedAlgorithm`. Before, the error matched no sentinel. The error text for an unsupported `kty` or `crv` no longer repeats the value.
+- A token whose segments are not exactly base64url is refused, even when it is correctly signed. This covers line breaks, whitespace, padding and non-zero unused bits in the last character. The same rule applies to the base64url members of a jwk, such as `n`, `e`, `x`, `y` and `d`, and to `x5t` and `x5t#S256`.
+- A protected header or JWT claims set that is not valid UTF-8 is refused. Previously each invalid byte became U+FFFD.
+- A protected header or JWT claims set with a string that holds an unpaired UTF-16 surrogate escape, such as `"\ud800"`, is refused. Previously the escape became U+FFFD. A U+FFFD that is in the signed bytes, raw or as `\ufffd`, is still accepted.
+- A JWT claims set of `null` is refused. `jwt.Validate` and `jws.VerifyCompactSerialization` previously returned a nil body and no error.
+- A `b64` header of `false` is refused, even when `UnderstoodCriticalHeaders` names `b64`.
+- An `alg` with no validator, `EdDSA` today, is refused with `ErrUnsupportedAlgorithm` before any key is sought. It was `ErrInvalidSignature`, after any `jku` fetch.
+- A token whose `cty` is `JWT` is refused by `jws.VerifyCompactSerialization` and `jwt.Validate` with a message naming nested JWTs. Media-type parameters on the `cty` are ignored.
+- Header errors that echo a token value now use double quotes, not single quotes, and cut the value at 64 characters. Match errors with `errors.Is`, not their text.
+- `jws.Verify` is new. It returns the payload as octets, for a JWS whose payload is not a JSON object.
 
 ## Upgrading from the pre-0.10 line
 
