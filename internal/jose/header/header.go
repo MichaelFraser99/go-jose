@@ -113,13 +113,13 @@ func ValidateHeader(ctx context.Context, header map[string]any, client *http.Cli
 	}
 
 	var jwkRetrievers []model.Retriever
-	if includedJwk != nil { // prefer an in-line jwk
+	if includedJwk != nil && opts.UseTokenProvidedKeys { // prefer an in-line jwk
 		jwkRetrievers = append(jwkRetrievers, jwk.InlineJWK(*includedJwk, kid, *alg))
 	}
 	if x5c != nil && opts.X509Roots != nil { // then try an in-line certificate, if a trust anchor is configured for it
 		jwkRetrievers = append(jwkRetrievers, x5.InlineCertificate(*x5c, x5t, x5ts256, *alg, opts.X509Roots))
 	}
-	if jku != nil { // check for specified keystore
+	if jku != nil && opts.UseTokenProvidedKeys { // check for specified keystore
 		jwkRetrievers = append(jwkRetrievers, jwk.RetrieveJKU(*jku, httputils.Fetcher(ctx, client, opts.FetchTimeout), kid, *alg))
 	}
 	if x5u != nil && opts.X509Roots != nil { // check for specified remote certificate chain, if a trust anchor is configured for it

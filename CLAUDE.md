@@ -70,7 +70,7 @@ A zero-valued field and a `nil` `*JoseOptions` must mean the same thing. `UseTok
 
 ### A token's own keys are not trusted by default
 
-A `jwk`, `jku`, `x5c` or `x5u` header names a key the token's signer chose. Anyone can sign a token and name their own key. RFC 7515 section 10.3 requires the origin of a key to be authenticated. So `UseTokenProvidedKeys` gates all four, and `x5c` and `x5u` also need `X509Roots`. Do not add a key source that bypasses that gate.
+A `jwk`, `jku`, `x5c` or `x5u` header names a key the token's signer chose. RFC 7515 section 10.3 requires the origin of a key to be authenticated. `x5c` and `x5u` are authenticated by chain validation against `X509Roots`, so setting roots is their opt-in. `jwk` and `jku` carry nothing that authenticates them, so they need `UseTokenProvidedKeys`. Setting one switch must never admit the other kind of source. Any new key source must name what authenticates it and be gated on that.
 
 ## Conventions
 

@@ -44,9 +44,7 @@ func VerifyCompactSerialization(ctx context.Context, compactSerialization string
 		return nil, nil, fmt.Errorf("%werror validating header: %w", joseerror.ErrMalformedToken, err)
 	}
 
-	if opts != nil && opts.UseTokenProvidedKeys {
-		jwkRetrievers = append(jwkRetrievers, headerJwkRetrievers...)
-	}
+	jwkRetrievers = append(jwkRetrievers, headerJwkRetrievers...)
 
 	if len(jwkRetrievers) == 0 {
 		return nil, nil, fmt.Errorf("%wno cyptographic material provided for signature validation", joseerror.ErrMalformedToken)

@@ -148,27 +148,35 @@ pk := validator.Public()
 
 ## Keys a token carries
 
-A JOSE header can name the key that signed the token, through `jwk`, `jku`, `x5c` or `x5u`. `jwt.Validate` and `jws.VerifyCompactSerialization` do not use those keys unless you turn them on:
+A JOSE header can name the key that signed the token, through `jwk`, `jku`, `x5c` or `x5u`. RFC 7515 section 10.3 says the technique used to get a public key "must authenticate the origin of the key". The four headers differ in whether anything authenticates the key, so each has its own switch:
+
+| Header | Used when | What authenticates the key |
+| --- | --- | --- |
+| `x5c` | `X509Roots` is set | The chain validates against your roots, as section 4.1.6 requires |
+| `x5u` | `X509Roots` and `HttpClient` are set | The same chain validation, after the fetch |
+| `jwk` | `UseTokenProvidedKeys` is true | Nothing. The token names its own key |
+| `jku` | `UseTokenProvidedKeys` is true and `HttpClient` is set | Nothing. The token's signer chooses the URL, and TLS proves only the server's identity |
+
+`jwk` and `jku` are off by default, including when you pass no options, because anyone can sign a token and name their own key. A token that verifies against such a key proves only that its signer holds that key. Turn `UseTokenProvidedKeys` on only when your application ties those keys to a party you trust some other way:
 
 ```go
 head, body, err := jwt.Validate(ctx, token, nil, &model.JoseOptions{UseTokenProvidedKeys: true})
 ```
 
-They are off by default because anyone can sign a token and name their own key in its header. A token that verifies against a key it carries proves only that its signer holds that key. RFC 7515 section 10.3 says the technique used to get a public key "must authenticate the origin of the key". Turn the option on only when something else ties those keys to a party you trust, such as `X509Roots` for `x5c` and `x5u`.
+Setting `X509Roots` does not turn `jwk` or `jku` on.
 
-With the option off, supply your own key material through the retriever. That is the usual case.
+When you supply your own retriever and also use a header source, both are tried. The token verifies if a key from either source verifies it.
 
-**This is a breaking change for a caller that passes no options.** v0.10.0 used the token's keys when `opts` was `nil`. Such a caller must now pass `UseTokenProvidedKeys: true` to keep that behaviour. A caller that set `UseTokenProvidedKeys` keeps the same meaning. A caller that constructed `JoseOptions` without it was already getting no token keys.
+**This is a breaking change for a caller that passes no options.** v0.10.0 used the token's keys when `opts` was `nil`. Such a caller must now pass `UseTokenProvidedKeys: true` to keep using `jwk` and `jku`, and set `X509Roots` to use `x5c` and `x5u`. A caller that set `UseTokenProvidedKeys` keeps the same meaning for `jwk` and `jku`. A caller that constructed `JoseOptions` without it was already getting no token keys.
 
 ### jku and x5u need a client
 
-The two remote headers name a URL this library fetches. Supply the client it should use:
+The two remote headers name a URL this library fetches. Supply the client it should use. The example below uses `x5u`; `jku` also needs `UseTokenProvidedKeys`:
 
 ```go
 head, body, err := jwt.Validate(ctx, token, nil, &model.JoseOptions{
-    UseTokenProvidedKeys: true,
-    HttpClient:           &http.Client{Transport: yourGuardedTransport},
-    X509Roots:            roots,
+    HttpClient: &http.Client{Transport: yourGuardedTransport},
+    X509Roots:  roots,
 })
 ```
 
@@ -213,14 +221,14 @@ RFC 5280 path validation takes a trust anchor as an **input**. A chain cannot vo
 roots := x509.NewCertPool()
 roots.AppendCertsFromPEM(issuerRootPEM)
 
-head, body, err := jwt.Validate(ctx, token, nil, &model.JoseOptions{UseTokenProvidedKeys: true, X509Roots: roots})
+head, body, err := jwt.Validate(ctx, token, nil, &model.JoseOptions{X509Roots: roots})
 ```
 
 With no `X509Roots` configured, a token's `x5c` and `x5u` headers contribute no key. They are not an error — section 4.1.6 makes use of the header OPTIONAL — so the token still verifies if another key source does, and fails with `no cyptographic material provided for signature validation` if none does.
 
 A malformed `x5c` is refused whether or not roots are configured, because its shape is a property of the claim rather than of your trust configuration. An array that is not an array of strings, an empty array, or an entry that is not base64-encoded DER is `ErrMalformedClaim`.
 
-`jwk` and `jku` are deliberately left alone by this. Neither carries a validation MUST, and an inline `jwk` is transparently "here is my key, check against it" — a caller reading the header knows no trust is being conferred. An `x5c` chain looks like PKI, which is why it is the one that needs the anchor made explicit.
+Configuring roots does not make `jwk` or `jku` usable. Nothing anchors those keys, so they need `UseTokenProvidedKeys`, as described under [Keys a token carries](#keys-a-token-carries).
 
 ## Jwks
 This library includes two methods for converting keys into JWK format
@@ -351,7 +359,7 @@ if errors.Is(err, joseerror.ErrInvalidSignature) {
 
 - An HMAC secret must be at least the hash output size, and a validator for an HMAC algorithm can only be built from a signer.
 - An Ed25519 jwk now carries a `kid`.
-- `JoseOptions.UseTokenProvidedKeys` is off unless set, including when `opts` is `nil`.
+- `JoseOptions.UseTokenProvidedKeys` is off unless set, including when `opts` is `nil`, and now covers only `jwk` and `jku`. `x5c` and `x5u` are used when `X509Roots` is set.
 - A `crit` header naming an extension you have not declared in `UnderstoodCriticalHeaders` is refused.
 - `x5c` and `x5u` contribute no key unless `JoseOptions.X509Roots` is configured.
 
