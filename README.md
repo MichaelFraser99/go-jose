@@ -300,7 +300,7 @@ Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 | `ErrMissingCriticalClaim` | A header named in `crit` is absent, or names an extension this library does not understand |
 | `ErrNoKeyIdentifierMatch` | No key could be selected. The `kid` matches nothing, a certificate chain does not reach a configured root, or an `x5t` thumbprint does not match the chain |
 | `ErrKeystoreError` | A key set could not be read, holds no usable key, or the configuration needed to use it is absent, such as `X509Roots` for a certificate chain |
-| `ErrApplicationError` | Key material a header named could not be obtained or decoded. Covers a failed `jku` or `x5u` fetch, and a local decode of what one returned |
+| `ErrApplicationError` | Key material a header named could not be obtained, decoded or used. Covers a failed `jku` or `x5u` fetch, a local decode of what one returned, and an inline `jwk` of a key type or curve this library does not support |
 | `ErrMalformedToken` | The token is not a well formed JOSE object |
 
 Each sentinel carries a prefix terminated by `": "`, so wrap one with `%w` immediately followed by the rest of the message and no space:
