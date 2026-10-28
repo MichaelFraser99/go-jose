@@ -1,15 +1,18 @@
 package jws
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"testing"
 
@@ -126,6 +129,163 @@ func TestGetSigner_RefusesToGenerateAnRSAKeyAboveTheCeiling(t *testing.T) {
 				t.Errorf("[#83] a refused construction must return a nil Signer, got %#v", signer)
 			}
 		})
+	}
+}
+
+func TestRSAConstructors_AcceptOnlyAnOddPublicExponentFromThreeToTheCryptoRSABound(t *testing.T) {
+	tests := []struct {
+		e      int64
+		accept bool
+		clause string
+	}{
+		{e: 1, clause: "RFC 8017 3.1"},
+		{e: 2, clause: "RFC 8017 3.1"},
+		{e: 3, accept: true, clause: "RFC 8017 3.1"},
+		{e: 4, clause: "RFC 8017 3.1"},
+		{e: 65536, clause: "RFC 8017 3.1"},
+		{e: 65537, accept: true, clause: "RFC 8017 3.1"},
+		{e: math.MaxInt32, accept: true, clause: "crypto/rsa e <= 2^31-1"},
+		{e: math.MaxInt32 + 2, clause: "crypto/rsa e <= 2^31-1"},
+	}
+
+	for _, alg := range rsaAlgorithms {
+		for _, test := range tests {
+			t.Run(fmt.Sprintf("%s with e=%d", alg, test.e), func(t *testing.T) {
+				if test.e > math.MaxInt {
+					t.Skipf("[%s] e=%d does not fit this platform's int, so no rsa.PublicKey can carry it", test.clause, test.e)
+				}
+				publicKey := rsaPublicKeyOfBits(2048)
+				publicKey.E = int(test.e)
+				privateKey := &rsa.PrivateKey{PublicKey: *publicKey, D: big.NewInt(3)}
+				constructions := map[string]struct {
+					construct func() (any, error)
+					class     error
+				}{
+					"GetValidator": {func() (any, error) {
+						v, err := GetValidator(alg, publicKey)
+						return v, err
+					}, joseerror.ErrInvalidPublicKey},
+					"GetValidatorFromJwk": {func() (any, error) {
+						v, err := GetValidatorFromJwk(alg, rsaJwkOf(publicKey))
+						return v, err
+					}, joseerror.ErrInvalidPublicKey},
+					"GetSignerFromPrivateKey": {func() (any, error) {
+						s, err := GetSignerFromPrivateKey(alg, privateKey)
+						return s, err
+					}, joseerror.ErrInvalidPrivateKey},
+				}
+				for name, c := range constructions {
+					built, err := c.construct()
+					if test.accept {
+						if err != nil {
+							t.Errorf("[%s] %s must accept e=%d, got %v", test.clause, name, test.e, err)
+						}
+						continue
+					}
+					if !errors.Is(err, c.class) {
+						t.Errorf("[%s] %s must refuse e=%d with %v, got %v", test.clause, name, test.e, c.class, err)
+					}
+					if built != nil {
+						t.Errorf("[%s] a refused construction must return a nil interface, got %#v", test.clause, built)
+					}
+				}
+			})
+		}
+	}
+}
+
+func emsaPKCS1v15SHA256(hash []byte, emLen int) []byte {
+	t := append([]byte{0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05, 0x00, 0x04, 0x20}, hash...)
+	em := bytes.Repeat([]byte{0xff}, emLen)
+	em[0], em[1] = 0x00, 0x01
+	em[emLen-len(t)-1] = 0x00
+	copy(em[emLen-len(t):], t)
+	return em
+}
+
+func emsaPSSSHA256(mHash, salt []byte, modBits int) []byte {
+	emBits := modBits - 1
+	emLen := (emBits + 7) / 8
+	h := sha256.Sum256(append(append(make([]byte, 8), mHash...), salt...))
+	db := make([]byte, emLen-len(h)-1)
+	db[len(db)-len(salt)-1] = 0x01
+	copy(db[len(db)-len(salt):], salt)
+	var mask []byte
+	for counter := uint32(0); len(mask) < len(db); counter++ {
+		block := sha256.Sum256(append(append([]byte{}, h[:]...), byte(counter>>24), byte(counter>>16), byte(counter>>8), byte(counter)))
+		mask = append(mask, block[:]...)
+	}
+	for i := range db {
+		db[i] ^= mask[i]
+	}
+	db[0] &= 0xff >> (8*emLen - emBits)
+	em := append(append(db, h[:]...), 0xbc)
+	return append(make([]byte, (modBits+7)/8-emLen), em...)
+}
+
+func TestRSAValidators_RefuseExponentOneUnderWhichTheEncodedHashIsItsOwnSignature(t *testing.T) {
+	realKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("failed to generate an RSA key: %v", err)
+	}
+	input := []byte("eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJhZG1pbiJ9")
+	hash := sha256.Sum256(input)
+	salt := bytes.Repeat([]byte{0x5a}, sha256.Size)
+
+	tests := []struct {
+		alg       jwa.Algorithm
+		forged    []byte
+		stdlibAck func(signature []byte) error
+	}{
+		{
+			alg:    jwa.RS256,
+			forged: emsaPKCS1v15SHA256(hash[:], 256),
+			stdlibAck: func(signature []byte) error {
+				return rsa.VerifyPKCS1v15(&realKey.PublicKey, crypto.SHA256, hash[:], signature)
+			},
+		},
+		{
+			alg:    jwa.PS256,
+			forged: emsaPSSSHA256(hash[:], salt, 2048),
+			stdlibAck: func(signature []byte) error {
+				return rsa.VerifyPSS(&realKey.PublicKey, crypto.SHA256, hash[:], signature, &rsa.PSSOptions{SaltLength: sha256.Size})
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.alg.String(), func(t *testing.T) {
+			signedByRealKey := new(big.Int).Exp(new(big.Int).SetBytes(test.forged), realKey.D, realKey.N).FillBytes(make([]byte, 256))
+			if err := test.stdlibAck(signedByRealKey); err != nil {
+				t.Fatalf("[RFC 8017 9.1.1, 9.2] the forged value must be a well-formed encoded message of the signing input, but crypto/rsa refused it: %v", err)
+			}
+
+			exponentOne := rsaPublicKeyOfBits(2048)
+			exponentOne.E = 1
+			validator, err := GetValidator(test.alg, exponentOne)
+			if err == nil {
+				valid, verifyErr := validator.ValidateSignature(input, test.forged)
+				t.Fatalf("[RFC 8017 5.2.2] with e=1 RSAVP1 returns the signature itself, so a key with e=1 must be refused before it can verify a signature no private key made, but a validator was built and reported valid=%t err=%v", valid, verifyErr)
+			}
+			if !errors.Is(err, joseerror.ErrInvalidPublicKey) || validator != nil {
+				t.Errorf("[RFC 8017 3.1] a key with e=1 must be refused with ErrInvalidPublicKey and no validator, got validator=%v err=%v", validator, err)
+			}
+		})
+	}
+}
+
+func TestESConstructors_DescribeAnUnsupportedCurveWithoutNamingAJwk(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P224(), rand.Reader)
+	if err != nil {
+		t.Fatalf("failed to generate a P-224 key: %v", err)
+	}
+	validator, err := GetValidator(jwa.ES256, &key.PublicKey)
+	if validator != nil || !errors.Is(err, joseerror.ErrInvalidPublicKey) || err.Error() != "invalid public key: curve should be P-256, was a curve this library does not support" {
+		t.Errorf("[RFC 7518 3.4] ES256 is defined over P-256, so a caller's P-224 key must be refused as such without mention of a jwk, got validator=%v err=%v", validator, err)
+	}
+	signer, err := GetSignerFromPrivateKey(jwa.ES256, key)
+	if signer != nil || !errors.Is(err, joseerror.ErrInvalidPrivateKey) || err.Error() != "invalid private key: curve should be P-256, was a curve this library does not support" {
+		t.Errorf("[RFC 7518 3.4] ES256 is defined over P-256, so a caller's P-224 key must be refused as such without mention of a jwk, got signer=%v err=%v", signer, err)
 	}
 }
 

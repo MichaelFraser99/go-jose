@@ -18,12 +18,21 @@ const MinimumRSAModulusBits = 2048
 // matches the default cap crypto/tls applies to a peer's RSA key.
 const MaximumRSAModulusBits = 8192
 
+// MaximumRSAPublicExponent is the largest public exponent the RS and PS
+// algorithms accept, the same bound crypto/rsa applies from Go 1.24.
+const MaximumRSAPublicExponent = 1<<31 - 1
+
 // CheckRSAPublicKey refuses, with the error class given, an RSA public key a
-// signature cannot be checked with or whose modulus lies outside
-// [MinimumRSAModulusBits, MaximumRSAModulusBits].
+// signature cannot be checked with, whose modulus lies outside
+// [MinimumRSAModulusBits, MaximumRSAModulusBits], or whose exponent is not an
+// odd integer in [3, MaximumRSAPublicExponent]. RFC 8017 section 3.1 puts e
+// between 3 and n - 1 with GCD(e, lambda(n)) = 1, and lambda(n) is even.
 func CheckRSAPublicKey(publicKey *rsa.PublicKey, class error) error {
 	if err := checkRSAPublicKey(publicKey, class); err != nil {
 		return err
+	}
+	if e := publicKey.E; e < 3 || e%2 == 0 || e > MaximumRSAPublicExponent {
+		return fmt.Errorf("%wan RSA public exponent is odd and in [3, %d], got %d", class, MaximumRSAPublicExponent, e)
 	}
 	if bits := publicKey.N.BitLen(); bits < MinimumRSAModulusBits || bits > MaximumRSAModulusBits {
 		return fmt.Errorf("%wan RSA modulus of %d to %d bits is required, got %d", class, MinimumRSAModulusBits, MaximumRSAModulusBits, bits)
@@ -52,7 +61,7 @@ func CheckRSAPrivateKey(privateKey *rsa.PrivateKey) error {
 // that is not a point on curve. RFC 7518 section 3.1 defines each ES algorithm
 // by its curve.
 func CheckECDSAPublicKey(publicKey *ecdsa.PublicKey, curve elliptic.Curve, class error) error {
-	if err := checkECDSAPublicKey(publicKey, class); err != nil {
+	if err := checkECDSAPublicKey(publicKey, class, "curve should be "+curve.Params().Name+", was a curve this library does not support"); err != nil {
 		return err
 	}
 	if publicKey.Curve != curve {

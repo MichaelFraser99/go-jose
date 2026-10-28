@@ -24,8 +24,8 @@ type Validator struct {
 }
 
 func NewSigner(size int) (*Signer, error) {
-	if size < 2048 {
-		return nil, fmt.Errorf("specified key bit size should be at least 2048")
+	if size < common.MinimumRSAModulusBits {
+		return nil, fmt.Errorf("%wspecified key bit size should be at least %d", joseerror.ErrInvalidPrivateKey, common.MinimumRSAModulusBits)
 	}
 	if size > common.MaximumRSAModulusBits {
 		return nil, fmt.Errorf("%wspecified key bit size should be at most %d", joseerror.ErrInvalidPrivateKey, common.MaximumRSAModulusBits)

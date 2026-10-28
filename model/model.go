@@ -78,11 +78,14 @@ type JoseOptions struct {
 }
 
 // Retriever supplies the keys a token may be verified with. A bare
-// crypto.PublicKey carries no algorithm, so a returned key verifies a token
-// under any algorithm of its family that the token names: one RSA key serves
-// RS256 to PS512. RFC 8725 section 3.1 requires each key to be used with
-// exactly one algorithm, so bind the key to its algorithm with
-// JoseOptions.AllowedSigningAlgorithms.
+// crypto.PublicKey carries no algorithm. An EC key is bound to one algorithm by
+// its curve, as RFC 7518 section 3.4 defines each ES algorithm over one curve.
+// An RSA key verifies a token under any of RS256 to PS512 that the token names,
+// and an HMAC secret under any HS algorithm whose minimum length it meets.
+// RFC 8725 section 3.1 requires each key to be used with exactly one algorithm,
+// so bind such a key to its algorithm with JoseOptions.AllowedSigningAlgorithms.
+// That list applies to every key the retriever returns, so keys bound to
+// different algorithms of one family need separate retrievers.
 type Retriever func() ([]crypto.PublicKey, error)
 
 type Mode int //todo: do we actually need this?

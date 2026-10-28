@@ -133,7 +133,7 @@ func extractECDSACoordinatesFromJwk(jwk map[string]any) (*big.Int, *big.Int, *bi
 // size of the curve, so a point that is not on its curve is refused rather than
 // encoded.
 func JwkFromECDSAPublicKey(publicKey *ecdsa.PublicKey) (map[string]any, error) {
-	if err := checkECDSAPublicKey(publicKey, jose_errors.ErrInvalidPublicKey); err != nil {
+	if err := checkECDSAPublicKey(publicKey, jose_errors.ErrInvalidPublicKey, jwkCurves); err != nil {
 		return nil, err
 	}
 	jwk := map[string]any{}
@@ -152,14 +152,16 @@ func JwkFromECDSAPublicKey(publicKey *ecdsa.PublicKey) (map[string]any, error) {
 	return jwk, nil
 }
 
-func checkECDSAPublicKey(publicKey *ecdsa.PublicKey, class error) error {
+const jwkCurves = "the curve of an EC jwk is one of P-256, P-384 and P-521"
+
+func checkECDSAPublicKey(publicKey *ecdsa.PublicKey, class error, unsupportedCurve string) error {
 	if publicKey == nil || publicKey.Curve == nil || publicKey.X == nil || publicKey.Y == nil {
 		return fmt.Errorf("%wan ECDSA key needs a curve and a point", class)
 	}
 	switch publicKey.Curve {
 	case elliptic.P256(), elliptic.P384(), elliptic.P521():
 	default:
-		return fmt.Errorf("%wthe curve of an EC jwk is one of P-256, P-384 and P-521", class)
+		return fmt.Errorf("%w%s", class, unsupportedCurve)
 	}
 	if _, err := publicKey.ECDH(); err != nil {
 		return fmt.Errorf("%wthe point of an ECDSA key is not on its curve: %w", class, err)
@@ -175,7 +177,7 @@ func JwkFromECDSAPrivateKey(privateKey *ecdsa.PrivateKey) (map[string]any, error
 	if privateKey == nil {
 		return nil, fmt.Errorf("%wan ECDSA key needs a curve and a point", jose_errors.ErrInvalidPrivateKey)
 	}
-	if err := checkECDSAPublicKey(&privateKey.PublicKey, jose_errors.ErrInvalidPrivateKey); err != nil {
+	if err := checkECDSAPublicKey(&privateKey.PublicKey, jose_errors.ErrInvalidPrivateKey, jwkCurves); err != nil {
 		return nil, err
 	}
 	if privateKey.D == nil {
