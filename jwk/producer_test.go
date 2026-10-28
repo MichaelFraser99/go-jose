@@ -379,9 +379,10 @@ func TestPrivateJwk_AnECScalarOutsideOneToNMinusOneIsRefused(t *testing.T) {
 		})
 	}
 
-	key := &ecdsa.PrivateKey{PublicKey: ecdsa.PublicKey{Curve: elliptic.P256(), X: params.Gx, Y: params.Gy}, D: new(big.Int).Sub(params.N, big.NewInt(1))}
+	minusG := ecdsa.PublicKey{Curve: elliptic.P256(), X: params.Gx, Y: new(big.Int).Sub(params.P, params.Gy)}
+	key := &ecdsa.PrivateKey{PublicKey: minusG, D: new(big.Int).Sub(params.N, big.NewInt(1))}
 	if _, err := produce(t, func() (*map[string]any, error) { return PrivateJwk(key) }); err != nil {
-		t.Errorf("[RFC 7518 6.2.2.1] d is a SEC1 private key, an integer in [1, n-1], so n-1 must be encoded, got %v", err)
+		t.Errorf("[RFC 7518 6.2.2.1] d is a SEC1 private key, an integer in [1, n-1], so n-1 with its point -G must be encoded, got %v", err)
 	}
 }
 
