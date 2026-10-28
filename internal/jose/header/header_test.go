@@ -340,7 +340,6 @@ func generateCertificateChain(t *testing.T, numCerts int) ([][]byte, []crypto.Pu
 		NotBefore:             time.Now(),
 		NotAfter:              time.Now().AddDate(10, 0, 0),
 		IsCA:                  true,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		BasicConstraintsValid: true,
 	}
@@ -380,7 +379,6 @@ func generateCertificateChain(t *testing.T, numCerts int) ([][]byte, []crypto.Pu
 			NotBefore:             time.Now(),
 			NotAfter:              time.Now().AddDate(1, 0, 0),
 			IsCA:                  i != numCerts-1,
-			ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
 			KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 			BasicConstraintsValid: true,
 		}

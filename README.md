@@ -230,9 +230,23 @@ head, body, err := jwt.Validate(ctx, token, nil, &model.JoseOptions{X509Roots: r
 
 With no `X509Roots` configured, a token's `x5c` and `x5u` headers contribute no key. They are not an error — section 4.1.6 makes use of the header OPTIONAL — so the token still verifies if another key source does, and fails with `no cyptographic material provided for signature validation` if none does.
 
-A malformed `x5c` is refused whether or not roots are configured, because its shape is a property of the claim rather than of your trust configuration. An array that is not an array of strings, an empty array, or an entry that is not exactly one base64-encoded DER certificate is `ErrMalformedClaim`.
+A malformed `x5c` is refused whether or not roots are configured, because its shape is a property of the claim rather than of your trust configuration. An array that is not an array of strings, an empty array, or an entry that is not exactly one base64-encoded DER certificate is `ErrMalformedClaim`. Section 4.1.6 names the base64 of RFC 4648 section 4, and RFC 4648 section 3.3 says a decoder MUST reject characters outside the alphabet. So an entry holding a line break is refused, as is one whose pad bits are not zero. An `x5u` body is PEM, where line breaks are part of the format, so this does not apply to it.
 
 The signing key is taken from the first certificate, and that certificate is the one validated against your roots, as section 4.1.6 requires. The algorithm the issuer used to sign that certificate is not compared with the token's `alg`. An ES256 key in a certificate issued by an RSA root is usable.
+
+That first certificate must also be one whose key may verify a signature. `x5c` and `x5u` get the same checks:
+
+- **Key usage.** When the certificate has a key usage extension, it must assert `digitalSignature` or `nonRepudiation` (`x509.KeyUsageContentCommitment`). RFC 5280 section 4.2.1.3 defines both as the bits for a key that verifies signatures. A CA certificate that asserts only `keyCertSign` is refused, as is a key agreement certificate.
+- **Extended key usage.** RFC 5280 section 4.2.1.12 says that when the extension is present, the certificate "MUST only be used for one of the purposes indicated". No purpose is registered for JWS, so you name the ones you accept in `JoseOptions.X509ExtKeyUsages`. When it is set, it is passed to Go's chain verification, which holds the signing certificate and every CA above it to one of those purposes. When it is unset, a signing certificate whose extension is present must name `anyExtendedKeyUsage`. A certificate with no extended key usage extension is accepted either way.
+
+```go
+head, body, err := jwt.Validate(ctx, token, nil, &model.JoseOptions{
+    X509Roots:        roots,
+    X509ExtKeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageCodeSigning},
+})
+```
+
+Naming `x509.ExtKeyUsageAny` turns the extended key usage check off, as it does in Go's `x509.VerifyOptions`. A purpose Go has no constant for, such as a private OID, cannot be named, so a certificate restricted to one is accepted only with the check off. A refusal for either usage matches `ErrNoKeyIdentifierMatch`, as a chain that does not validate does.
 
 Configuring roots does not make `jwk` or `jku` usable. Nothing anchors those keys, so they need `UseTokenProvidedKeys`, as described under [Keys a token carries](#keys-a-token-carries).
 
@@ -346,6 +360,12 @@ fmt.Errorf("%wshould be an instance of *ecdsa.PrivateKey", joseerror.ErrInvalidP
 ```
 
 That reads `invalid private key: should be an instance of *ecdsa.PrivateKey`, and `errors.Is` still matches.
+
+## Upgrading from 0.10.x
+
+- An `x5c` or `x5u` signing certificate whose extended key usage extension is present must name `anyExtendedKeyUsage`, or a purpose you list in the new `JoseOptions.X509ExtKeyUsages`. Previously the extension was not checked. If your issuer gives signing certificates `clientAuth`, `serverAuth`, `codeSigning` or another purpose, list it, for example `X509ExtKeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}`. See [x5c and x5u need trust anchors](#x5c-and-x5u-need-trust-anchors).
+- An `x5c` or `x5u` signing certificate whose key usage extension asserts neither `digitalSignature` nor `nonRepudiation` is refused. This includes a CA certificate that asserts only `keyCertSign`.
+- An `x5c` entry holding a line break, or whose base64 pad bits are not zero, is refused as `ErrMalformedClaim`.
 
 ## Upgrading from the pre-0.10 line
 

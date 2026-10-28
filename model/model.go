@@ -75,6 +75,17 @@ type JoseOptions struct {
 	// When a retriever is also given, any certificate that chains to these roots can
 	// verify the token, not only the retriever's key.
 	X509Roots *x509.CertPool
+
+	// X509ExtKeyUsages names the extended key usages that permit an x5c or x5u
+	// certificate to verify a JWS. RFC 5280 section 4.2.1.12 says a certificate whose
+	// extension is present MUST only be used for a purpose it names, and no purpose is
+	// registered for JWS. When set, the signing certificate and every certificate
+	// above it must permit one of these, or carry no extended key usage. Naming
+	// x509.ExtKeyUsageAny turns the check off.
+	//
+	// When unset, a signing certificate whose extension is present must name
+	// anyExtendedKeyUsage.
+	X509ExtKeyUsages []x509.ExtKeyUsage
 }
 
 type Retriever func() ([]crypto.PublicKey, error)

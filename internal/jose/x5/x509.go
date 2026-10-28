@@ -10,6 +10,7 @@ import (
 	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/model"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -58,7 +59,10 @@ func CertificateChainStrings(value any) ([]string, error) {
 func parseCertificateChain(certificateChain []string) ([]*x509.Certificate, error) {
 	certificates := make([]*x509.Certificate, 0, len(certificateChain))
 	for i, entry := range certificateChain {
-		der, err := base64.StdEncoding.DecodeString(entry)
+		if strings.ContainsAny(entry, "\r\n") {
+			return nil, fmt.Errorf("%wentry %d of the chain holds a line break, which is outside the base64 alphabet", joseerror.ErrMalformedClaim, i)
+		}
+		der, err := base64.StdEncoding.Strict().DecodeString(entry)
 		if err != nil {
 			return nil, fmt.Errorf("%wone or more entries in the chain is not a valid base64 string: %s", joseerror.ErrMalformedClaim, err.Error())
 		}
@@ -102,7 +106,22 @@ func certificatesFromX5uBody(body []byte) ([]*x509.Certificate, error) {
 	return x509.ParseCertificates(der)
 }
 
-func validateCertificateChain(certificates []*x509.Certificate, roots *x509.CertPool) error {
+// permitsAnyExtendedKeyUsage reports whether a certificate carries no extended key
+// usage, or names anyExtendedKeyUsage, so RFC 5280 section 4.2.1.12 restricts it to
+// no purpose.
+func permitsAnyExtendedKeyUsage(certificate *x509.Certificate) bool {
+	if len(certificate.ExtKeyUsage) == 0 && len(certificate.UnknownExtKeyUsage) == 0 {
+		return true
+	}
+	for _, usage := range certificate.ExtKeyUsage {
+		if usage == x509.ExtKeyUsageAny {
+			return true
+		}
+	}
+	return false
+}
+
+func validateCertificateChain(certificates []*x509.Certificate, roots *x509.CertPool, extKeyUsages []x509.ExtKeyUsage) error {
 	if roots == nil {
 		return fmt.Errorf("%wno x509 trust anchors are configured, so a certificate chain cannot be validated", joseerror.ErrKeystoreError)
 	}
@@ -115,19 +134,30 @@ func validateCertificateChain(certificates []*x509.Certificate, roots *x509.Cert
 		intermediateCertPool.AddCert(intermediate)
 	}
 
-	_, err := certificates[0].Verify(x509.VerifyOptions{
+	keyUsages := extKeyUsages
+	if len(keyUsages) == 0 {
+		keyUsages = []x509.ExtKeyUsage{x509.ExtKeyUsageAny}
+	}
+	signingCertificate := certificates[0]
+	_, err := signingCertificate.Verify(x509.VerifyOptions{
 		Roots:         roots,
 		Intermediates: intermediateCertPool,
-		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+		KeyUsages:     keyUsages,
 	})
 	if err != nil {
 		return fmt.Errorf("%wthe certificate chain does not validate against the configured trust anchors: %s", joseerror.ErrNoKeyIdentifierMatch, err.Error())
 	}
+	if len(extKeyUsages) == 0 && !permitsAnyExtendedKeyUsage(signingCertificate) {
+		return fmt.Errorf("%wthe signing certificate's extended key usage names no purpose the caller accepts", joseerror.ErrNoKeyIdentifierMatch)
+	}
+	if signingCertificate.KeyUsage != 0 && signingCertificate.KeyUsage&(x509.KeyUsageDigitalSignature|x509.KeyUsageContentCommitment) == 0 {
+		return fmt.Errorf("%wthe signing certificate's key usage asserts neither digitalSignature nor nonRepudiation", joseerror.ErrNoKeyIdentifierMatch)
+	}
 	return nil
 }
 
-func keyFromValidatedChain(certificates []*x509.Certificate, x5t, x5ts256 *string, roots *x509.CertPool) ([]crypto.PublicKey, error) {
-	if err := validateCertificateChain(certificates, roots); err != nil {
+func keyFromValidatedChain(certificates []*x509.Certificate, x5t, x5ts256 *string, roots *x509.CertPool, extKeyUsages []x509.ExtKeyUsage) ([]crypto.PublicKey, error) {
+	if err := validateCertificateChain(certificates, roots, extKeyUsages); err != nil {
 		return nil, err
 	}
 
@@ -142,7 +172,10 @@ func keyFromValidatedChain(certificates []*x509.Certificate, x5t, x5ts256 *strin
 	return []crypto.PublicKey{signingCertificate.PublicKey}, nil
 }
 
-func InlineCertificate(certificateChain []string, x5t, x5ts256 *string, roots *x509.CertPool) model.Retriever {
+// InlineCertificate yields the key of the first certificate of an x5c chain once the
+// chain validates against roots and that certificate may verify a signature, under
+// RFC 7515 section 4.1.6 and RFC 5280 sections 4.2.1.3 and 4.2.1.12.
+func InlineCertificate(certificateChain []string, x5t, x5ts256 *string, roots *x509.CertPool, extKeyUsages []x509.ExtKeyUsage) model.Retriever {
 	return func() ([]crypto.PublicKey, error) {
 		if len(certificateChain) == 0 {
 			return nil, fmt.Errorf("%wthe certificate chain carries no certificate", joseerror.ErrMalformedClaim)
@@ -152,11 +185,12 @@ func InlineCertificate(certificateChain []string, x5t, x5ts256 *string, roots *x
 		if err != nil {
 			return nil, err
 		}
-		return keyFromValidatedChain(certificates, x5t, x5ts256, roots)
+		return keyFromValidatedChain(certificates, x5t, x5ts256, roots, extKeyUsages)
 	}
 }
 
-func RetrieveX5U(x5u string, fetch httputils.Fetch, x5t, x5ts256 *string, roots *x509.CertPool) model.Retriever {
+// RetrieveX5U fetches an x5u chain and holds it to the same checks as InlineCertificate.
+func RetrieveX5U(x5u string, fetch httputils.Fetch, x5t, x5ts256 *string, roots *x509.CertPool, extKeyUsages []x509.ExtKeyUsage) model.Retriever {
 	return func() ([]crypto.PublicKey, error) {
 		response, err := fetch(x5u, "x5u")
 		if err != nil {
@@ -172,6 +206,6 @@ func RetrieveX5U(x5u string, fetch httputils.Fetch, x5t, x5ts256 *string, roots 
 		if err != nil {
 			return nil, fmt.Errorf("%wunable to parse retrieved x5u response as a certificate chain: %w", joseerror.ErrApplicationError, err)
 		}
-		return keyFromValidatedChain(certificates, x5t, x5ts256, roots)
+		return keyFromValidatedChain(certificates, x5t, x5ts256, roots, extKeyUsages)
 	}
 }
