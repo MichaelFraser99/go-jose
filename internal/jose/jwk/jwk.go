@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/eddsa"
 	"github.com/MichaelFraser99/go-jose/internal/httputils"
 	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
 	"github.com/MichaelFraser99/go-jose/joseerror"
@@ -164,7 +165,7 @@ func checkMember(jwk map[string]any, kid *string, alg string, ignoreKeyUse bool)
 		if !ok {
 			return fmt.Errorf("%wjwk has malformed alg value", joseerror.ErrMalformedClaim)
 		}
-		if sa != alg {
+		if !eddsa.SameAlgorithm(sa, alg) {
 			return fmt.Errorf("%wjwk alg does not match value from jose header", joseerror.ErrNoKeyIdentifierMatch)
 		}
 	}

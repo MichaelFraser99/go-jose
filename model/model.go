@@ -226,6 +226,8 @@ func (j *Jwks) Add(jwk map[string]any) error {
 //     callers following Go's crypto.Signer convention. It applies to the ES, RS and PS
 //     algorithms. The HS algorithms have no such mode, because HMAC is itself the keyed
 //     hash, and refuse a non-zero HashFunc rather than mac an already hashed digest.
+//     Ed25519 refuses it too: RFC 9864 section 4.1.1 names pure Ed25519, which signs
+//     the whole input.
 type Signer interface {
 	Alg() jwa.Algorithm
 	crypto.Signer
@@ -252,8 +254,8 @@ type Opts struct {
 
 // SignerOpts implements crypto.SignerOpts and signals that the digest passed to
 // Sign has already been hashed. ES, RS and PS signers skip their internal hashing
-// when Hash is non-zero, and refuse a Hash that is not their own. HMAC signers have
-// no pre-hashed mode and refuse a non-zero Hash.
+// when Hash is non-zero, and refuse a Hash that is not their own. HMAC and Ed25519
+// signers have no pre-hashed mode and refuse a non-zero Hash.
 type SignerOpts struct {
 	Hash crypto.Hash
 }

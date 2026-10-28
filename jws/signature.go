@@ -3,6 +3,7 @@ package jws
 import (
 	"crypto"
 	"fmt"
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/eddsa"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es256"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es384"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es512"
@@ -19,6 +20,8 @@ import (
 	"github.com/MichaelFraser99/go-jose/jwa"
 	"github.com/MichaelFraser99/go-jose/model"
 )
+
+var errSignWithEdDSA = fmt.Errorf("%wEdDSA is accepted only for verification: RFC 9864 section 4.1.2 deprecates it, so sign with Ed25519", joseerror.ErrUnsupportedAlgorithm)
 
 // GetSigner
 //
@@ -72,8 +75,12 @@ func GetSigner(alg jwa.Algorithm, opts *model.Opts) (model.Signer, error) {
 			return nil, fmt.Errorf("%wa secret key must be specified for HS algorithms", joseerror.ErrInvalidPrivateKey)
 		}
 		s, err = hs512.NewSigner(opts.SecretKey)
+	case jwa.Ed25519:
+		s, err = eddsa.NewSigner()
 
-	case jwa.EdDSA, jwa.Unknown:
+	case jwa.EdDSA:
+		return nil, errSignWithEdDSA
+	case jwa.Unknown:
 		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg)
 	default:
 		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg)
@@ -117,8 +124,12 @@ func GetSignerFromPrivateKey(alg jwa.Algorithm, privateKey crypto.PrivateKey) (m
 		s, err = ps512.NewSignerFromPrivateKey(privateKey)
 	case jwa.HS256, jwa.HS384, jwa.HS512:
 		return nil, fmt.Errorf("%wHMAC Signers cannot be created this way - please use GetSigner and specify the secret key using the Opts function", joseerror.ErrUnsupportedAlgorithm)
+	case jwa.Ed25519:
+		s, err = eddsa.NewSignerFromPrivateKey(privateKey)
 
-	case jwa.EdDSA, jwa.Unknown:
+	case jwa.EdDSA:
+		return nil, errSignWithEdDSA
+	case jwa.Unknown:
 		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg)
 	default:
 		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg)

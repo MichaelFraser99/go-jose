@@ -3,6 +3,7 @@ package jws
 import (
 	"crypto"
 	"fmt"
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/eddsa"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es256"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es384"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es512"
@@ -49,18 +50,20 @@ func GetValidator(alg jwa.Algorithm, publicKey crypto.PublicKey) (model.Validato
 }
 
 var validatorConstructors = map[jwa.Algorithm]func(crypto.PublicKey) (model.Validator, error){
-	jwa.ES256: func(k crypto.PublicKey) (model.Validator, error) { return es256.NewValidator(k) },
-	jwa.ES384: func(k crypto.PublicKey) (model.Validator, error) { return es384.NewValidator(k) },
-	jwa.ES512: func(k crypto.PublicKey) (model.Validator, error) { return es512.NewValidator(k) },
-	jwa.RS256: func(k crypto.PublicKey) (model.Validator, error) { return rs256.NewValidator(k) },
-	jwa.RS384: func(k crypto.PublicKey) (model.Validator, error) { return rs384.NewValidator(k) },
-	jwa.RS512: func(k crypto.PublicKey) (model.Validator, error) { return rs512.NewValidator(k) },
-	jwa.PS256: func(k crypto.PublicKey) (model.Validator, error) { return ps256.NewValidator(k) },
-	jwa.PS384: func(k crypto.PublicKey) (model.Validator, error) { return ps384.NewValidator(k) },
-	jwa.PS512: func(k crypto.PublicKey) (model.Validator, error) { return ps512.NewValidator(k) },
-	jwa.HS256: func(k crypto.PublicKey) (model.Validator, error) { return hs256.NewValidator(k) },
-	jwa.HS384: func(k crypto.PublicKey) (model.Validator, error) { return hs384.NewValidator(k) },
-	jwa.HS512: func(k crypto.PublicKey) (model.Validator, error) { return hs512.NewValidator(k) },
+	jwa.ES256:   func(k crypto.PublicKey) (model.Validator, error) { return es256.NewValidator(k) },
+	jwa.ES384:   func(k crypto.PublicKey) (model.Validator, error) { return es384.NewValidator(k) },
+	jwa.ES512:   func(k crypto.PublicKey) (model.Validator, error) { return es512.NewValidator(k) },
+	jwa.RS256:   func(k crypto.PublicKey) (model.Validator, error) { return rs256.NewValidator(k) },
+	jwa.RS384:   func(k crypto.PublicKey) (model.Validator, error) { return rs384.NewValidator(k) },
+	jwa.RS512:   func(k crypto.PublicKey) (model.Validator, error) { return rs512.NewValidator(k) },
+	jwa.PS256:   func(k crypto.PublicKey) (model.Validator, error) { return ps256.NewValidator(k) },
+	jwa.PS384:   func(k crypto.PublicKey) (model.Validator, error) { return ps384.NewValidator(k) },
+	jwa.PS512:   func(k crypto.PublicKey) (model.Validator, error) { return ps512.NewValidator(k) },
+	jwa.HS256:   func(k crypto.PublicKey) (model.Validator, error) { return hs256.NewValidator(k) },
+	jwa.HS384:   func(k crypto.PublicKey) (model.Validator, error) { return hs384.NewValidator(k) },
+	jwa.HS512:   func(k crypto.PublicKey) (model.Validator, error) { return hs512.NewValidator(k) },
+	jwa.EdDSA:   func(k crypto.PublicKey) (model.Validator, error) { return eddsa.NewValidator(k) },
+	jwa.Ed25519: func(k crypto.PublicKey) (model.Validator, error) { return eddsa.NewValidator(k) },
 }
 
 func hasValidator(alg jwa.Algorithm) bool {
@@ -80,16 +83,16 @@ func hasValidator(alg jwa.Algorithm) bool {
 // refused unless that member is the string alg names.
 func GetValidatorFromJwk(alg jwa.Algorithm, publicJwk map[string]any) (model.Validator, error) {
 	switch alg {
-	case jwa.ES256, jwa.ES384, jwa.ES512, jwa.RS256, jwa.RS384, jwa.RS512, jwa.PS256, jwa.PS384, jwa.PS512:
+	case jwa.ES256, jwa.ES384, jwa.ES512, jwa.RS256, jwa.RS384, jwa.RS512, jwa.PS256, jwa.PS384, jwa.PS512, jwa.EdDSA, jwa.Ed25519:
 	case jwa.HS256, jwa.HS384, jwa.HS512:
 		return nil, fmt.Errorf("%wvalidators cannot be created for symmetric algorithms", joseerror.ErrUnsupportedAlgorithm)
-	case jwa.EdDSA, jwa.Unknown:
+	case jwa.Unknown:
 		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg.String())
 	default:
 		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg.String())
 	}
 	if member, present := publicJwk["alg"]; present {
-		if name, isString := member.(string); name != alg.String() {
+		if name, isString := member.(string); !eddsa.SameAlgorithm(name, alg.String()) {
 			named := "a value that is not a string"
 			if isString {
 				named = jsonutils.QuoteBounded(name)
