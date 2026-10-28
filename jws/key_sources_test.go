@@ -84,7 +84,7 @@ func TestVerifyCompactSerialization_EachHeaderKeySourceNeedsItsOwnAnchor(t *test
 	roots.AddCert(root)
 
 	x5cToken := es256Token(t, leafKey, map[string]any{"x5c": []string{base64.StdEncoding.EncodeToString(leaf.Raw)}})
-	jwkToken := es256Token(t, attackerKey, map[string]any{"jwk": common.JwkFromECDSAPublicKey(&attackerKey.PublicKey)})
+	jwkToken := es256Token(t, attackerKey, map[string]any{"jwk": mustJwk(t)(common.JwkFromECDSAPublicKey(&attackerKey.PublicKey))})
 
 	tests := map[string]struct {
 		token     string
@@ -147,7 +147,7 @@ func TestVerifyCompactSerialization_OnceOptedInEitherTheCallersKeyOrAHeaderKeyMa
 	callersKey, headerKey := p256(t), p256(t)
 	retriever := func() ([]crypto.PublicKey, error) { return []crypto.PublicKey{&callersKey.PublicKey}, nil }
 	head := func() map[string]any {
-		return map[string]any{"jwk": common.JwkFromECDSAPublicKey(&headerKey.PublicKey)}
+		return map[string]any{"jwk": mustJwk(t)(common.JwkFromECDSAPublicKey(&headerKey.PublicKey))}
 	}
 
 	tests := map[string]*ecdsa.PrivateKey{
@@ -172,7 +172,7 @@ func TestVerifyCompactSerialization_ARemoteSourceIsFetchedOnlyUnderItsOwnAnchor(
 	roots := x509.NewCertPool()
 	roots.AddCert(root)
 
-	jwks, err := json.Marshal(map[string]any{"keys": []any{common.JwkFromECDSAPublicKey(&jkuKey.PublicKey)}})
+	jwks, err := json.Marshal(map[string]any{"keys": []any{mustJwk(t)(common.JwkFromECDSAPublicKey(&jkuKey.PublicKey))}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -89,6 +89,11 @@ func (signer *Signer) Public() crypto.PublicKey {
 	return slices.Clone(signer.secret)
 }
 
+// Sign macs the signing input whole. An hmac algorithm has no pre-hashed mode,
+// because HMAC is itself the keyed hash, so a non-zero opts.HashFunc is refused.
 func (signer *Signer) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error) {
+	if opts != nil && opts.HashFunc() != 0 {
+		return nil, fmt.Errorf("%wan hmac algorithm has no pre-hashed mode, so the signing input must be passed whole", joseerror.ErrSigningError)
+	}
 	return common.ProduceMac(hmac.New(sha512.New384, signer.secret), digest), nil
 }

@@ -30,8 +30,8 @@ func TestValidateHeader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to generate test rsaKey: %s", err)
 	}
-	rsaJwk := common.JwkFromRSAPublicKey(rsaKey.Public().(*rsa.PublicKey))
-	psJwk := common.JwkFromRSAPublicKey(rsaKey.Public().(*rsa.PublicKey))
+	rsaJwk := mustJwk(t)(common.JwkFromRSAPublicKey(rsaKey.Public().(*rsa.PublicKey)))
+	psJwk := mustJwk(t)(common.JwkFromRSAPublicKey(rsaKey.Public().(*rsa.PublicKey)))
 	psJwk["alg"] = "PS256"
 
 	certificates, certificateKeys, err := generateCertificateChain(t, 5)
@@ -64,14 +64,14 @@ func TestValidateHeader(t *testing.T) {
 				t.Fatalf("Failed to generate test rsa rsaKey: %s", err)
 			}
 			jwkKeysArray = append(jwkKeysArray, k.Public())
-			entry = common.JwkFromRSAPublicKey(k.Public().(*rsa.PublicKey))
+			entry = mustJwk(t)(common.JwkFromRSAPublicKey(k.Public().(*rsa.PublicKey)))
 		} else {
 			k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 			if err != nil {
 				t.Fatalf("Failed to generate test ec rsaKey: %s", err)
 			}
 			jwkKeysArray = append(jwkKeysArray, k.Public())
-			entry = common.JwkFromECDSAPublicKey(k.Public().(*ecdsa.PublicKey))
+			entry = mustJwk(t)(common.JwkFromECDSAPublicKey(k.Public().(*ecdsa.PublicKey)))
 		}
 
 		keySet.Keys = append(keySet.Keys, entry)
@@ -405,4 +405,14 @@ func headerX5t(cert []byte) string {
 func headerX5tS256(cert []byte) string {
 	sum := sha256.Sum256(cert)
 	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+func mustJwk(t *testing.T) func(map[string]any, error) map[string]any {
+	t.Helper()
+	return func(jwk map[string]any, err error) map[string]any {
+		if err != nil {
+			t.Fatalf("failed to build a jwk: %v", err)
+		}
+		return jwk
+	}
 }

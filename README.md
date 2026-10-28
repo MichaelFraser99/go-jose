@@ -102,7 +102,9 @@ The `Sign` method follows JOSE conventions per RFC 7518 rather than Go's `crypto
 - **JOSE mode** (`opts == nil` or `opts.HashFunc() == 0`): pass the raw JWS Signing Input — the signer hashes it internally using the algorithm's designated hash. This is the expected usage for JWS operations.
 - **Pre-hashed mode** (`opts.HashFunc() != 0`): pass an already-hashed digest — the signer skips internal hashing. This supports interoperability with callers following Go's `crypto.Signer` convention. ES, RS and PS implement this mode, and refuse a `Hash` that is not the algorithm's own with `ErrSigningError`.
 
-> **The HMAC algorithms do not implement pre-hashed mode.** HS256, HS384 and HS512 ignore `opts` entirely. HMAC is itself a keyed hash, so there is no internal hashing step to skip. Passing a pre-hashed digest to one produces a MAC over the digest rather than over the signing input, which no validator accepts, and `Sign` returns no error to say so. A wrong `Hash` is not refused either. Pass the signing input whole to an HS signer, and leave `opts` nil. Tracked as [#69](https://github.com/MichaelFraser99/go-jose/issues/69).
+> **The HMAC algorithms have no pre-hashed mode, and refuse one.** HMAC is itself a keyed hash, so there is no internal hashing step for a caller to skip. HS256, HS384 and HS512 refuse a non-zero `opts.HashFunc()` with `ErrSigningError`. Pass the signing input whole and leave `opts` nil.
+>
+> **This is a breaking change,** and it breaks two kinds of caller differently. One passed a pre-hashed digest with a non-zero `Hash`, as the old documentation described: they were already producing a MAC over the digest rather than over the signing input, which no validator accepts, with no error to say so. They now get an error at the call that causes it. The other is generic over `crypto.Signer` and passes a non-zero `Hash` alongside the **raw** signing input — that worked, because `opts` was ignored, and it no longer does. Such a caller should pass `nil` for an HS algorithm, or a zero `Hash`.
 
 A `SignerOpts` implementation is provided:
 ```go
@@ -245,7 +247,22 @@ func jwk.PublicJwk(publicKey crypto.PublicKey) (*map[string]any, error)
 func jwk.PrivateJwk(privateKey crypto.PrivateKey) (*map[string]any, error)
 ```
 
-Pass a pointer to the key. An `*ecdsa.PublicKey`, an `*rsa.PublicKey` or an `*ed25519.PublicKey` is accepted; anything else is refused with `ErrInvalidPublicKey`.
+Pass the key in the form the standard library gives it. An `*ecdsa.PublicKey`, an `*rsa.PublicKey`, or an `ed25519.PublicKey` (or a pointer to one) is accepted. `PrivateJwk` takes the private equivalents. Anything else is refused with `ErrInvalidPublicKey` or `ErrInvalidPrivateKey`.
+
+A key that cannot be encoded is refused with the same errors:
+
+- A nil key, or a key with a missing field.
+- An EC key on a curve other than P-256, P-384 and P-521, the curves RFC 7518 section 6.2.1.1 registers. The curve must be the standard library's own `elliptic.P256()`, `P384()` or `P521()`; another curve that carries one of those names is refused.
+- An EC key whose point is not on its curve, including a negative coordinate or one too large for the curve.
+- An EC private key whose `d` is outside `[1, n-1]`, where `n` is the order of the curve.
+- An RSA private key whose `d` is not between 0 and `n`.
+- An RSA private key with one prime, or more than two. RFC 7518 section 6.3.2.7 says a consumer that does not support more than two MUST NOT use such a key, and `PrivateFromJwk` refuses a jwk that carries `oth`.
+- An RSA private key with a prime that is not positive. RFC 8017 section 3.2 makes `p` and `q` positive integers.
+- A two-prime RSA private key that `rsa.PrivateKey.Validate` rejects, such as one whose primes do not multiply to `n`.
+
+An EC private key's `d` is padded to the length of the curve order, as RFC 7518 section 6.2.2.1 requires.
+
+An RSA private key with no primes is encoded as `n`, `e` and `d`. RFC 7518 section 6.3.2 makes `d` the only required private member. A two-prime key also carries `p`, `q`, `dp`, `dq` and `qi`, which that section says producers SHOULD include. The CRT values are computed on a copy, so the caller's key is not changed.
 
 ```go
 // Direct from a public key
@@ -285,7 +302,7 @@ type jwt.Opts struct {
 }
 ```
 
-Give it the algorithm the signer was built for. It decides which hash `New` applies to the signing input, so an algorithm that disagrees with the signer produces a signature nothing verifies.
+Give it the algorithm the signer was built for. `New` hashes the signing input only for an ES, RS or PS algorithm. A signer from this library refuses a hash that is not its own, and an HMAC signer refuses any hash. With an HS or EdDSA algorithm, or none, `New` passes the input whole and the signer signs with its own algorithm. A `crypto.Signer` from elsewhere makes no such check. If the hash `Opts` names is not the one that signer uses, the signature verifies against nothing.
 
 The second validates a jwt and returns the decoded head and body:
 
@@ -361,6 +378,7 @@ if errors.Is(err, joseerror.ErrInvalidSignature) {
 
 - An HMAC secret must be at least the hash output size, and a validator for an HMAC algorithm can only be built from a signer.
 - An Ed25519 jwk now carries a `kid`.
+- `PublicJwk` and `PrivateJwk` refuse a key they cannot encode, rather than panic or produce a malformed jwk.
 - `JoseOptions.UseTokenProvidedKeys` is off unless set, including when `opts` is `nil`, and now covers only `jwk` and `jku`. `x5c` and `x5u` are used when `X509Roots` is set.
 - A `crit` header naming an extension you have not declared in `UnderstoodCriticalHeaders` is refused.
 - `x5c` and `x5u` contribute no key unless `JoseOptions.X509Roots` is configured.
