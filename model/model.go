@@ -63,6 +63,9 @@ type JoseOptions struct {
 	// Setting roots is what opts in to x5c and x5u: a chain that validates against
 	// them authenticates the key's origin, as RFC 7515 section 10.3 requires. x5u also
 	// needs HttpClient. With no roots configured, both headers are ignored.
+	//
+	// When a retriever is also given, any certificate that chains to these roots can
+	// verify the token, not only the retriever's key.
 	X509Roots *x509.CertPool
 }
 

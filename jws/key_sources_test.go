@@ -13,6 +13,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -158,6 +159,87 @@ func TestVerifyCompactSerialization_OnceOptedInEitherTheCallersKeyOrAHeaderKeyMa
 			token := es256Token(t, signingKey, head())
 			if _, _, err := VerifyCompactSerialization(token, retriever, &model.JoseOptions{UseTokenProvidedKeys: true}); err != nil {
 				t.Errorf("[JoseOptions.UseTokenProvidedKeys] a caller who opts in with a retriever accepts either source, got %v", err)
+			}
+		})
+	}
+}
+
+func TestVerifyCompactSerialization_ARemoteSourceIsFetchedOnlyUnderItsOwnAnchor(t *testing.T) {
+	rootKey, leafKey, jkuKey := p256(t), p256(t), p256(t)
+	root := certificate(t, "root", rootKey, nil, nil)
+	leaf := certificate(t, "leaf", leafKey, root, rootKey)
+	roots := x509.NewCertPool()
+	roots.AddCert(root)
+
+	jwks, err := json.Marshal(map[string]any{"keys": []any{common.JwkFromECDSAPublicKey(&jkuKey.PublicKey)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chain := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leaf.Raw})
+
+	tests := map[string]struct {
+		header    string
+		key       *ecdsa.PrivateKey
+		body      []byte
+		opts      func(client *http.Client) *model.JoseOptions
+		verifies  bool
+		reference string
+	}{
+		"a jku under roots and a client but no opt-in": {
+			header: "jku", key: jkuKey, body: jwks,
+			opts: func(client *http.Client) *model.JoseOptions {
+				return &model.JoseOptions{X509Roots: roots, HttpClient: client}
+			},
+			reference: "RFC 7515 10.3",
+		},
+		"a jku once the caller opts in with a client": {
+			header: "jku", key: jkuKey, body: jwks, verifies: true,
+			opts: func(client *http.Client) *model.JoseOptions {
+				return &model.JoseOptions{UseTokenProvidedKeys: true, HttpClient: client}
+			},
+			reference: "JoseOptions.UseTokenProvidedKeys",
+		},
+		"an x5u opted in with a client but no roots": {
+			header: "x5u", key: leafKey, body: chain,
+			opts: func(client *http.Client) *model.JoseOptions {
+				return &model.JoseOptions{UseTokenProvidedKeys: true, HttpClient: client}
+			},
+			reference: "RFC 7515 4.1.6",
+		},
+		"an x5u under roots and a client": {
+			header: "x5u", key: leafKey, body: chain, verifies: true,
+			opts: func(client *http.Client) *model.JoseOptions {
+				return &model.JoseOptions{X509Roots: roots, HttpClient: client}
+			},
+			reference: "RFC 7515 4.1.5",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			var fetches atomic.Int64
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				fetches.Add(1)
+				if _, err := w.Write(test.body); err != nil {
+					return
+				}
+			}))
+			defer server.Close()
+
+			token := es256Token(t, test.key, map[string]any{test.header: server.URL})
+			_, _, err := VerifyCompactSerialization(token, nil, test.opts(server.Client()))
+
+			wantFetches := int64(0)
+			if test.verifies {
+				wantFetches = 1
+				if err != nil {
+					t.Errorf("[%s] expected the token to verify, got %v", test.reference, err)
+				}
+			} else if err == nil {
+				t.Errorf("[%s] a source whose own anchor is not configured must not verify the token", test.reference)
+			}
+			if got := fetches.Load(); got != wantFetches {
+				t.Errorf("[%s] expected %d fetches of the %s URL, got %d", test.reference, wantFetches, test.header, got)
 			}
 		})
 	}
