@@ -7,6 +7,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -321,13 +322,18 @@ func EdDSAPrivateKeyFromJwk(jwk map[string]any) (*ed25519.PrivateKey, error) {
 // primes or exactly two.
 //
 // RFC 7518 section 6.3 gives the members the semantics of RFC 3447 sections
-// 3.1 and 3.2: n is a product of odd primes, d is a positive integer less
-// than n with e*d == 1 (mod lambda(n)), and dp, dq and qi are the CRT values
-// of p and q. A key whose members disagree is refused.
+// 3.1 and 3.2: d is a positive integer less than n with e*d == 1
+// (mod lambda(n)). "d" must be in [1, n-1]. With "p" and "q", n must be odd, the
+// key must pass rsa.PrivateKey.Validate, and "dp", "dq" and "qi" must equal
+// the CRT values crypto/rsa computes from p, q and d. With no primes, lambda(n)
+// is unknown, so crypto/rsa must sign 32 random 32-byte messages with the key
+// under PKCS #1 v1.5 and verify each signature under n and e. A wrong d passes
+// only if every one of those signatures happens to come out right. A refusal
+// for "n" or "e" carries ErrInvalidPrivateKey and wraps the public key error.
 func RSAPrivateKeyFromJwk(jwk map[string]any) (*rsa.PrivateKey, error) {
 	publicKey, err := RSAPublicKeyFromJwk(jwk)
 	if err != nil {
-		return nil, fmt.Errorf("error extracting public portion of RSA jwk: %w", err)
+		return nil, fmt.Errorf("%wthe public members of an RSA private jwk are not a public key: %w", jose_errors.ErrInvalidPrivateKey, err)
 	}
 
 	dBytes, err := jsonutils.ExtractAndDecodeBase64urlString(jwk, "d")
@@ -355,11 +361,8 @@ func RSAPrivateKeyFromJwk(jwk map[string]any) (*rsa.PrivateKey, error) {
 		return nil, fmt.Errorf("%wthe 'd' of an RSA jwk is a positive integer less than n", jose_errors.ErrInvalidPrivateKey)
 	}
 	if !pPresent {
-		two := big.NewInt(2)
-		roundTrip := new(big.Int).Exp(two, privateKey.D, privateKey.N)
-		roundTrip.Exp(roundTrip, big.NewInt(int64(privateKey.E)), privateKey.N)
-		if roundTrip.Cmp(new(big.Int).Mod(two, privateKey.N)) != 0 {
-			return nil, fmt.Errorf("%wthe 'd' of an RSA jwk is not the private exponent of its 'n' and 'e'", jose_errors.ErrInvalidPrivateKey)
+		if err := checkRSAPrivateExponent(&privateKey); err != nil {
+			return nil, err
 		}
 		return &privateKey, nil
 	}
@@ -386,6 +389,25 @@ func RSAPrivateKeyFromJwk(jwk map[string]any) (*rsa.PrivateKey, error) {
 	}
 
 	return &privateKey, nil
+}
+
+const rsaPrivateExponentRounds = 32
+
+func checkRSAPrivateExponent(privateKey *rsa.PrivateKey) error {
+	message := make([]byte, 32)
+	for i := 0; i < rsaPrivateExponentRounds; i++ {
+		if _, err := io.ReadFull(rand.Reader, message); err != nil {
+			return fmt.Errorf("%wfailed to read a random message to check the 'd' of an RSA jwk: %w", jose_errors.ErrInvalidPrivateKey, err)
+		}
+		signature, err := rsa.SignPKCS1v15(nil, privateKey, crypto.Hash(0), message)
+		if err != nil {
+			return fmt.Errorf("%wthe 'd' of an RSA jwk does not sign under its 'n' and 'e': %w", jose_errors.ErrInvalidPrivateKey, err)
+		}
+		if err := rsa.VerifyPKCS1v15(&privateKey.PublicKey, crypto.Hash(0), message, signature); err != nil {
+			return fmt.Errorf("%wthe 'd' of an RSA jwk is not the private exponent of its 'n' and 'e': %w", jose_errors.ErrInvalidPrivateKey, err)
+		}
+	}
+	return nil
 }
 
 // RSAPublicKeyFromJwk reads the jwk of an RSA public key.

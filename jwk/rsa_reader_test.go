@@ -129,17 +129,35 @@ func TestPublicFromJwk_ReadsAnRSAExponentExactlyOrRefusesIt(t *testing.T) {
 	}
 }
 
-func TestPrivateFromJwk_RefusesAnRSAExponentPublicFromJwkRefuses(t *testing.T) {
+func TestPrivateFromJwk_RefusesAnRSAExponentPublicFromJwkRefusesAsAnInvalidPrivateKey(t *testing.T) {
 	a, _ := rsaReaderKeyPair(t)
-	jwk := rsaFullJwk(a)
-	jwk["e"] = rsaMember(new(big.Int).Add(new(big.Int).Lsh(big.NewInt(1), 64), big.NewInt(int64(a.E))))
+	pow := func(bits uint) *big.Int { return new(big.Int).Lsh(big.NewInt(1), bits) }
 
-	key, err := PrivateFromJwk(jwk)
-	if err == nil {
-		t.Fatalf("[RFC 7518 6.3.1.2] an e of 2^64+%d must be refused rather than read as its low 64 bits, got %T", a.E, key)
+	tests := map[string]*big.Int{
+		"2^64+e, whose low 64 bits are e": new(big.Int).Add(pow(64), big.NewInt(int64(a.E))),
+		"65536, an even value":            pow(16),
+		"one":                             big.NewInt(1),
 	}
-	if !errors.Is(err, joseerror.ErrInvalidPublicKey) {
-		t.Errorf("[RFC 7518 6.3.1.2] the refusal must carry the public key error class of the member at fault, got %v", err)
+
+	for name, e := range tests {
+		t.Run(name, func(t *testing.T) {
+			jwk := rsaFullJwk(a)
+			jwk["e"] = rsaMember(e)
+
+			key, err := PrivateFromJwk(jwk)
+			if err == nil {
+				t.Fatalf("[RFC 7518 6.3.1.2] an e of %s must be refused, got %T", name, key)
+			}
+			if !errors.Is(err, joseerror.ErrInvalidPrivateKey) {
+				t.Errorf("[RFC 7518 6.3.2] a private jwk with a bad public member is an invalid private key, so the refusal must carry the private key error class, got %v", err)
+			}
+			if !errors.Is(err, joseerror.ErrInvalidPublicKey) {
+				t.Errorf("[RFC 7518 6.3.1.2] the refusal must still carry the public key error class of the member at fault, got %v", err)
+			}
+			if key != nil {
+				t.Errorf("no key may be returned alongside the refusal, got %#v", key)
+			}
+		})
 	}
 }
 
@@ -216,6 +234,62 @@ func TestPrivateFromJwk_RefusesAnRSAKeyWhosePrivateMembersDisagree(t *testing.T)
 	}
 }
 
+func rsaMemberFromJwk(t *testing.T, jwk map[string]any, member string) *big.Int {
+	t.Helper()
+	b, err := base64.RawURLEncoding.DecodeString(jwk[member].(string))
+	if err != nil {
+		t.Fatalf("failed to decode '%s': %v", member, err)
+	}
+	return new(big.Int).SetBytes(b)
+}
+
+func TestPrivateFromJwk_RefusesAnRSAPrivateExponentMovedByHalfOfLambdaWithNoPrimes(t *testing.T) {
+	a, _ := rsaReaderKeyPair(t)
+	tests := map[string]struct {
+		full                 map[string]any
+		twoFixedByHalfLambda bool
+	}{
+		"the RFC 7517 A.2 example key, where 2^(lambda(n)/2) == 1 (mod n)": {full: rfc7517ExampleRSAKey(), twoFixedByHalfLambda: true},
+		"a generated key": {full: rsaFullJwk(a)},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			full := test.full
+			n := rsaMemberFromJwk(t, full, "n")
+			d := rsaMemberFromJwk(t, full, "d")
+			pMinus1 := new(big.Int).Sub(rsaMemberFromJwk(t, full, "p"), big.NewInt(1))
+			qMinus1 := new(big.Int).Sub(rsaMemberFromJwk(t, full, "q"), big.NewInt(1))
+			lambda := new(big.Int).Mul(pMinus1, qMinus1)
+			lambda.Div(lambda, new(big.Int).GCD(nil, nil, pMinus1, qMinus1))
+			half := new(big.Int).Rsh(lambda, 1)
+			if test.twoFixedByHalfLambda && new(big.Int).Exp(big.NewInt(2), half, n).Cmp(big.NewInt(1)) != 0 {
+				t.Fatalf("the fixture must have 2^(lambda(n)/2) == 1 (mod n), so that d and d+lambda(n)/2 agree on the message 2")
+			}
+			moved := new(big.Int).Add(d, half)
+			if moved.Cmp(n) >= 0 {
+				moved.Sub(d, half)
+			}
+
+			key, err := PrivateFromJwk(map[string]any{"kty": "RSA", "n": full["n"], "e": full["e"], "d": rsaMember(moved)})
+			if err == nil {
+				t.Fatalf("[RFC 3447 3.2] e*d must be 1 (mod lambda(n)), and d moved by lambda(n)/2 is not, so it must be refused, got %T", key)
+			}
+			if !errors.Is(err, joseerror.ErrInvalidPrivateKey) {
+				t.Errorf("[RFC 7518 6.3.2] the refusal must carry the private key error class, got %v", err)
+			}
+			if key != nil {
+				t.Errorf("no key may be returned alongside the refusal, got %#v", key)
+			}
+		})
+	}
+}
+
+func rfc7517ExampleRSAPublicKey(t *testing.T) *rsa.PublicKey {
+	t.Helper()
+	return &rsa.PublicKey{N: rsaMemberFromJwk(t, rfc7517ExampleRSAKey(), "n"), E: 65537}
+}
+
 func TestPrivateFromJwk_ReadsAnRSAKeyWhosePrivateMembersAgree(t *testing.T) {
 	a, _ := rsaReaderKeyPair(t)
 	tests := map[string]struct {
@@ -224,13 +298,13 @@ func TestPrivateFromJwk_ReadsAnRSAKeyWhosePrivateMembersAgree(t *testing.T) {
 	}{
 		"a generated key with every member":    {jwk: rsaFullJwk(a), public: &a.PublicKey},
 		"a generated key with n, e and d only": {jwk: rsaDOnlyJwk(a), public: &a.PublicKey},
-		"the RFC 7517 A.2 example key": {jwk: rfc7517ExampleRSAKey(), public: func() *rsa.PublicKey {
-			n, err := base64.RawURLEncoding.DecodeString(rfc7517ExampleRSAKey()["n"].(string))
-			if err != nil {
-				t.Fatal(err)
-			}
-			return &rsa.PublicKey{N: new(big.Int).SetBytes(n), E: 65537}
-		}()},
+		"the RFC 7517 A.2 example key with n, e and d only": {jwk: map[string]any{
+			"kty": "RSA",
+			"n":   rfc7517ExampleRSAKey()["n"],
+			"e":   rfc7517ExampleRSAKey()["e"],
+			"d":   rfc7517ExampleRSAKey()["d"],
+		}, public: rfc7517ExampleRSAPublicKey(t)},
+		"the RFC 7517 A.2 example key": {jwk: rfc7517ExampleRSAKey(), public: rfc7517ExampleRSAPublicKey(t)},
 	}
 
 	for name, test := range tests {
