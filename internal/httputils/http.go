@@ -82,14 +82,20 @@ func (h httpsOnly) RoundTrip(request *http.Request) (*http.Response, error) {
 
 // RetrieveResource fetches url through a copy of client whose transport refuses any
 // hop that is not https, keeping the client's own transport and redirect policy.
+// The fetch is bounded by the earlier of timeout and the client's own Timeout, so a
+// body that either limit cuts short is never taken as complete.
 func RetrieveResource(ctx context.Context, client *http.Client, timeout time.Duration, url, alias string) (*http.Response, error) {
 	if client == nil {
 		return nil, fmt.Errorf("%w%s is specified but no client exists", joseerror.ErrApplicationError, alias)
 	}
 	tlsOnly := *client
 	tlsOnly.Transport = httpsOnly{next: client.Transport}
+	limit := timeoutOrDefault(timeout)
+	if client.Timeout > 0 && client.Timeout < limit {
+		limit = client.Timeout
+	}
 
-	ctx, cancel := context.WithTimeout(ctx, timeoutOrDefault(timeout))
+	ctx, cancel := context.WithTimeout(ctx, limit)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
