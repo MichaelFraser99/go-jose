@@ -3,6 +3,7 @@ package model
 import (
 	"crypto"
 	"crypto/x509"
+	"encoding/json"
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
@@ -75,6 +76,14 @@ type JoseOptions struct {
 	// When a retriever is also given, any certificate that chains to these roots can
 	// verify the token, not only the retriever's key.
 	X509Roots *x509.CertPool
+
+	// IgnoreKeyUse lets a jwk or jku key verify a token whatever its "use" and "key_ops"
+	// members say. Off by default, including when no options are passed: a key whose
+	// "use" is present and is not "sig", or whose "key_ops" is present and lacks
+	// "verify", is refused, because its publisher marked it as not for verifying
+	// signatures (RFC 7517 sections 4.2 and 4.3). Neither member is required by any RFC,
+	// so turn this on to accept keys whose publisher marks them inconsistently.
+	IgnoreKeyUse bool
 }
 
 type Retriever func() ([]crypto.PublicKey, error)
@@ -91,6 +100,31 @@ type Jwks struct {
 	Opts struct {
 		EnforceUniqueKIDs bool //todo: we should enforce this on marshal too
 	} `json:"-"`
+}
+
+// UnmarshalJSON reads a JWK Set. RFC 7517 section 5 requires a JSON object with a
+// "keys" member holding an array of JWKs, so anything else, including a JSON null, is
+// refused with ErrKeystoreError. The member name is matched exactly, by the RFC 7515
+// section 5.3 comparison rules; other members are ignored. A struct field that may
+// hold no set should be a *Jwks, which a JSON null leaves nil.
+func (j *Jwks) UnmarshalJSON(data []byte) error {
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(data, &members); err != nil {
+		return fmt.Errorf("%wa JWK Set must be a JSON object: %w", joseerror.ErrKeystoreError, err)
+	}
+	raw, present := members["keys"]
+	if !present {
+		return fmt.Errorf("%wa JWK Set must have a \"keys\" member", joseerror.ErrKeystoreError)
+	}
+	var keys []map[string]any
+	if err := json.Unmarshal(raw, &keys); err != nil {
+		return fmt.Errorf("%wthe \"keys\" member of a JWK Set must be an array of JWKs: %w", joseerror.ErrKeystoreError, err)
+	}
+	if keys == nil {
+		return fmt.Errorf("%wthe \"keys\" member of a JWK Set must be an array, not null", joseerror.ErrKeystoreError)
+	}
+	j.Keys = keys
+	return nil
 }
 
 // RetrieveByKeyID returns every jwk in the key set whose kid matches the one given,
