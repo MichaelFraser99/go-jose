@@ -1,6 +1,7 @@
 package x5
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/x509"
 	"encoding/asn1"
@@ -58,7 +59,12 @@ func CertificateChainStrings(value any) ([]string, error) {
 	}
 }
 
+const maxChainLength = 16
+
 func parseCertificateChain(certificateChain []string) ([]*x509.Certificate, error) {
+	if len(certificateChain) > maxChainLength {
+		return nil, chainTooLong(len(certificateChain))
+	}
 	certificates := make([]*x509.Certificate, 0, len(certificateChain))
 	for i, entry := range certificateChain {
 		if strings.ContainsAny(entry, "\r\n") {
@@ -70,7 +76,7 @@ func parseCertificateChain(certificateChain []string) ([]*x509.Certificate, erro
 		}
 		certificate, err := x509.ParseCertificate(der)
 		if err != nil {
-			return nil, fmt.Errorf("%wentry %d of the chain is not exactly one certificate: %s", joseerror.ErrMalformedClaim, i, err.Error())
+			return nil, fmt.Errorf("%wentry %d of the chain is not exactly one certificate: %s", joseerror.ErrMalformedClaim, i, jsonutils.QuoteBounded(err.Error()))
 		}
 		certificates = append(certificates, certificate)
 	}
@@ -82,7 +88,7 @@ func parseCertificateChain(certificateChain []string) ([]*x509.Certificate, erro
 // Any other body must be UTF-8 text, as RFC 7468 PEM is, and its CERTIFICATE
 // blocks are read in order.
 func certificatesFromX5uBody(body []byte) ([]*x509.Certificate, error) {
-	if certificates, err := x509.ParseCertificates(body); err == nil {
+	if certificates, err := x509.ParseCertificates(body); err == nil && len(certificates) > 0 {
 		return certificates, nil
 	}
 	if !utf8.Valid(body) {
@@ -105,7 +111,31 @@ func certificatesFromX5uBody(body []byte) ([]*x509.Certificate, error) {
 	if len(der) == 0 {
 		return nil, fmt.Errorf("%wthe retrieved resource carries no PEM certificate block", joseerror.ErrMalformedClaim)
 	}
-	return x509.ParseCertificates(der)
+	certificates, err := x509.ParseCertificates(der)
+	if err != nil {
+		return nil, fmt.Errorf("%wa PEM certificate block is not a certificate: %s", joseerror.ErrMalformedClaim, jsonutils.QuoteBounded(err.Error()))
+	}
+	return certificates, nil
+}
+
+func chainTooLong(length int) error {
+	return fmt.Errorf("%wthe chain holds %d certificates, more than the %d this library accepts", joseerror.ErrMalformedClaim, length, maxChainLength)
+}
+
+func checkChainOrder(certificates []*x509.Certificate) error {
+	if len(certificates) > maxChainLength {
+		return chainTooLong(len(certificates))
+	}
+	for i := 1; i < len(certificates); i++ {
+		certified, issuer := certificates[i-1], certificates[i]
+		if !bytes.Equal(certified.RawIssuer, issuer.RawSubject) {
+			return fmt.Errorf("%wcertificate %d of the chain is not issued by the subject of certificate %d", joseerror.ErrMalformedClaim, i-1, i)
+		}
+		if err := issuer.CheckSignature(certified.SignatureAlgorithm, certified.RawTBSCertificate, certified.Signature); err != nil {
+			return fmt.Errorf("%wcertificate %d of the chain is not signed by certificate %d", joseerror.ErrMalformedClaim, i-1, i)
+		}
+	}
+	return nil
 }
 
 var (
@@ -188,6 +218,9 @@ func validateCertificateChain(certificates []*x509.Certificate, roots *x509.Cert
 }
 
 func keyFromValidatedChain(certificates []*x509.Certificate, x5t, x5ts256 *string, roots *x509.CertPool, extKeyUsages []x509.ExtKeyUsage) ([]crypto.PublicKey, error) {
+	if err := checkChainOrder(certificates); err != nil {
+		return nil, err
+	}
 	if err := validateCertificateChain(certificates, roots, extKeyUsages); err != nil {
 		return nil, err
 	}
@@ -203,9 +236,11 @@ func keyFromValidatedChain(certificates []*x509.Certificate, x5t, x5ts256 *strin
 	return []crypto.PublicKey{signingCertificate.PublicKey}, nil
 }
 
-// InlineCertificate yields the key of the first certificate of an x5c chain once the
-// chain validates against roots and that certificate may verify a signature, under
-// RFC 7515 section 4.1.6 and RFC 5280 sections 4.2.1.3 and 4.2.1.12.
+// InlineCertificate yields the key of the first certificate of an x5c chain once each
+// later certificate is the one that certified the certificate before it, the chain
+// validates against roots and that certificate may verify a signature, under RFC 7515
+// section 4.1.6 and RFC 5280 sections 4.2.1.3 and 4.2.1.12. A chain of more than 16
+// certificates is refused.
 func InlineCertificate(certificateChain []string, x5t, x5ts256 *string, roots *x509.CertPool, extKeyUsages []x509.ExtKeyUsage) model.Retriever {
 	return func() ([]crypto.PublicKey, error) {
 		if len(certificateChain) == 0 {
@@ -220,7 +255,8 @@ func InlineCertificate(certificateChain []string, x5t, x5ts256 *string, roots *x
 	}
 }
 
-// RetrieveX5U fetches an x5u chain and holds it to the same checks as InlineCertificate.
+// RetrieveX5U fetches an x5u chain and holds it to the same checks as InlineCertificate,
+// as RFC 7515 section 4.1.5 orders an x5u chain the same way.
 func RetrieveX5U(x5u string, fetch httputils.Fetch, x5t, x5ts256 *string, roots *x509.CertPool, extKeyUsages []x509.ExtKeyUsage) model.Retriever {
 	return func() ([]crypto.PublicKey, error) {
 		response, err := fetch(x5u, "x5u")
