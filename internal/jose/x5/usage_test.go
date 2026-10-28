@@ -99,6 +99,7 @@ type usageCase struct {
 	chain        func(t *testing.T, root *issued) []*issued
 	extKeyUsages []x509.ExtKeyUsage
 	rootUsage    x509.KeyUsage
+	rootExtras   []pkix.Extension
 	accept       bool
 }
 
@@ -133,7 +134,9 @@ func assertUsageCases(t *testing.T, tests map[string]usageCase) {
 				if rootUsage == 0 {
 					rootUsage = x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature
 				}
-				root := issueCertificate(t, caTemplate("root", rootUsage), nil)
+				rootTemplate := caTemplate("root", rootUsage)
+				rootTemplate.ExtraExtensions = tc.rootExtras
+				root := issueCertificate(t, rootTemplate, nil)
 				chain := tc.chain(t, root)
 				keys, err := retrieve(t, chain, poolOfIssued(root), tc.extKeyUsages)
 				if tc.accept {
@@ -244,6 +247,56 @@ func TestKeyFromValidatedChain_AnExtendedKeyUsageMustCoverTheUse(t *testing.T) {
 			},
 			accept: true,
 		},
+		"a leaf under an intermediate whose extended key usage names no purpose, when the caller named its purpose": {
+			reference:    "RFC 5280 4.2.1.12",
+			extKeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageCodeSigning},
+			chain: func(t *testing.T, root *issued) []*issued {
+				intermediate := issueCertificate(t, withExtension(caTemplate("intermediate", x509.KeyUsageCertSign), noPurpose), root)
+				return []*issued{issueCertificate(t, leafTemplate(signing, x509.ExtKeyUsageCodeSigning), intermediate), intermediate}
+			},
+		},
+		"a leaf under an intermediate whose extended key usage names no purpose, when the caller named nothing": {
+			reference: "RFC 5280 4.2.1.12",
+			chain: func(t *testing.T, root *issued) []*issued {
+				intermediate := issueCertificate(t, withExtension(caTemplate("intermediate", x509.KeyUsageCertSign), noPurpose), root)
+				return []*issued{issueCertificate(t, leafTemplate(signing), intermediate), intermediate}
+			},
+		},
+		"a leaf under an intermediate whose extended key usage names no purpose, when the caller named anyExtendedKeyUsage": {
+			reference:    "RFC 5280 4.2.1.12",
+			extKeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+			chain: func(t *testing.T, root *issued) []*issued {
+				intermediate := issueCertificate(t, withExtension(caTemplate("intermediate", x509.KeyUsageCertSign), noPurpose), root)
+				return []*issued{issueCertificate(t, leafTemplate(signing), intermediate), intermediate}
+			},
+		},
+		"a leaf under two intermediates of one key, only one naming no purpose": {
+			reference:    "RFC 5280 6.1",
+			extKeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageCodeSigning},
+			chain: func(t *testing.T, root *issued) []*issued {
+				clean, empty := sameKeyIntermediates(t, root, noPurpose)
+				return []*issued{issueCertificate(t, leafTemplate(signing, x509.ExtKeyUsageCodeSigning), clean), empty, clean}
+			},
+			accept: true,
+		},
+		"a leaf offered only through the one of two intermediates that names no purpose": {
+			reference:    "RFC 5280 4.2.1.12",
+			extKeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageCodeSigning},
+			chain: func(t *testing.T, root *issued) []*issued {
+				clean, empty := sameKeyIntermediates(t, root, noPurpose)
+				return []*issued{issueCertificate(t, leafTemplate(signing, x509.ExtKeyUsageCodeSigning), clean), empty}
+			},
+		},
+		"a leaf under a clean intermediate and a trust anchor whose extended key usage names no purpose": {
+			reference:    "RFC 5280 6.1.1",
+			extKeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageCodeSigning},
+			rootExtras:   []pkix.Extension{noPurpose},
+			chain: func(t *testing.T, root *issued) []*issued {
+				intermediate := issueCertificate(t, caTemplate("intermediate", x509.KeyUsageCertSign), root)
+				return []*issued{issueCertificate(t, leafTemplate(signing, x509.ExtKeyUsageCodeSigning), intermediate), intermediate}
+			},
+			accept: true,
+		},
 		"a leaf under an intermediate restricted to a purpose the caller did not name": {
 			reference:    "JoseOptions.X509ExtKeyUsages",
 			extKeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageCodeSigning},
@@ -299,4 +352,22 @@ func TestKeyFromValidatedChain_AKeyUsageMustAllowVerifyingASignature(t *testing.
 			accept: true,
 		},
 	})
+}
+
+func sameKeyIntermediates(t *testing.T, root *issued, extension pkix.Extension) (clean, withExtra *issued) {
+	t.Helper()
+	clean = issueCertificate(t, caTemplate("intermediate", x509.KeyUsageCertSign), root)
+	template := withExtension(caTemplate("intermediate", x509.KeyUsageCertSign), extension)
+	template.SerialNumber = big.NewInt(time.Now().UnixNano())
+	template.NotBefore = time.Now().Add(-time.Hour)
+	template.NotAfter = time.Now().Add(time.Hour)
+	der, err := x509.CreateCertificate(rand.Reader, template, root.cert, clean.key.Public(), root.key)
+	if err != nil {
+		t.Fatalf("failed to create a certificate: %v", err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatalf("failed to parse a certificate: %v", err)
+	}
+	return clean, &issued{cert: cert, key: clean.key}
 }

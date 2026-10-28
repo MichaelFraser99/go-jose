@@ -96,7 +96,8 @@ type JoseOptions struct {
 	// chain verification nests extended key usage, so the signing certificate and
 	// every certificate above it must permit one of these, or carry no extended key
 	// usage. Naming x509.ExtKeyUsageAny turns this purpose check off. A signing
-	// certificate whose extension names no purpose is refused in every case.
+	// certificate or intermediate whose extension names no purpose is refused in
+	// every case, as RFC 5280 section 4.2.1.12 allows no empty extension.
 	X509ExtKeyUsages []x509.ExtKeyUsage
 
 	// ExpectedAudience names this recipient. When set, jwt.Validate requires the "aud"
