@@ -4,7 +4,9 @@ This file gives guidance to Claude Code (claude.ai/code) when it works in this r
 
 ## Overview
 
-A zero-dependency Go implementation of the JOSE standards: JWS (RFC 7515), JWE (RFC 7516), JWK (RFC 7517), JWA (RFC 7518) and JWT (RFC 7519). It is a library, not a service.
+A zero-dependency Go implementation of the JOSE standards: JWS (RFC 7515), JWK (RFC 7517), JWA (RFC 7518) and JWT (RFC 7519). It is a library, not a service.
+
+JWE (RFC 7516) is **not** implemented. The `jwe` package exists but exports nothing: its body is commented out and it has no tests. Do not describe this library as supporting JWE.
 
 ## Commands
 
@@ -26,7 +28,7 @@ A godoc comment that names an RFC clause earns its place. One that recounts a fi
 ## Layout
 
 - **`jwa/`** — algorithm identifiers. `Algorithm` is an int whose zero value is `Unknown`.
-- **`jws/`**, **`jwe/`**, **`jwt/`**, **`jwk/`** — the public API. There is **no root package**: `go-jose` itself holds only `e2e_test.go`. Import the subpackage.
+- **`jws/`**, **`jwt/`**, **`jwk/`** — the public API (`jwe/` is an empty stub). There is **no root package**: `go-jose` itself holds only `e2e_test.go`. Import the subpackage.
 - **`model/`** — exported types shared across packages, including `JoseOptions`.
 - **`joseerror/`** — the error sentinels. Each carries a message prefix, so wrap with `%w` followed immediately by the rest of the message and no space.
 - **`internal/algorithms/<alg>/`** — one package per algorithm, each with `NewSigner` and `NewValidator`.

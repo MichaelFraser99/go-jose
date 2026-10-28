@@ -4,6 +4,21 @@ A Go implementation of the JOSE suite of specifications — JWS ([RFC 7515](http
 ## Requirements
 - Go 1.21 or higher
 
+## Import paths
+
+There is **no root package**. Import the subpackage you need:
+
+```go
+import (
+	"github.com/MichaelFraser99/go-jose/jwa"        // algorithm identifiers
+	"github.com/MichaelFraser99/go-jose/jwk"        // jwk conversion
+	"github.com/MichaelFraser99/go-jose/jws"        // signers and validators
+	"github.com/MichaelFraser99/go-jose/jwt"        // jwt signing and validation
+	"github.com/MichaelFraser99/go-jose/joseerror"  // error sentinels
+	"github.com/MichaelFraser99/go-jose/model"      // shared types and options
+)
+```
+
 ## Installation
 ```bash
 go get github.com/MichaelFraser99/go-jose
@@ -53,39 +68,41 @@ if comparer, ok := validator.Public().(interface{ Equal(crypto.PublicKey) bool }
 
 Note what `Equal` does not answer. HMAC pads a key shorter than its block size and hashes a longer one, so two different byte strings can key identically. `Equal` compares the bytes and reports such a pair as unequal. `SecretKey` carries no algorithm, and the block size differs between HS256 and the other two, so there is no one canonical form it could compare instead.
 
-Algorithms are represented inside this module with the following type:
+Algorithms are identified by the `jwa` package:
 ```go
-type Algorithm int
+type jwa.Algorithm int
 ```
 
-with the following methods defined
+Its zero value is `jwa.Unknown`, so a variable you forgot to set names no algorithm rather than ES256.
 
 ```go
 func (a Algorithm) String() string
 ```
-String returns the string representation of that algorithm (i.e. "RS256" or "HS384")
+`String` returns the name of the algorithm, such as `"RS256"`. It returns the empty string for `Unknown`.
 
 ```go
-func GetAlgorithm(alg string) *Algorithm
+func GetAlgorithm(alg string) Algorithm
 ```
-GetAlgorithm takes in a string and returns a pointer to the relevant algorithm type or nil if an invalid string provided
+`GetAlgorithm` returns the algorithm a name identifies, and `Unknown` if no algorithm has that name. The comparison is case sensitive, because RFC 7515 section 4.1.1 makes the `alg` header value case sensitive.
 
 ## Signers
-To create a Signer object use the `GetSigner` method. This takes in an algorithm and an optional `Opts` object (defines a bit size used for RSA keys) and returns a `crypto.Signer` implementation complete with generated key pair. The below example shows how to generate a signer for ES256:
+To create a Signer, use `jws.GetSigner`. It takes an algorithm and an optional `model.Opts`, and returns a `model.Signer` with a generated key pair. `Opts.BitSize` sets the modulus size for the RSA algorithms. `Opts.SecretKey` carries the secret for the HMAC algorithms, where it is required rather than optional. The example below generates a signer for ES256:
 ```go
-signer, err := jose.GetSigner(jwa.ES256, nil)
+signer, err := jws.GetSigner(jwa.ES256, nil)
 ```
 
-The `GetSignerFromPrivateKey` method can also be used. This takes in an algorithm and a pointer to a `crypto.PrivateKey` implementation. The below example shows how to generate a signer for ES256:
+`jws.GetSignerFromPrivateKey` builds a signer from a key you already hold. It takes an algorithm and a `crypto.PrivateKey`. It refuses the HMAC algorithms, which take their secret through `model.Opts` instead. The example below builds a signer for ES256:
 ```go
-signer, err := jose.GetSignerFromPrivateKey(jwa.ES256, privateKey)
+signer, err := jws.GetSignerFromPrivateKey(jwa.ES256, privateKey)
 ```
 
 ## Signing Contract
 The `Sign` method follows JOSE conventions per RFC 7518 rather than Go's `crypto.Signer` contract. It supports two modes:
 
 - **JOSE mode** (`opts == nil` or `opts.HashFunc() == 0`): pass the raw JWS Signing Input — the signer hashes it internally using the algorithm's designated hash. This is the expected usage for JWS operations.
-- **Pre-hashed mode** (`opts.HashFunc() != 0`): pass an already-hashed digest — the signer skips internal hashing. This supports interoperability with callers following Go's `crypto.Signer` convention.
+- **Pre-hashed mode** (`opts.HashFunc() != 0`): pass an already-hashed digest — the signer skips internal hashing. This supports interoperability with callers following Go's `crypto.Signer` convention. ES, RS and PS implement this mode, and refuse a `Hash` that is not the algorithm's own with `ErrSigningError`.
+
+> **The HMAC algorithms do not implement pre-hashed mode.** HS256, HS384 and HS512 ignore `opts` entirely. HMAC is itself a keyed hash, so there is no internal hashing step to skip. Passing a pre-hashed digest to one produces a MAC over the digest rather than over the signing input, which no validator accepts, and `Sign` returns no error to say so. A wrong `Hash` is not refused either. Pass the signing input whole to an HS signer, and leave `opts` nil. Tracked as [#69](https://github.com/MichaelFraser99/go-jose/issues/69).
 
 A `SignerOpts` implementation is provided:
 ```go
@@ -102,30 +119,30 @@ In addition to the packaged signers, a validator type is also included for each 
 The `GetValidator` method takes in a crypto.PublicKey implementation and returns a validator instance. The below example shows how to generate a validator for ES256:
 ```go
 // Construct a validator from a public key
-validator, err := jose.GetValidator(jwa.ES256, publicKey)
+validator, err := jws.GetValidator(jwa.ES256, publicKey)
 
 // Construct a validator from a signer instance
-signer, err := jose.GetSigner(jwa.ES256, nil)
-validator, err := jose.GetValidator(signer.Alg(), signer.Public())
+signer, err := jws.GetSigner(jwa.ES256, nil)
+validator, err := jws.GetValidator(signer.Alg(), signer.Public())
 ```
 
-The `GetValidatorFromJwk` method takes in the bytes of a jwk format public key and returns a validator instance. The below example shows how to generate a validator for ES256:
+`jws.GetValidatorFromJwk` builds a validator from a jwk, decoded as a `map[string]any` rather than raw bytes. It refuses the HMAC algorithms, because an `oct` key cannot be reached this way. The example below builds a validator for ES256:
 ```go
 // Construct a validator from a jwk public key
-validator, err := jose.GetValidatorFromJwk(jwa.ES256, publicKeyBytes)
+validator, err := jws.GetValidatorFromJwk(jwa.ES256, publicKeyMap)
 ```
 
-The validator object has a method `ValidateSignature` which takes in the bytes of the digest and signature and returns a boolean indicating whether the signature is valid. The below example shows how to validate a signature:
+`ValidateSignature` takes the raw signing input and the signature, and reports whether the signature verifies. Do not hash the input first: the validator hashes it internally with the algorithm's own hash. A signature that does not verify returns `false` with a nil error. The error is non-nil only when the signature could not be checked at all.
 ```go
 // Validate a signature
-validator, err := jose.GetValidator(jwa.ES256, publicKey)
+validator, err := jws.GetValidator(jwa.ES256, publicKey)
 
 valid, err := validator.ValidateSignature(digest, signature)
 ```
 
 Finally, validators expose their PublicKey with the `Public()` method
 ```go
-validator, err := jose.GetValidator(jwa.ES256, publicKey)
+validator, err := jws.GetValidator(jwa.ES256, publicKey)
 pk := validator.Public()
 ```
 
@@ -205,47 +222,65 @@ All JWK methods include in the returned map a KID suggestion based on the public
 
 **This is a breaking change for Ed25519 keys.** Earlier versions computed the suggestion for an Ed25519 key and then discarded it, so the jwk went out with no `kid` at all. It now carries one, like every other algorithm. Two consequences for a caller: the serialised jwk of an Ed25519 key gains a member, so a pinned fixture of that JSON no longer matches; and `Jwks.Add` with `EnforceUniqueKIDs` now refuses a second copy of one Ed25519 key, where before it had no `kid` to compare and accepted it.
 
-PublicJwk takes in a pointer to a public key and returns a `map[string]string` containing the jwk representation of the provided public key
+`jwk.PublicJwk` takes a public key and returns the jwk representation of it:
+```go
+func jwk.PublicJwk(publicKey crypto.PublicKey) (*map[string]any, error)
+func jwk.PrivateJwk(privateKey crypto.PrivateKey) (*map[string]any, error)
+```
+
+Pass a pointer to the key. An `*ecdsa.PublicKey`, an `*rsa.PublicKey` or an `*ed25519.PublicKey` is accepted; anything else is refused with `ErrInvalidPublicKey`.
+
 ```go
 // Direct from a public key
-jwkMap, err := PublicJwk(publicKey)
+jwkMap, err := jwk.PublicJwk(publicKey)
 
-// From a Signer
-signer, err := jose.GetSigner(jwa.ES256, nil)
-publicKey := signer.Public
-jwkMap, err := PublicJwk(&publicKey)
+// From a Signer. Note Public() is a call, and its result is already a pointer
+// for the EC and RSA algorithms
+signer, err := jws.GetSigner(jwa.ES256, nil)
+jwkMap, err := jwk.PublicJwk(signer.Public())
 ```
 
-Also included is a method to convert an existing public key JWK back into it's respective public key
-
-The value returned is a pointer to the respective public key `*ecdsa.PublicKey` or `*rsa.PublicKey`
+Two methods convert a jwk back into a key:
 
 ```go
-PublicFromJwk(jwk map[string]any) (crypto.PublicKey, error)
+func jwk.PublicFromJwk(jwk map[string]any) (crypto.PublicKey, error)
+func jwk.PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error)
 ```
+
+The value returned is a pointer to the respective key, such as `*ecdsa.PublicKey` or `*rsa.PublicKey`.
 
 ## JWTs
 This library includes two methods for jwt handling
 
-The first is for signing a jwt from provided signer implementation, head map, and body map
-
-If the head does not include the `typ` claim, the method will insert a value of "JWT"
-
-Additionally, if the `crypto.Signer` implementation provided is one of the implementations defined in this module, the `alg` claim is also added (if not already present)
+The first signs a jwt from a signer, a head map and a body map:
 
 ```go
-New(signer crypto.Signer, head, body map[string]any) (*string, error) {
+func jwt.New(signer crypto.Signer, head, body map[string]any, opts jwt.Opts) (*string, error)
 ```
 
-The second provides basic jwt validation and returns the decoded head and body values as instances of `map[string]any`
+If the head carries no `typ` claim, `New` inserts `"JWT"`. If the signer is one of this module's own implementations, `New` adds the `alg` claim when the head does not already carry one.
 
-If present, the `iat`, `nbf`, and `exp` claims will also be validated
+`jwt.Opts` names the algorithm to sign with:
 
 ```go
-Validate(publicKey crypto.PublicKey, jwt string) (head, body map[string]any, err error)
+type jwt.Opts struct {
+	Algorithm jwa.Algorithm
+}
 ```
 
-### Errors
+Give it the algorithm the signer was built for. It decides which hash `New` applies to the signing input, so an algorithm that disagrees with the signer produces a signature nothing verifies.
+
+The second validates a jwt and returns the decoded head and body:
+
+```go
+func jwt.Validate(token string, outOfBoundsPublicKey model.Retriever, opts *model.JoseOptions) (head, body map[string]any, err error)
+```
+
+The retriever supplies key material of your own. Pass nil to rely only on what the token's header names. `model.JoseOptions` carries everything described under [Keys a token carries](#keys-a-token-carries), and may be nil for the defaults.
+
+If the `iat`, `nbf` and `exp` claims are present, `Validate` checks them. `JoseOptions.ClockSkewLeeway` widens the window they are judged against.
+
+## Errors
 Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 
 | Sentinel | Meaning |
@@ -253,15 +288,15 @@ Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 | `ErrInvalidPublicKey` | The public key given cannot be used for this algorithm |
 | `ErrInvalidPrivateKey` | The private key or secret given cannot be used for this algorithm |
 | `ErrInvalidSignature` | The signature does not verify against the signing input |
-| `ErrDecryptionFailed` | A JWE payload could not be decrypted |
+| `ErrDecryptionFailed` | Reserved for JWE. Nothing returns it: the `jwe` package is a stub and exports nothing |
 | `ErrUnsupportedAlgorithm` | The algorithm named is not supported, or not permitted by the options given |
 | `ErrSigningError` | Signing failed |
 | `ErrMalformedClaim` | A claim is present but its type or value is wrong |
 | `ErrMissingClaim` | A required claim is absent |
-| `ErrMissingCriticalClaim` | A claim named in `crit` is absent from the header |
-| `ErrNoKeyIdentifierMatch` | No key in the set carries the `kid` the token names |
-| `ErrKeystoreError` | A key set could not be read or does not hold a usable key |
-| `ErrApplicationError` | A resource a header named could not be retrieved |
+| `ErrMissingCriticalClaim` | A header named in `crit` is absent, or names an extension this library does not understand |
+| `ErrNoKeyIdentifierMatch` | No key could be selected. The `kid` matches nothing, a certificate chain does not reach a configured root, or an `x5t` thumbprint does not match the chain |
+| `ErrKeystoreError` | A key set could not be read, holds no usable key, or the configuration needed to use it is absent, such as `X509Roots` for a certificate chain |
+| `ErrApplicationError` | Key material a header named could not be obtained or decoded. Covers a failed `jku` or `x5u` fetch, and a local decode of what one returned |
 | `ErrMalformedToken` | The token is not a well formed JOSE object |
 
 Each sentinel carries a prefix terminated by `": "`, so wrap one with `%w` immediately followed by the rest of the message and no space:
@@ -271,3 +306,47 @@ fmt.Errorf("%wshould be an instance of *ecdsa.PrivateKey", joseerror.ErrInvalidP
 ```
 
 That reads `invalid private key: should be an instance of *ecdsa.PrivateKey`, and `errors.Is` still matches.
+
+## Upgrading from the pre-0.10 line
+
+Every change below is a compile error or a silent behaviour change for a consumer of the previous release.
+
+### Packages moved
+
+| Was | Now |
+| --- | --- |
+| `go-jose/error` | `go-jose/joseerror` |
+| `model.Algorithm`, `model.ES256` and the rest | `jwa.Algorithm`, `jwa.ES256` and the rest |
+| `jose.GetSigner` and friends | `jws.GetSigner`; there is no root package |
+
+### Error sentinels
+
+`ErrSigning` is now `ErrSigningError`. Eight sentinels are new.
+
+**Every sentinel message now ends in `": "`,** so a sentinel composes with the text that wraps it into one sentence. If you match on an error string, that match breaks. Match with `errors.Is` instead:
+
+```go
+if errors.Is(err, joseerror.ErrInvalidSignature) {
+```
+
+### Signatures changed
+
+| Function | Change |
+| --- | --- |
+| `jwa.GetAlgorithm` | Returns `Algorithm`, not `*Algorithm`. Returns `jwa.Unknown` rather than nil for an unknown name, and the comparison is now case sensitive |
+| `jwt.New` | Takes a fourth parameter, `jwt.Opts`, naming the algorithm to sign with |
+| `jwt.Validate` | Takes `(token string, retriever model.Retriever, opts *model.JoseOptions)`. The `publicKey` parameter is gone: supply key material through the retriever, or rely on what the token's header names |
+| `jws.GetValidatorFromJwk` | Takes `map[string]any`, not `[]byte` |
+| `jwk.PublicJwk`, `jwk.PrivateJwk` | Return `*map[string]any`, not `map[string]string` |
+
+### Behaviour changes documented elsewhere in this file
+
+- An HMAC secret must be at least the hash output size, and a validator for an HMAC algorithm can only be built from a signer.
+- An Ed25519 jwk now carries a `kid`.
+- `JoseOptions.IgnoreTokenProvidedKeys` replaces `UseTokenProvidedKeys`, inverted so the zero value is the documented default.
+- A `crit` header naming an extension you have not declared in `UnderstoodCriticalHeaders` is refused.
+- `x5c` and `x5u` contribute no key unless `JoseOptions.X509Roots` is configured.
+
+### Not implemented
+
+The `jwe` package exports nothing. JWE is not supported in this release.

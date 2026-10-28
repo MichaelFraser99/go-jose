@@ -129,7 +129,9 @@ func (j *Jwks) Add(jwk map[string]any) error {
 //     This is the expected usage for JWS operations per RFC 7518.
 //   - Pre-hashed mode (opts.HashFunc() != 0): digest is already hashed by the caller
 //     and the implementation skips internal hashing. This supports interoperability with
-//     callers following Go's crypto.Signer convention.
+//     callers following Go's crypto.Signer convention. It applies to the ES, RS and PS
+//     algorithms. The HS algorithms do not implement it and ignore opts, so a caller
+//     passing a pre-hashed digest to one produces a signature nothing verifies.
 type Signer interface {
 	Alg() jwa.Algorithm
 	crypto.Signer
@@ -154,6 +156,10 @@ type Opts struct {
 	SecretKey *[]byte
 }
 
+// SignerOpts implements crypto.SignerOpts and signals that the digest passed to
+// Sign has already been hashed. ES, RS and PS signers skip their internal hashing
+// when Hash is non-zero, and refuse a Hash that is not their own. HMAC signers
+// have no pre-hashed mode and ignore this entirely: see issue #69.
 type SignerOpts struct {
 	Hash crypto.Hash
 }
