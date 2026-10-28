@@ -124,7 +124,7 @@ func signingHash(alg jwa.Algorithm) crypto.Hash {
 		return crypto.SHA384
 	case jwa.RS512, jwa.PS512, jwa.ES512:
 		return crypto.SHA512
-	case jwa.HS256, jwa.HS384, jwa.HS512, jwa.EdDSA, jwa.Unknown:
+	case jwa.HS256, jwa.HS384, jwa.HS512, jwa.Ed25519, jwa.Unknown:
 		return 0
 	}
 	return 0
@@ -193,7 +193,7 @@ func signWithCryptoSigner(signer crypto.Signer, alg jwa.Algorithm, signingInput 
 			return signer.Sign(rand.Reader, digest, &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthEqualsHash, Hash: hash})
 		}
 		return signer.Sign(rand.Reader, digest, hash)
-	case jwa.EdDSA:
+	case jwa.Ed25519:
 		if _, ok := signer.Public().(ed25519.PublicKey); !ok {
 			return nil, fmt.Errorf("%w%s needs an ed25519 key", joseerror.ErrInvalidPrivateKey, alg)
 		}

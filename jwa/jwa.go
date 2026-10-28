@@ -20,7 +20,9 @@ const (
 	HS256
 	HS384
 	HS512
-	EdDSA //todo: this needs validator & signer implementations
+	// Ed25519 is EdDSA with the Ed25519 parameters of RFC 8032 section 5.1, as
+	// RFC 9864 section 4.1.1 registers it.
+	Ed25519
 )
 
 func (a Algorithm) String() string {
@@ -51,8 +53,8 @@ func (a Algorithm) String() string {
 		return "HS384"
 	case HS512:
 		return "HS512"
-	case EdDSA:
-		return "EdDSA"
+	case Ed25519:
+		return "Ed25519"
 	default:
 		return ""
 	}
@@ -86,8 +88,8 @@ func GetAlgorithm(alg string) Algorithm {
 		return HS384
 	case "HS512":
 		return HS512
-	case "EdDSA":
-		return EdDSA
+	case "Ed25519":
+		return Ed25519
 	default:
 		return Unknown
 	}

@@ -24,6 +24,7 @@ import (
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/hs256"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
+	"github.com/MichaelFraser99/go-jose/jws"
 	"github.com/MichaelFraser99/go-jose/model"
 )
 
@@ -242,11 +243,11 @@ func TestNew_StandardLibrarySignersProduceJwsSignatures(t *testing.T) {
 		{name: "PS256 with an opaque crypto.Signer over an rsa key", signer: opaqueSigner{rsaKey}, alg: jwa.PS256, verify: verifyPSS(crypto.SHA256), viaThisLibrary: true},
 		{name: "RS256 with *rsa.PrivateKey", signer: rsaKey, alg: jwa.RS256, verify: verifyPKCS1(crypto.SHA256), viaThisLibrary: true},
 		{name: "RS512 with an opaque crypto.Signer over an rsa key", signer: opaqueSigner{rsaKey}, alg: jwa.RS512, verify: verifyPKCS1(crypto.SHA512), viaThisLibrary: true},
-		{name: "EdDSA with ed25519.PrivateKey", signer: edKey, alg: jwa.EdDSA, verify: func(t *testing.T, public crypto.PublicKey, input, signature []byte) {
+		{name: "Ed25519 with ed25519.PrivateKey", signer: edKey, alg: jwa.Ed25519, verify: func(t *testing.T, public crypto.PublicKey, input, signature []byte) {
 			if !ed25519.Verify(public.(ed25519.PublicKey), input, signature) {
-				t.Error("[RFC 8037 3.1] not an Ed25519 signature over the JWS Signing Input")
+				t.Error("[RFC 9864 4.1.1] not an Ed25519 signature over the JWS Signing Input")
 			}
-		}},
+		}, viaThisLibrary: true},
 	}
 
 	for _, tt := range tests {
@@ -338,7 +339,8 @@ func TestNew_RefusesAStandardLibrarySignerThatCannotSignTheAlgorithm(t *testing.
 		{name: "ES256 with an rsa key", signer: rsaKey, alg: jwa.ES256, want: joseerror.ErrInvalidPrivateKey, clause: "RFC 7518 3.4"},
 		{name: "PS256 with an ecdsa key", signer: p256, alg: jwa.PS256, want: joseerror.ErrInvalidPrivateKey, clause: "RFC 7518 3.5"},
 		{name: "RS256 with an ecdsa key", signer: p256, alg: jwa.RS256, want: joseerror.ErrInvalidPrivateKey, clause: "RFC 7518 3.3"},
-		{name: "EdDSA with an ecdsa key", signer: p256, alg: jwa.EdDSA, want: joseerror.ErrInvalidPrivateKey, clause: "RFC 8037 3.1"},
+		{name: "Ed25519 with an ecdsa key", signer: p256, alg: jwa.Ed25519, want: joseerror.ErrInvalidPrivateKey, clause: "RFC 9864 4.1.1"},
+		{name: "Ed25519 with an rsa key", signer: rsaKey, alg: jwa.Ed25519, want: joseerror.ErrInvalidPrivateKey, clause: "RFC 9864 4.1.1"},
 		{name: "HS256 with an ecdsa key", signer: p256, alg: jwa.HS256, want: joseerror.ErrInvalidPrivateKey, clause: "RFC 7518 3.2"},
 		{name: "HS256 with an rsa key", signer: rsaKey, alg: jwa.HS256, want: joseerror.ErrInvalidPrivateKey, clause: "RFC 7518 3.2"},
 		{name: "ES256 output that is empty", signer: fixedOutputSigner{public: &p256.PublicKey, output: []byte{}}, alg: jwa.ES256, want: joseerror.ErrSigningError, clause: "RFC 7518 3.4"},
@@ -479,5 +481,24 @@ func TestNew_ANilBodyIsAnEmptyClaimsSet(t *testing.T) {
 	}
 	if body == nil || len(body) != 0 {
 		t.Errorf("[RFC 7519 7.2 step 10] want an empty claims set, got %v", body)
+	}
+}
+
+func TestNew_RefusesAHeadNamingTheDeprecatedEdDSA(t *testing.T) {
+	_, edKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := jws.GetSigner(jwa.Ed25519, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, given := range map[string]crypto.Signer{"an ed25519.PrivateKey": edKey, "an Ed25519 signer of this library": signer} {
+		t.Run(name, func(t *testing.T) {
+			token, err := New(given, map[string]any{"alg": "EdDSA"}, map[string]any{}, Opts{})
+			if !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || token != nil {
+				t.Errorf("[RFC 9864 4.1.2] EdDSA is deprecated and not supported here, so a head naming it must be refused with ErrUnsupportedAlgorithm and no token, got %v and %v", token, err)
+			}
+		})
 	}
 }

@@ -281,6 +281,10 @@ func TestVerifyCompactSerialization_RefusesANestedJWTBeforeTouchingAKey(t *testi
 }
 
 func TestVerify_RefusesAnAlgorithmWithNoValidatorBeforeAnyFetch(t *testing.T) {
+	construct := validatorConstructors[jwa.Ed25519]
+	delete(validatorConstructors, jwa.Ed25519)
+	t.Cleanup(func() { validatorConstructors[jwa.Ed25519] = construct })
+
 	var hits atomic.Int32
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
@@ -292,7 +296,7 @@ func TestVerify_RefusesAnAlgorithmWithNoValidatorBeforeAnyFetch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	header, _ := json.Marshal(map[string]any{"alg": "EdDSA", "jku": server.URL + "/jwks", "jwk": map[string]any{"kty": "OKP", "crv": "Ed25519", "x": base64.RawURLEncoding.EncodeToString(public)}})
+	header, _ := json.Marshal(map[string]any{"alg": "Ed25519", "jku": server.URL + "/jwks", "jwk": map[string]any{"kty": "OKP", "crv": "Ed25519", "x": base64.RawURLEncoding.EncodeToString(public)}})
 	input := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"a"}`))
 	token := input + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(private, []byte(input)))
 
@@ -318,7 +322,7 @@ func TestVerify_RefusesAnAlgorithmWithNoValidatorBeforeAnyFetch(t *testing.T) {
 			if !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) {
 				t.Errorf("[RFC 7515 4.1.1] an alg with no validator was reported as %v, not ErrUnsupportedAlgorithm", err)
 			}
-			if err != nil && !strings.Contains(err.Error(), strconv.Quote("EdDSA")+" has no validator") {
+			if err != nil && !strings.Contains(err.Error(), strconv.Quote("Ed25519")+" has no validator") {
 				t.Errorf("[RFC 7515 4.1.1] the refusal does not name the algorithm: %v", err)
 			}
 			if hits.Load() != 0 || retrieverCalls.Load() != 0 {

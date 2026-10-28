@@ -203,7 +203,7 @@ func TestGetValidatorFromJwk_AnAlgMismatchIsAnInvalidPublicKey(t *testing.T) {
 }
 
 func TestGetValidatorFromJwk_RefusesAnUnsupportedAlgorithmBeforeReadingTheJwk(t *testing.T) {
-	for _, alg := range []jwa.Algorithm{jwa.Unknown, jwa.EdDSA, jwa.Algorithm(-1), jwa.HS256, jwa.HS384, jwa.HS512} {
+	for _, alg := range []jwa.Algorithm{jwa.Unknown, jwa.Algorithm(-1), jwa.HS256, jwa.HS384, jwa.HS512} {
 		t.Run(alg.String(), func(t *testing.T) {
 			validator, err := GetValidatorFromJwk(alg, map[string]any{})
 			if !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) {

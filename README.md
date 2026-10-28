@@ -35,6 +35,9 @@ Currently, the module supports the following asymmetric algorithms:
 - PS256
 - PS384
 - PS512
+- Ed25519
+
+Ed25519 is EdDSA with the Ed25519 parameters of RFC 8032 section 5.1, as RFC 9864 section 4.1.1 registers it. RFC 9864 section 4.1.2 deprecates the `EdDSA` identifier, and this library does not support it. A token whose `alg` is `EdDSA` is refused with `ErrUnsupportedAlgorithm`. Ed448 is not supported.
 
 Also supported are the following HMAC with SHA2 symmetric algorithms:
 - HS256
@@ -103,6 +106,7 @@ signer, err := jws.GetSignerFromPrivateKey(jwa.ES256, privateKey)
 - **RS and PS:** the modulus must be 2048 to 8192 bits. RFC 7518 sections 3.3 and 3.5 make 2048 bits a MUST. The 8192-bit ceiling is this library's: the cost of an RSA verification grows with the square of the modulus, and a token can name its own key, so an unbounded modulus lets a peer hold a core for seconds. 8192 bits is also the default cap `crypto/tls` puts on a peer's RSA key. `Opts.BitSize` takes the same range.
 - **RS and PS exponent:** the public exponent must be odd and between 3 and 2^31 - 1. RFC 8017 section 3.1 puts e between 3 and n - 1 with GCD(e, λ(n)) = 1, and λ(n) is even, so e is odd. With e = 1 a signature is its own encoded message, so anyone could forge one. `crypto/rsa` refuses such a key when it verifies, and this library refuses it earlier, when the signer or validator is built.
 - **ES:** the key must lie on the algorithm's own curve: P-256 for ES256, P-384 for ES384 and P-521 for ES512. RFC 7518 section 3.1 defines each algorithm by its curve.
+- **Ed25519:** the key must be an `ed25519.PrivateKey` or `ed25519.PublicKey`, or a pointer to one. A private key must be 64 bytes, and its public half must be the public key of its seed. A public key must be 32 bytes. RFC 8032 section 5.1.5 sets these sizes. The signer and validator keep a copy of the key, so a later change to your key does not affect them.
 - **Every family:** a nil key, or one missing the modulus, exponent, curve, coordinates or private scalar, is refused when the signer or validator is built rather than panicking later. An RSA private key needs only `D`: RFC 7518 section 6.3.2 makes the primes optional.
 
 ## Signing Contract
@@ -112,6 +116,8 @@ The `Sign` method follows JOSE conventions per RFC 7518 rather than Go's `crypto
 - **Pre-hashed mode** (`opts.HashFunc() != 0`): pass an already-hashed digest — the signer skips internal hashing. This supports interoperability with callers following Go's `crypto.Signer` convention. ES, RS and PS implement this mode. They refuse a `Hash` that is not the algorithm's own, and a digest whose length is not that hash's output size, with `ErrSigningError`.
 
 > **The HMAC algorithms have no pre-hashed mode, and refuse one.** HMAC is itself a keyed hash, so there is no internal hashing step for a caller to skip. HS256, HS384 and HS512 refuse a non-zero `opts.HashFunc()` with `ErrSigningError`. Pass the signing input whole and leave `opts` nil.
+>
+> **Ed25519 has no pre-hashed mode either, and refuses one.** Ed25519 hashes the whole signing input as part of the signature. For a non-zero hash, `crypto/ed25519` signs with Ed25519ph, which is a different algorithm. So the Ed25519 signer refuses a non-zero `opts.HashFunc()` with `ErrSigningError`.
 >
 > **This is a breaking change,** and it breaks two kinds of caller differently. One passed a pre-hashed digest with a non-zero `Hash`, as the old documentation described: they were already producing a MAC over the digest rather than over the signing input, which no validator accepts, with no error to say so. They now get an error at the call that causes it. The other is generic over `crypto.Signer` and passes a non-zero `Hash` alongside the **raw** signing input — that worked, because `opts` was ignored, and it no longer does. Such a caller should pass `nil` for an HS algorithm, or a zero `Hash`.
 
@@ -404,7 +410,7 @@ A `crypto.Signer` from elsewhere, such as an `*ecdsa.PrivateKey`, an `*rsa.Priva
 
 - For ES256, ES384 and ES512, `New` converts the ASN.1 DER signature the signer returns to the fixed-length R||S form of RFC 7518 section 3.4. The key must be on P-256, P-384 or P-521 respectively. Output that is not DER, or an R or S outside 1 to n-1 (FIPS 186-5 section 6.4.1), is refused with `ErrSigningError`.
 - For PS256, PS384 and PS512, `New` asks for RSASSA-PSS with a salt the size of the hash, as RFC 7518 section 3.5 requires. For RS256, RS384 and RS512 it asks for RSASSA-PKCS1-v1_5.
-- For EdDSA, the key must be Ed25519.
+- For Ed25519, the key must be an Ed25519 key.
 - A key that does not suit the algorithm, and any HS algorithm, is refused with `ErrInvalidPrivateKey`.
 
 The second validates a jwt and returns the decoded head and body:
@@ -517,7 +523,7 @@ Every change below is a compile error or a silent behaviour change for a consume
 - A protected header or JWT claims set with a string that holds an unpaired UTF-16 surrogate escape, such as `"\ud800"`, is refused. Previously the escape became U+FFFD. A U+FFFD that is in the signed bytes, raw or as `\ufffd`, is still accepted.
 - A JWT claims set of `null` is refused. `jwt.Validate` and `jws.VerifyCompactSerialization` previously returned a nil body and no error.
 - A `b64` header of `false` is refused, even when `UnderstoodCriticalHeaders` names `b64`.
-- An `alg` with no validator, `EdDSA` today, is refused with `ErrUnsupportedAlgorithm` before any key is sought. It was `ErrInvalidSignature`, after any `jku` fetch.
+- `jwa.EdDSA` is removed, and `jwa.GetAlgorithm("EdDSA")` returns `Unknown`. RFC 9864 section 4.1.2 deprecates `EdDSA`. Use the new `jwa.Ed25519`, which has a signer and a validator. A token whose `alg` is `EdDSA` is refused with `ErrUnsupportedAlgorithm` before any key is sought. v0.10.0 refused it with `ErrInvalidSignature`, after any `jku` fetch. `jwt.New` refuses a head whose `alg` is `EdDSA` with `ErrUnsupportedAlgorithm`.
 - A token whose `cty` is `JWT` is refused by `jws.VerifyCompactSerialization` and `jwt.Validate` with a message naming nested JWTs. Media-type parameters on the `cty` are ignored.
 - Header errors that echo a token value now use double quotes, not single quotes, and cut the value at 64 characters. Match errors with `errors.Is`, not their text.
 - `jws.Verify` is new. It returns the payload as octets, for a JWS whose payload is not a JSON object.
