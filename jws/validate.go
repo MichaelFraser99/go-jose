@@ -88,7 +88,9 @@ func hasValidator(alg jwa.Algorithm) bool {
 // refused unless that member is the string alg names. A jwk whose "use" is
 // present and is not "sig", or whose "key_ops" is present and lacks "verify",
 // is refused too, as RFC 7517 sections 4.2 and 4.3 mark it as not for verifying
-// signatures. Every refusal carries ErrInvalidPublicKey.
+// signatures. Every refusal carries ErrInvalidPublicKey. To verify with such a
+// key anyway, read it with jwk.PublicFromJwk and pass it to GetValidator,
+// which applies no key-use rule.
 func GetValidatorFromJwk(alg jwa.Algorithm, publicJwk map[string]any) (model.Validator, error) {
 	switch alg {
 	case jwa.ES256, jwa.ES384, jwa.ES512, jwa.RS256, jwa.RS384, jwa.RS512, jwa.PS256, jwa.PS384, jwa.PS512, jwa.EdDSA, jwa.Ed25519, jwa.MLDSA44, jwa.MLDSA65, jwa.MLDSA87:

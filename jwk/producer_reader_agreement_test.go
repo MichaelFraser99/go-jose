@@ -8,8 +8,11 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"math/big"
+	"os"
+	"strconv"
 	"sync"
 	"testing"
 
@@ -231,89 +234,60 @@ func TestFromJwk_RefusesAZeroLengthBase64urlUInt(t *testing.T) {
 	}
 }
 
-var manyPrimeRSAKeys sync.Map
-
-func rsaKeyOfManyPrimesWithNoneListed(t *testing.T, bits int) *rsa.PrivateKey {
+func rsaKeyFromPrimesAtTheModulusCap(t *testing.T, bits string) *rsa.PrivateKey {
 	t.Helper()
-	if key, ok := manyPrimeRSAKeys.Load(bits); ok {
-		return key.(*rsa.PrivateKey)
+	raw, err := os.ReadFile("testdata/rsa_primes_at_the_modulus_cap.json")
+	if err != nil {
+		t.Fatal(err)
 	}
-	e := big.NewInt(65537)
+	var fixtures map[string]map[string]string
+	if err := json.Unmarshal(raw, &fixtures); err != nil {
+		t.Fatal(err)
+	}
+	p, okP := new(big.Int).SetString(fixtures[bits]["p"], 16)
+	q, okQ := new(big.Int).SetString(fixtures[bits]["q"], 16)
+	if !okP || !okQ {
+		t.Fatalf("the fixture for %s bits must hold two hexadecimal primes", bits)
+	}
 	one := big.NewInt(1)
-	coprime := func(p *big.Int) bool {
-		return new(big.Int).GCD(nil, nil, e, new(big.Int).Sub(p, one)).Cmp(one) == 0
+	pMinus, qMinus := new(big.Int).Sub(p, one), new(big.Int).Sub(q, one)
+	lambda := new(big.Int).Div(new(big.Int).Mul(pMinus, qMinus), new(big.Int).GCD(nil, nil, pMinus, qMinus))
+	d := new(big.Int).ModInverse(big.NewInt(65537), lambda)
+	if d == nil {
+		t.Fatalf("the fixture for %s bits must have 65537 invertible mod lambda(n)", bits)
 	}
-	n := big.NewInt(1)
-	var primes []*big.Int
-	for n.BitLen() < bits-1024 {
-		p, err := rand.Prime(rand.Reader, 512)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if coprime(p) && new(big.Int).Mod(n, p).Sign() != 0 {
-			primes = append(primes, p)
-			n.Mul(n, p)
-		}
-	}
-	low := new(big.Int).Add(new(big.Int).Div(new(big.Int).Lsh(one, uint(bits-1)), n), one)
-	span := new(big.Int).Sub(new(big.Int).Div(new(big.Int).Sub(new(big.Int).Lsh(one, uint(bits)), one), n), low)
-	for {
-		q, err := rand.Int(rand.Reader, span)
-		if err != nil {
-			t.Fatal(err)
-		}
-		q.Add(q, low).SetBit(q, 0, 1)
-		if q.ProbablyPrime(32) && coprime(q) && new(big.Int).Mod(n, q).Sign() != 0 {
-			primes = append(primes, q)
-			n.Mul(n, q)
-			break
-		}
-	}
-	lambda := big.NewInt(1)
-	for _, p := range primes {
-		pMinus := new(big.Int).Sub(p, one)
-		lambda.Div(new(big.Int).Mul(lambda, pMinus), new(big.Int).GCD(nil, nil, lambda, pMinus))
-	}
-	if n.BitLen() != bits {
-		t.Fatalf("the fixture must be a %d-bit modulus, got %d", bits, n.BitLen())
-	}
-	key := &rsa.PrivateKey{PublicKey: rsa.PublicKey{N: n, E: 65537}, D: new(big.Int).ModInverse(e, lambda)}
-	manyPrimeRSAKeys.Store(bits, key)
-	return key
+	return &rsa.PrivateKey{PublicKey: rsa.PublicKey{N: new(big.Int).Mul(p, q), E: 65537}, D: d, Primes: []*big.Int{p, q}}
 }
 
 func TestJwk_AnRSAKeyWithNoPrimesIsReadUpToTheModulusCapAndRefusedPastIt(t *testing.T) {
 	tests := map[string]struct {
-		bits   int
+		bits   string
 		accept bool
 	}{
-		"8192 bits, the cap":        {bits: 8192, accept: true},
-		"8193 bits, one past it":    {bits: 8193},
-		"8256 bits, a word past it": {bits: 8256},
+		"8192 bits, the cap":     {bits: "8192", accept: true},
+		"8193 bits, one past it": {bits: "8193"},
 	}
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			key := rsaKeyOfManyPrimesWithNoneListed(t, test.bits)
-			jwk := map[string]any{
-				"kty": "RSA",
-				"n":   rsaMember(key.N),
-				"e":   rsaMember(big.NewInt(int64(key.E))),
-				"d":   rsaMember(key.D),
+			full := rsaKeyFromPrimesAtTheModulusCap(t, test.bits)
+			if got := strconv.Itoa(full.N.BitLen()); got != test.bits {
+				t.Fatalf("the fixture must be a %s-bit modulus, got %s", test.bits, got)
 			}
-			read, readErr := PrivateFromJwk(jwk)
+			key := &rsa.PrivateKey{PublicKey: full.PublicKey, D: full.D}
+			read, readErr := PrivateFromJwk(rsaDOnlyJwk(key))
+			produced, produceErr := produce(t, func() (*map[string]any, error) { return PrivateJwk(key) })
 			if test.accept {
-				if readErr != nil {
-					t.Errorf("[RFC 7518 6.3.2] a %d-bit key with no primes whose d inverts e is within the cap, so it must be read, got %v", test.bits, readErr)
+				if readErr != nil || produceErr != nil {
+					t.Errorf("[RFC 7518 6.3.2] a %s-bit two-prime key with no primes listed is within the cap, so it must be read and produced, got %v and %v", test.bits, readErr, produceErr)
 				}
 				return
 			}
-			produced, produceErr := produce(t, func() (*map[string]any, error) { return PrivateJwk(key) })
 			if !errors.Is(readErr, joseerror.ErrInvalidPrivateKey) {
-				t.Errorf("[RFC 7518 6.3.2] with no primes d can be checked only by signing, so a %d-bit modulus above the 8192-bit cap must be refused with ErrInvalidPrivateKey even when d inverts e, got %v and %T", test.bits, readErr, read)
+				t.Errorf("[RFC 7518 6.3.2] the primes of a key with none listed are recovered only up to the 8192-bit cap, so a valid %s-bit key must be refused with ErrInvalidPrivateKey, got %v and %T", test.bits, readErr, read)
 			}
 			if !errors.Is(produceErr, joseerror.ErrInvalidPrivateKey) {
-				t.Errorf("[RFC 7518 6.3.2] PrivateJwk must refuse a %d-bit key with no primes that PrivateFromJwk refuses, got %v and %v", test.bits, produceErr, produced)
+				t.Errorf("[RFC 7518 6.3.2] PrivateJwk must refuse a %s-bit key with no primes that PrivateFromJwk refuses, got %v and %v", test.bits, produceErr, produced)
 			}
 		})
 	}
@@ -390,5 +364,39 @@ func TestFromJwk_AJwkWithNoKtyIsRefusedWithTheKeyErrorClass(t *testing.T) {
 	}
 	if key, err := PrivateFromJwk(jwk); !errors.Is(err, joseerror.ErrInvalidPrivateKey) {
 		t.Errorf("[RFC 7517 4.1] kty is REQUIRED, so a jwk without it must be refused with ErrInvalidPrivateKey, got %v and %T", err, key)
+	}
+}
+
+func TestPrivateFromJwk_ReturnsTheRecoveredPrimesOfAnRSAKeyWithNone(t *testing.T) {
+	for _, bits := range []int{2048, 3072, 4096} {
+		generated, err := rsa.GenerateKey(rand.Reader, bits)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Run(big.NewInt(int64(bits)).String()+" bits", func(t *testing.T) {
+			read, err := PrivateFromJwk(rsaDOnlyJwk(generated))
+			if err != nil {
+				t.Fatalf("[SP 800-56B Rev. 2 C.1 step 6] a two-prime key whose d inverts e must be read, got %v", err)
+			}
+			key := read.(*rsa.PrivateKey)
+			want := generated.Primes
+			matches := len(key.Primes) == 2 && (key.Primes[0].Cmp(want[0]) == 0 && key.Primes[1].Cmp(want[1]) == 0 || key.Primes[0].Cmp(want[1]) == 0 && key.Primes[1].Cmp(want[0]) == 0)
+			if !matches {
+				t.Errorf("[SP 800-56B Rev. 2 C.1 step 5] the key read must carry the primes crypto/rsa generated, in either order (note 3), got %v", key.Primes)
+			}
+			if key.Precomputed.Dp == nil || key.Precomputed.Qinv == nil {
+				t.Errorf("[RFC 8017 3.2] the key read must carry its CRT values, got %+v", key.Precomputed)
+			}
+		})
+	}
+}
+
+func TestPrivateFromJwk_RefusesAnRSAKeyWithNoPrimesWhoseModulusHasThree(t *testing.T) {
+	threePrime, err := rsa.GenerateMultiPrimeKey(rand.Reader, 3, 2048) //nolint:staticcheck
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key, err := PrivateFromJwk(rsaDOnlyJwk(threePrime)); !errors.Is(err, joseerror.ErrInvalidPrivateKey) {
+		t.Errorf("[RFC 7518 6.3.2.7] this library reads two-prime keys only, so a three-prime key with no primes listed must be refused with ErrInvalidPrivateKey, got %v and %T", err, key)
 	}
 }

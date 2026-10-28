@@ -71,3 +71,36 @@ func TestGetValidatorFromJwk_RefusesAJwkMarkedAsNotForVerifying(t *testing.T) {
 		})
 	}
 }
+
+func TestGetValidator_VerifiesWithAJwkMarkedForEncryptionWhenTheCallerReadsItFirst(t *testing.T) {
+	signer, err := GetSigner(jwa.ES256, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	public, err := jwk.PublicJwk(signer.Public())
+	if err != nil {
+		t.Fatal(err)
+	}
+	(*public)["use"] = "enc"
+
+	if validator, err := GetValidatorFromJwk(jwa.ES256, *public); !errors.Is(err, joseerror.ErrInvalidPublicKey) {
+		t.Fatalf("[RFC 7517 4.2] GetValidatorFromJwk must refuse a jwk whose use is enc, got %v and %#v", err, validator)
+	}
+
+	key, err := jwk.PublicFromJwk(*public)
+	if err != nil {
+		t.Fatalf("[RFC 7517 4.2] PublicFromJwk reads a key whatever its use, got %v", err)
+	}
+	validator, err := GetValidator(jwa.ES256, key)
+	if err != nil {
+		t.Fatalf("[RFC 7517 4.2] GetValidator carries no key-use rule, so the key read from a jwk whose use is enc must build a validator, got %v", err)
+	}
+	input := []byte("the signing input")
+	signature, err := signer.Sign(rand.Reader, input, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if valid, err := validator.ValidateSignature(input, signature); err != nil || !valid {
+		t.Errorf("[RFC 7518 3.4] the validator built from the key read must verify its signer's signature, got %t and %v", valid, err)
+	}
+}

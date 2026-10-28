@@ -5,7 +5,6 @@ import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -306,13 +305,13 @@ func EdDSAPrivateKeyFromJwk(jwk map[string]any) (*ed25519.PrivateKey, error) {
 // 3.1 and 3.2: d is a positive integer less than n with e*d == 1
 // (mod lambda(n)). "d" must be in [1, n-1]. With "p" and "q", the key must pass
 // rsa.PrivateKey.Validate, and "dp", "dq" and "qi" must equal
-// the CRT values crypto/rsa computes from p, q and d. With no primes, lambda(n)
-// is unknown, so crypto/rsa must sign 32 random 32-byte messages with the key
-// under PKCS #1 v1.5 and verify each signature under n and e. A wrong d passes
-// only if every one of those signatures happens to come out right. That check
-// costs 32 private operations, so with no primes a modulus over
-// MaximumRSAModulusBits is refused before it runs. A refusal
-// for "n" or "e" carries ErrInvalidPrivateKey and wraps the public key error.
+// the CRT values crypto/rsa computes from p, q and d. With no primes, p and q
+// are recovered from n, e and d by NIST SP 800-56B Rev. 2 Appendix C.1, and
+// the key must then pass rsa.PrivateKey.Validate. The key returned carries
+// them and its CRT values. A key with no primes whose modulus is not two
+// primes, or whose modulus is over MaximumRSAModulusBits, is refused. A
+// refusal for "n" or "e" carries ErrInvalidPrivateKey and wraps the public key
+// error.
 func RSAPrivateKeyFromJwk(jwk map[string]any) (*rsa.PrivateKey, error) {
 	publicKey, err := RSAPublicKeyFromJwk(jwk)
 	if err != nil {
@@ -341,10 +340,12 @@ func RSAPrivateKeyFromJwk(jwk map[string]any) (*rsa.PrivateKey, error) {
 		D:         new(big.Int).SetBytes(dBytes),
 	}
 	if !pPresent {
-		if err := checkRSAPrivateKey(&privateKey); err != nil {
+		completed, err := completeRSAPrivateKey(&privateKey)
+		if err != nil {
 			return nil, err
 		}
-		return &privateKey, nil
+		completed.Precompute()
+		return completed, nil
 	}
 
 	members := map[string]*big.Int{}
@@ -357,15 +358,16 @@ func RSAPrivateKeyFromJwk(jwk map[string]any) (*rsa.PrivateKey, error) {
 	}
 
 	privateKey.Primes = []*big.Int{members["p"], members["q"]}
-	if err := checkRSAPrivateKey(&privateKey); err != nil {
+	completed, err := completeRSAPrivateKey(&privateKey)
+	if err != nil {
 		return nil, err
 	}
-	privateKey.Precompute()
-	if members["dp"].Cmp(privateKey.Precomputed.Dp) != 0 || members["dq"].Cmp(privateKey.Precomputed.Dq) != 0 || members["qi"].Cmp(privateKey.Precomputed.Qinv) != 0 {
+	completed.Precompute()
+	if members["dp"].Cmp(completed.Precomputed.Dp) != 0 || members["dq"].Cmp(completed.Precomputed.Dq) != 0 || members["qi"].Cmp(completed.Precomputed.Qinv) != 0 {
 		return nil, fmt.Errorf("%wthe 'dp', 'dq' and 'qi' of an RSA jwk are not the CRT values of its 'p', 'q' and 'd'", jose_errors.ErrInvalidPrivateKey)
 	}
 
-	return &privateKey, nil
+	return completed, nil
 }
 
 func extractBase64urlUInt(jwk map[string]any, name string) ([]byte, error) {
@@ -380,25 +382,6 @@ func extractBase64urlUInt(jwk map[string]any, name string) ([]byte, error) {
 		return nil, fmt.Errorf("%wthe %q member is a Base64urlUInt, which RFC 7518 section 2 encodes in the minimum number of octets", jose_errors.ErrMalformedClaim, name)
 	}
 	return value, nil
-}
-
-const rsaPrivateExponentRounds = 32
-
-func checkRSAPrivateExponent(privateKey *rsa.PrivateKey) error {
-	message := make([]byte, 32)
-	for i := 0; i < rsaPrivateExponentRounds; i++ {
-		if _, err := io.ReadFull(rand.Reader, message); err != nil {
-			return fmt.Errorf("%wfailed to read a random message to check the d of an RSA private key: %w", jose_errors.ErrInvalidPrivateKey, err)
-		}
-		signature, err := rsa.SignPKCS1v15(nil, privateKey, crypto.Hash(0), message)
-		if err != nil {
-			return fmt.Errorf("%wthe d of an RSA private key does not sign under its n and e: %w", jose_errors.ErrInvalidPrivateKey, err)
-		}
-		if err := rsa.VerifyPKCS1v15(&privateKey.PublicKey, crypto.Hash(0), message, signature); err != nil {
-			return fmt.Errorf("%wthe d of an RSA private key is not the private exponent of its n and e: %w", jose_errors.ErrInvalidPrivateKey, err)
-		}
-	}
-	return nil
 }
 
 // RSAPublicKeyFromJwk reads the jwk of an RSA public key.
@@ -471,7 +454,7 @@ func JwkFromRSAPrivateKey(privateKey *rsa.PrivateKey) (map[string]any, error) {
 	if len(privateKey.Primes) != 0 && len(privateKey.Primes) != 2 {
 		return nil, fmt.Errorf("%wan RSA private key has no primes or exactly two", jose_errors.ErrInvalidPrivateKey)
 	}
-	if err := checkRSAPrivateKey(privateKey); err != nil {
+	if _, err := completeRSAPrivateKey(privateKey); err != nil {
 		return nil, err
 	}
 
