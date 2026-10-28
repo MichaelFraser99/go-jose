@@ -268,6 +268,10 @@ func EdDSAPublicKeyFromJwk(jwk map[string]any) (*ed25519.PublicKey, error) {
 		return nil, fmt.Errorf("no 'crv' claim present in jwk")
 	}
 
+	if len(xBytes) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf("%wthe 'x' parameter of an Ed25519 jwk is %d bytes, got %d", jose_errors.ErrInvalidPublicKey, ed25519.PublicKeySize, len(xBytes))
+	}
+
 	return model.Pointer(ed25519.PublicKey(xBytes)), nil
 }
 
@@ -286,7 +290,17 @@ func EdDSAPrivateKeyFromJwk(jwk map[string]any) (*ed25519.PrivateKey, error) {
 		return nil, fmt.Errorf("no 'crv' claim present in jwk")
 	}
 
-	return model.Pointer(ed25519.PrivateKey(append(dBytes, xBytes...))), nil
+	if len(dBytes) != ed25519.SeedSize {
+		return nil, fmt.Errorf("%wthe 'd' parameter of an Ed25519 jwk is %d bytes, got %d", jose_errors.ErrInvalidPrivateKey, ed25519.SeedSize, len(dBytes))
+	}
+	if len(xBytes) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf("%wthe 'x' parameter of an Ed25519 jwk is %d bytes, got %d", jose_errors.ErrInvalidPrivateKey, ed25519.PublicKeySize, len(xBytes))
+	}
+
+	private := make([]byte, 0, ed25519.PrivateKeySize)
+	private = append(private, dBytes...)
+	private = append(private, xBytes...)
+	return model.Pointer(ed25519.PrivateKey(private)), nil
 }
 
 func RSAPrivateKeyFromJwk(jwk map[string]any) (*rsa.PrivateKey, error) {

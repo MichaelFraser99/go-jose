@@ -109,11 +109,23 @@ func PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error) {
 		}
 		switch ktyString {
 		case "EC":
-			return common.ECDSAPrivateKeyFromJwk(jwk)
+			key, err := common.ECDSAPrivateKeyFromJwk(jwk)
+			if err != nil {
+				return nil, err
+			}
+			return key, nil
 		case "RSA":
-			return common.RSAPrivateKeyFromJwk(jwk)
+			key, err := common.RSAPrivateKeyFromJwk(jwk)
+			if err != nil {
+				return nil, err
+			}
+			return key, nil
 		case "OKP":
-			return common.EdDSAPrivateKeyFromJwk(jwk)
+			key, err := common.EdDSAPrivateKeyFromJwk(jwk)
+			if err != nil {
+				return nil, err
+			}
+			return key, nil
 		default:
 			return nil, fmt.Errorf("%wunsupported kty: %s", joseerror.ErrUnsupportedAlgorithm, ktyString)
 		}
@@ -130,11 +142,23 @@ func PublicFromJwk(jwk map[string]any) (crypto.PublicKey, error) {
 		}
 		switch ktyString {
 		case "EC":
-			return common.ECDSAPublicKeyFromJwk(jwk)
+			key, err := common.ECDSAPublicKeyFromJwk(jwk)
+			if err != nil {
+				return nil, err
+			}
+			return key, nil
 		case "RSA":
-			return common.RSAPublicKeyFromJwk(jwk)
+			key, err := common.RSAPublicKeyFromJwk(jwk)
+			if err != nil {
+				return nil, err
+			}
+			return key, nil
 		case "OKP":
-			return common.EdDSAPublicKeyFromJwk(jwk)
+			key, err := common.EdDSAPublicKeyFromJwk(jwk)
+			if err != nil {
+				return nil, err
+			}
+			return key, nil
 		default:
 			return nil, fmt.Errorf("%wunsupported kty: %s", joseerror.ErrUnsupportedAlgorithm, ktyString)
 		}
