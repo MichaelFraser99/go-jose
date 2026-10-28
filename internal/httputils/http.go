@@ -65,9 +65,6 @@ func timeoutOrDefault(timeout time.Duration) time.Duration {
 
 var errNotTLS = errors.New("refusing a request that does not use TLS")
 
-// httpsOnly refuses any request whose URL is not https, so every hop of a redirect
-// uses TLS as RFC 7515 sections 4.1.2 and 4.1.5 require of the GET that retrieves a
-// jku or x5u resource.
 type httpsOnly struct {
 	next http.RoundTripper
 }

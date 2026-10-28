@@ -202,8 +202,25 @@ func TestRetrieveResource_AnEndlessRedirectStopsAtTheDefaultLimit(t *testing.T) 
 		_ = response.Body.Close()
 		t.Fatal("[net/http Client.CheckRedirect] a redirect loop must not yield a resource")
 	}
-	if got := hits.Load(); got > 10 {
+	if got := hits.Load(); got != 10 {
 		t.Errorf("[net/http Client.CheckRedirect] with no CheckRedirect the client stops after 10 consecutive requests, got %d", got)
+	}
+}
+
+func TestRetrieveResource_TheCallersClientTimeoutStillApplies(t *testing.T) {
+	stalling := stallingServer(t, true)
+	client := stalling.Client()
+	client.Timeout = 100 * time.Millisecond
+
+	begin := time.Now()
+	err := fetchAll(context.Background(), client, time.Hour, stalling.URL)
+	elapsed := time.Since(begin)
+
+	if err == nil {
+		t.Fatal("[net/http Client.Timeout] a fetch that outlives the caller's client Timeout must fail")
+	}
+	if elapsed > bound {
+		t.Errorf("[net/http Client.Timeout] the caller's client Timeout must survive the https-only wrapping, so 100ms must not take %v", elapsed)
 	}
 }
 
