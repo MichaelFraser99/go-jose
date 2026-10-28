@@ -66,7 +66,11 @@ A recipient MUST validate an `x5c` chain per RFC 5280, and RFC 5280 path validat
 
 ### `JoseOptions` fields default by their zero value
 
-`IgnoreTokenProvidedKeys` reads negatively on purpose. The field it replaced read `UseTokenProvidedKeys` and documented itself as defaulting to true, which held only while a caller passed no options at all: constructing the struct to set anything else zeroed it and silently turned every header key source off. Keep new fields in the same shape, so that the zero value is the behaviour the documentation describes.
+A zero-valued field and a `nil` `*JoseOptions` must mean the same thing. `UseTokenProvidedKeys` is the example: it is off when unset and off when no options are passed. In v0.10.0 a `nil` options pointer turned it on while a constructed struct turned it off, so setting any unrelated option silently changed which keys verified a token. Keep new fields in the same shape, so that the zero value is the behaviour the documentation describes.
+
+### A token's own keys are not trusted by default
+
+A `jwk`, `jku`, `x5c` or `x5u` header names a key the token's signer chose. RFC 7515 section 10.3 requires the origin of a key to be authenticated. `x5c` and `x5u` are authenticated by chain validation against `X509Roots`, so setting roots is their opt-in. `jwk` and `jku` carry nothing that authenticates them, so they need `UseTokenProvidedKeys`. Setting one switch must never admit the other kind of source. Any new key source must name what authenticates it and be gated on that.
 
 ## Conventions
 

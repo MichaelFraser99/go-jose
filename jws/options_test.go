@@ -45,43 +45,21 @@ func signedWithInlineJwk(t *testing.T) string {
 	return input + "." + base64.RawURLEncoding.EncodeToString(signature)
 }
 
-func TestVerifyCompactSerialization_SettingOneOptionDoesNotDisableTheKeysATokenCarries(t *testing.T) {
+func TestVerifyCompactSerialization_ATokenCarriesNoTrustedKeyUnlessTheCallerOptsIn(t *testing.T) {
 	token := signedWithInlineJwk(t)
 
 	tests := map[string]struct {
-		reference string
-		opts      *model.JoseOptions
-		verifies  bool
+		opts     *model.JoseOptions
+		verifies bool
 	}{
-		"no options at all": {
-			reference: "the documented default", opts: nil, verifies: true,
-		},
-		"an empty options struct": {
-			reference: "the documented default", opts: &model.JoseOptions{}, verifies: true,
-		},
-		"options set for an unrelated reason": {
-			reference: "the documented default",
-			opts:      &model.JoseOptions{X509Roots: x509.NewCertPool()},
-			verifies:  true,
-		},
-		"options set to allow this algorithm": {
-			reference: "the documented default",
-			opts:      &model.JoseOptions{AllowedSigningAlgorithms: []jwa.Algorithm{jwa.RS256}},
-			verifies:  true,
-		},
-		"options set to accept a type": {
-			reference: "the documented default",
-			opts:      &model.JoseOptions{AcceptedTypes: []string{"JWT"}},
-			verifies:  true,
-		},
-		"the keys a token carries turned off explicitly": {
-			reference: "opt out",
-			opts:      &model.JoseOptions{IgnoreTokenProvidedKeys: true},
-		},
-		"turned off alongside another option": {
-			reference: "opt out",
-			opts:      &model.JoseOptions{IgnoreTokenProvidedKeys: true, X509Roots: x509.NewCertPool()},
-		},
+		"no options at all":                   {opts: nil},
+		"an empty options struct":             {opts: &model.JoseOptions{}},
+		"options set for an unrelated reason": {opts: &model.JoseOptions{X509Roots: x509.NewCertPool()}},
+		"options set to allow this algorithm": {opts: &model.JoseOptions{AllowedSigningAlgorithms: []jwa.Algorithm{jwa.RS256}}},
+		"options set to accept a type":        {opts: &model.JoseOptions{AcceptedTypes: []string{"JWT"}}},
+		"the token's keys turned on":          {opts: &model.JoseOptions{UseTokenProvidedKeys: true}, verifies: true},
+		"turned on alongside another option":  {opts: &model.JoseOptions{UseTokenProvidedKeys: true, AcceptedTypes: []string{"JWT"}}, verifies: true},
+		"turned off explicitly":               {opts: &model.JoseOptions{UseTokenProvidedKeys: false}},
 	}
 
 	for name, tc := range tests {
@@ -89,12 +67,12 @@ func TestVerifyCompactSerialization_SettingOneOptionDoesNotDisableTheKeysATokenC
 			_, _, err := VerifyCompactSerialization(token, nil, tc.opts)
 			if tc.verifies {
 				if err != nil {
-					t.Errorf("[%s] a key the token carries is used unless the caller opts out, so setting an unrelated option must not silently disable it, got %v", tc.reference, err)
+					t.Errorf("[JoseOptions.UseTokenProvidedKeys] a caller who opted in must have the token's own key used, got %v", err)
 				}
 				return
 			}
 			if err == nil {
-				t.Errorf("[%s] a caller who opted out must not have the token's own key used", tc.reference)
+				t.Errorf("[RFC 7515 10.3] a key must be authenticated as belonging to the signer, and a token naming its own key authenticates nothing, so it must not verify unless the caller opts in")
 			}
 		})
 	}
@@ -144,7 +122,7 @@ func TestVerifyCompactSerialization_AJkuIsFetchedWithTheConfiguredClient(t *test
 	token := input + "." + base64.RawURLEncoding.EncodeToString(signature)
 
 	t.Run("with a client configured", func(t *testing.T) {
-		_, _, err := VerifyCompactSerialization(token, nil, &model.JoseOptions{HttpClient: server.Client()})
+		_, _, err := VerifyCompactSerialization(token, nil, &model.JoseOptions{HttpClient: server.Client(), UseTokenProvidedKeys: true})
 		if err != nil {
 			t.Fatalf("[RFC 7515 4.1.2] a jku names where the key set lives, so a caller supplying a client must have it fetched, got %v", err)
 		}
@@ -153,8 +131,19 @@ func TestVerifyCompactSerialization_AJkuIsFetchedWithTheConfiguredClient(t *test
 		}
 	})
 
+	t.Run("with a client configured but the token's keys not opted in to", func(t *testing.T) {
+		before := fetched.Load()
+		_, _, err := VerifyCompactSerialization(token, nil, &model.JoseOptions{HttpClient: server.Client()})
+		if err == nil {
+			t.Error("[JoseOptions.UseTokenProvidedKeys] a jku is a key the token names for itself, so it must not verify the token unless the caller opts in")
+		}
+		if got := fetched.Load(); got != before {
+			t.Error("[JoseOptions.UseTokenProvidedKeys] a caller who has not opted in must not have a peer-chosen URL fetched at all")
+		}
+	})
+
 	t.Run("with no client configured", func(t *testing.T) {
-		_, _, err := VerifyCompactSerialization(token, nil, nil)
+		_, _, err := VerifyCompactSerialization(token, nil, &model.JoseOptions{UseTokenProvidedKeys: true})
 		if err == nil {
 			t.Fatal("[RFC 7515 4.1.2] with no client the key set cannot be fetched, so the token must not verify")
 		}

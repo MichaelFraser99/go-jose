@@ -11,15 +11,14 @@ import (
 )
 
 type JoseOptions struct {
-	// IgnoreTokenProvidedKeys stops the keys a token carries in its own header — jwk,
-	// jku, x5c and x5u — from being used for verification. They are used by default,
-	// so a caller wanting only its own key material opts out here.
+	// UseTokenProvidedKeys lets a key the token names through its jwk or jku header
+	// verify it. Off by default, including when no options are passed: RFC 7515 section
+	// 10.3 requires the origin of a key to be authenticated, and neither header carries
+	// anything that authenticates it. x5c and x5u are governed by X509Roots instead.
 	//
-	// The sense is negative so that the zero value is the default. The field this
-	// replaced read UseTokenProvidedKeys and documented itself as defaulting to true,
-	// which held only while a caller passed no options at all: constructing the struct
-	// to set anything else zeroed it and silently turned every header key source off.
-	IgnoreTokenProvidedKeys bool
+	// When on, a header key and the caller's own retriever are both tried, and either
+	// may verify the token.
+	UseTokenProvidedKeys bool
 
 	// HttpClient fetches the resources a token's jku and x5u headers name. Both URLs
 	// come from the header of the token being verified, so this library makes an
@@ -61,8 +60,12 @@ type JoseOptions struct {
 	// validate the chain per RFC 5280, and RFC 5280 path validation takes a trust
 	// anchor as an input, so neither header can be used without one.
 	//
-	// With no roots configured, a token's x5c and x5u headers are ignored: they
-	// contribute no key, and the token verifies only if another source does.
+	// Setting roots is what opts in to x5c and x5u: a chain that validates against
+	// them authenticates the key's origin, as RFC 7515 section 10.3 requires. x5u also
+	// needs HttpClient. With no roots configured, both headers are ignored.
+	//
+	// When a retriever is also given, any certificate that chains to these roots can
+	// verify the token, not only the retriever's key.
 	X509Roots *x509.CertPool
 }
 

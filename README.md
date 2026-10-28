@@ -150,17 +150,30 @@ pk := validator.Public()
 
 ## Keys a token carries
 
-A JOSE header can name the key that signed the token, through `jwk`, `jku`, `x5c` or `x5u`. `jwt.Validate` and `jws.VerifyCompactSerialization` use those keys by default. A caller wanting only its own key material opts out:
+A JOSE header can name the key that signed the token, through `jwk`, `jku`, `x5c` or `x5u`. RFC 7515 section 10.3 says the technique used to get a public key "must authenticate the origin of the key". The four headers differ in whether anything authenticates the key, so each has its own switch:
+
+| Header | Used when | What authenticates the key |
+| --- | --- | --- |
+| `x5c` | `X509Roots` is set | The chain validates against your roots, as section 4.1.6 requires |
+| `x5u` | `X509Roots` and `HttpClient` are set | The same chain validation, after the fetch |
+| `jwk` | `UseTokenProvidedKeys` is true | Nothing. The token names its own key |
+| `jku` | `UseTokenProvidedKeys` is true and `HttpClient` is set | Nothing. The token's signer chooses the URL, and TLS proves only the server's identity |
+
+`jwk` and `jku` are off by default, including when you pass no options, because anyone can sign a token and name their own key. A token that verifies against such a key proves only that its signer holds that key. Turn `UseTokenProvidedKeys` on only when your application ties those keys to a party you trust some other way:
 
 ```go
-head, body, err := jwt.Validate(token, retriever, &model.JoseOptions{IgnoreTokenProvidedKeys: true})
+head, body, err := jwt.Validate(token, nil, &model.JoseOptions{UseTokenProvidedKeys: true})
 ```
 
-The sense is negative so the zero value is the default, which matters because a caller setting any other option constructs the struct. The field this replaced read `UseTokenProvidedKeys` and documented itself as defaulting to true — and that held only while you passed no options at all. Setting anything else zeroed it and silently turned every header key source off.
+Setting `X509Roots` does not turn `jwk` or `jku` on.
+
+When you supply your own retriever and also use a header source, both are tried. The token verifies if a key from either source verifies it.
+
+**This is a breaking change for a caller that passes no options.** v0.10.0 used the token's keys when `opts` was `nil`. Such a caller must now pass `UseTokenProvidedKeys: true` to keep using `jwk` and `jku`, and set `X509Roots` to use `x5c` and `x5u`. A caller that set `UseTokenProvidedKeys` keeps the same meaning for `jwk` and `jku`. A caller that constructed `JoseOptions` without it was already getting no token keys.
 
 ### jku and x5u need a client
 
-The two remote headers name a URL this library fetches. Supply the client it should use:
+The two remote headers name a URL this library fetches. Supply the client it should use. The example below uses `x5u`; `jku` also needs `UseTokenProvidedKeys`:
 
 ```go
 head, body, err := jwt.Validate(token, nil, &model.JoseOptions{
@@ -217,7 +230,7 @@ A malformed `x5c` is refused whether or not roots are configured, because its sh
 
 The signing key is taken from the first certificate, and that certificate is the one validated against your roots, as section 4.1.6 requires. The algorithm the issuer used to sign that certificate is not compared with the token's `alg`. An ES256 key in a certificate issued by an RSA root is usable.
 
-`jwk` and `jku` are deliberately left alone by this. Neither carries a validation MUST, and an inline `jwk` is transparently "here is my key, check against it" — a caller reading the header knows no trust is being conferred. An `x5c` chain looks like PKI, which is why it is the one that needs the anchor made explicit.
+Configuring roots does not make `jwk` or `jku` usable. Nothing anchors those keys, so they need `UseTokenProvidedKeys`, as described under [Keys a token carries](#keys-a-token-carries).
 
 ## Jwks
 This library includes two methods for converting keys into JWK format
@@ -299,7 +312,7 @@ The second validates a jwt and returns the decoded head and body:
 func jwt.Validate(token string, outOfBoundsPublicKey model.Retriever, opts *model.JoseOptions) (head, body map[string]any, err error)
 ```
 
-The retriever supplies key material of your own. Pass nil to rely only on what the token's header names. `model.JoseOptions` carries everything described under [Keys a token carries](#keys-a-token-carries), and may be nil for the defaults.
+The retriever supplies key material of your own. Pass nil only when you have turned on `UseTokenProvidedKeys`, so the token's header names the key. `model.JoseOptions` carries everything described under [Keys a token carries](#keys-a-token-carries), and may be nil for the defaults.
 
 If the `iat`, `nbf` and `exp` claims are present, `Validate` checks them. `JoseOptions.ClockSkewLeeway` widens the window they are judged against.
 
@@ -358,7 +371,7 @@ if errors.Is(err, joseerror.ErrInvalidSignature) {
 | --- | --- |
 | `jwa.GetAlgorithm` | Returns `Algorithm`, not `*Algorithm`. Returns `jwa.Unknown` rather than nil for an unknown name, and the comparison is now case sensitive |
 | `jwt.New` | Takes a fourth parameter, `jwt.Opts`, naming the algorithm to sign with |
-| `jwt.Validate` | Takes `(token string, retriever model.Retriever, opts *model.JoseOptions)`. The `publicKey` parameter is gone: supply key material through the retriever, or rely on what the token's header names |
+| `jwt.Validate` | Takes `(token string, retriever model.Retriever, opts *model.JoseOptions)`. The `publicKey` parameter is gone: supply key material through the retriever, or turn on `UseTokenProvidedKeys` to use what the token's header names |
 | `jws.GetValidatorFromJwk` | Takes `map[string]any`, not `[]byte` |
 | `jwk.PublicJwk`, `jwk.PrivateJwk` | Return `*map[string]any`, not `map[string]string` |
 
@@ -368,7 +381,7 @@ if errors.Is(err, joseerror.ErrInvalidSignature) {
 - An Ed25519 jwk now carries a `kid`.
 - An `OKP` jwk is read only when it is a well-formed Ed25519 key.
 - `PublicJwk` and `PrivateJwk` refuse a key they cannot encode, rather than panic or produce a malformed jwk.
-- `JoseOptions.IgnoreTokenProvidedKeys` replaces `UseTokenProvidedKeys`, inverted so the zero value is the documented default.
+- `JoseOptions.UseTokenProvidedKeys` is off unless set, including when `opts` is `nil`, and now covers only `jwk` and `jku`. `x5c` and `x5u` are used when `X509Roots` is set.
 - A `crit` header naming an extension you have not declared in `UnderstoodCriticalHeaders` is refused.
 - `x5c` and `x5u` contribute no key unless `JoseOptions.X509Roots` is configured.
 

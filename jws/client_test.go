@@ -29,14 +29,23 @@ func TestVerifyCompactSerialization_ARemoteHeaderWithoutAClientCannotTurnARefusa
 		t.Fatalf("failed to build a signer: %v", err)
 	}
 
-	tests := map[string]map[string]any{
-		"jku": {"alg": "RS256", "jku": "https://example.com/jwks"},
-		"x5u": {"alg": "RS256", "x5u": "https://example.com/certs"},
+	tests := map[string]struct {
+		head map[string]any
+		opts *model.JoseOptions
+	}{
+		"jku": {
+			head: map[string]any{"alg": "RS256", "jku": "https://example.com/jwks"},
+			opts: &model.JoseOptions{UseTokenProvidedKeys: true},
+		},
+		"x5u": {
+			head: map[string]any{"alg": "RS256", "x5u": "https://example.com/certs"},
+			opts: &model.JoseOptions{X509Roots: x509.NewCertPool()},
+		},
 	}
 
-	for name, head := range tests {
+	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			headBytes, err := json.Marshal(head)
+			headBytes, err := json.Marshal(test.head)
 			if err != nil {
 				t.Fatalf("failed to encode the header: %v", err)
 			}
@@ -48,7 +57,7 @@ func TestVerifyCompactSerialization_ARemoteHeaderWithoutAClientCannotTurnARefusa
 			token := input + "." + base64.RawURLEncoding.EncodeToString(signature)
 
 			callersRetriever := func() ([]crypto.PublicKey, error) { return []crypto.PublicKey{&callersKey.PublicKey}, nil }
-			_, _, err = VerifyCompactSerialization(token, callersRetriever, &model.JoseOptions{X509Roots: x509.NewCertPool()})
+			_, _, err = VerifyCompactSerialization(token, callersRetriever, test.opts)
 			if err == nil {
 				t.Fatal("a token signed by a key the caller does not hold must not verify")
 			}

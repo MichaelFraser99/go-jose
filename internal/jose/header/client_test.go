@@ -8,15 +8,23 @@ import (
 )
 
 func TestValidateHeader_WithoutAClientTheRemoteHeadersYieldNoRetriever(t *testing.T) {
-	tests := map[string]map[string]any{
-		"jku": {"alg": "RS256", "jku": "https://example.com/jwks"},
-		"x5u": {"alg": "RS256", "x5u": "https://example.com/certs"},
+	tests := map[string]struct {
+		head map[string]any
+		opts *model.JoseOptions
+	}{
+		"jku": {
+			head: map[string]any{"alg": "RS256", "jku": "https://example.com/jwks"},
+			opts: &model.JoseOptions{UseTokenProvidedKeys: true},
+		},
+		"x5u": {
+			head: map[string]any{"alg": "RS256", "x5u": "https://example.com/certs"},
+			opts: &model.JoseOptions{X509Roots: x509.NewCertPool()},
+		},
 	}
 
-	for name, head := range tests {
+	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			opts := &model.JoseOptions{X509Roots: x509.NewCertPool()}
-			retrievers, err := ValidateHeader(jsonDecodedHeader(t, head), nil, model.JWS, opts)
+			retrievers, err := ValidateHeader(jsonDecodedHeader(t, test.head), nil, model.JWS, test.opts)
 			if err != nil {
 				t.Fatalf("[JoseOptions.HttpClient] a well-formed header must not be refused merely because no client is configured, got %v", err)
 			}
