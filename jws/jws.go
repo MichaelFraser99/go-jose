@@ -77,7 +77,7 @@ func verify(ctx context.Context, compactSerialization string, outOfBoundsPublicK
 	jwkRetrievers = append(jwkRetrievers, headerJwkRetrievers...)
 
 	if len(jwkRetrievers) == 0 {
-		return nil, nil, nil, fmt.Errorf("%wno cyptographic material provided for signature validation", joseerror.ErrMalformedToken)
+		return nil, nil, nil, fmt.Errorf("%wno cryptographic material provided for signature validation", joseerror.ErrMalformedToken)
 	}
 
 	payload, err = jsonutils.DecodeBase64url(components[1])
