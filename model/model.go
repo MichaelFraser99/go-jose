@@ -24,14 +24,16 @@ type JoseOptions struct {
 	// come from the header of the token being verified, so this library makes an
 	// outbound request to an address a peer chose: supply a client whose transport
 	// rejects the destinations your deployment will not allow. FetchTimeout bounds each
-	// fetch whatever Timeout the client sets.
+	// fetch whatever Timeout the client sets, provided its transport honours the
+	// request's context.
 	//
 	// With no client, jku and x5u contribute no key.
 	HttpClient *http.Client
 
 	// FetchTimeout bounds each jku or x5u fetch, from sending the request to reading the
-	// last byte of the body, whatever HttpClient is supplied. Zero or less means 10
-	// seconds. A deadline on the context passed to Validate also applies.
+	// last byte of the body, provided the HttpClient's transport honours the request's
+	// context. Zero or less means 10 seconds. A deadline or cancellation on the context
+	// passed to jwt.Validate or jws.VerifyCompactSerialization also applies.
 	FetchTimeout time.Duration
 
 	// AllowedSigningAlgorithms defines the list of acceptable algorithms for token signature verification. If not specified, all algorithms are permitted

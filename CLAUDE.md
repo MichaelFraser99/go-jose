@@ -54,7 +54,7 @@ RFC 4231 test case 2 cannot go through an HMAC constructor: section 4.3 says its
 
 ### A peer chooses the `jku` and `x5u` a token names
 
-Both URLs come from the header of the token being verified, so this library makes an outbound request to an address a peer chose. `internal/httputils` caps a body at `MaxBodyBytes` and reads one byte past it, so a caller can tell an oversize body from one that exactly fills the cap. The address policy is the caller's: `JoseOptions.HttpClient` documents that their transport must refuse what their deployment will not allow.
+Both URLs come from the header of the token being verified, so this library makes an outbound request to an address a peer chose. `internal/httputils` caps a body at `MaxBodyBytes` and reads one byte past it, so a caller can tell an oversize body from one that exactly fills the cap. The address policy is the caller's: `JoseOptions.HttpClient` documents that their transport must refuse what their deployment will not allow. The time bound is the library's: every fetch runs under a context derived from the caller's `ctx`, limited by `JoseOptions.FetchTimeout` (10 seconds when unset), and released when the body is closed. Read a fetched body through `httputils.ReadBody`, which closes it on every path.
 
 ### A malformed jwk must return an error, never panic
 

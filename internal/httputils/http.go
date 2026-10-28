@@ -87,3 +87,21 @@ func RetrieveResource(ctx context.Context, client *http.Client, timeout time.Dur
 	}
 	return response, nil
 }
+
+// ReadBody reads a fetched resource up to MaxBodyBytes and closes the body on every
+// path, releasing the connection and the fetch deadline.
+func ReadBody(response *http.Response, alias string) ([]byte, error) {
+	if response.Body == nil {
+		return nil, fmt.Errorf("%wfailed to retrieve %s: response body is nil", joseerror.ErrApplicationError, alias)
+	}
+	defer func() { _ = response.Body.Close() }()
+
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, fmt.Errorf("%wfailed to read %s response: %w", joseerror.ErrApplicationError, alias, err)
+	}
+	if int64(len(body)) > MaxBodyBytes {
+		return nil, fmt.Errorf("%w%s response exceeded the %d byte limit", joseerror.ErrApplicationError, alias, MaxBodyBytes)
+	}
+	return body, nil
+}

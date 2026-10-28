@@ -10,7 +10,6 @@ import (
 	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/model"
-	"io"
 	"strings"
 )
 
@@ -210,21 +209,9 @@ func RetrieveX5U(x5u string, fetch httputils.Fetch, x5t, x5ts256 *string, alg st
 			return nil, err
 		}
 
-		if response.Body == nil {
-			return nil, fmt.Errorf("%wfailed to retrieve x5u: response body is nil", joseerror.ErrApplicationError)
-		}
-
-		responseBytes, err := io.ReadAll(response.Body)
+		responseBytes, err := httputils.ReadBody(response, "x5u")
 		if err != nil {
-			return nil, fmt.Errorf("%wfailed to read x5u response: %w", joseerror.ErrApplicationError, err)
-		}
-
-		err = response.Body.Close()
-		if err != nil {
-			return nil, fmt.Errorf("%wfailed to close x5u response: %w", joseerror.ErrApplicationError, err)
-		}
-		if int64(len(responseBytes)) > httputils.MaxBodyBytes {
-			return nil, fmt.Errorf("%wx5u response exceeded the %d byte limit", joseerror.ErrApplicationError, httputils.MaxBodyBytes)
+			return nil, err
 		}
 
 		certificates, err := validateCertificateChain(responseBytes, roots)

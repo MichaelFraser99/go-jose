@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -17,14 +18,47 @@ import (
 )
 
 func TestVerifyCompactSerialization_AStallingRemoteHeaderCannotHoldVerificationOpen(t *testing.T) {
+	bounds := map[string]struct {
+		fetchTimeout time.Duration
+		ctxTimeout   time.Duration
+		reference    string
+	}{
+		"bounded by FetchTimeout":     {fetchTimeout: 100 * time.Millisecond, ctxTimeout: time.Hour, reference: "JoseOptions.FetchTimeout"},
+		"bounded by the caller's ctx": {fetchTimeout: time.Hour, ctxTimeout: 100 * time.Millisecond, reference: "the ctx passed to VerifyCompactSerialization"},
+	}
+
 	for _, header := range []string{"jku", "x5u"} {
-		t.Run(header, func(t *testing.T) {
-			stallingRemoteHeader(t, header)
-		})
+		for name, bound := range bounds {
+			t.Run(header+", "+name, func(t *testing.T) {
+				token, client := stallingRemoteHeader(t, header)
+				ctx, cancel := context.WithTimeout(context.Background(), bound.ctxTimeout)
+				defer cancel()
+
+				start := time.Now()
+				_, _, err := VerifyCompactSerialization(ctx, token, nil, &model.JoseOptions{
+					UseTokenProvidedKeys: true,
+					HttpClient:           client,
+					FetchTimeout:         bound.fetchTimeout,
+					X509Roots:            x509.NewCertPool(),
+				})
+				elapsed := time.Since(start)
+
+				if err == nil {
+					t.Fatalf("a %s resource that never finishes arriving yields no key, so the token must not verify", header)
+				}
+				if elapsed > 2*time.Second {
+					t.Errorf("[%s] a peer-chosen %s must not hold verification open past the bound, took %v", bound.reference, header, elapsed)
+				}
+				if !errors.Is(err, context.DeadlineExceeded) {
+					t.Errorf("[%s] a fetch cut off by its bound must match context.DeadlineExceeded, got %v", bound.reference, err)
+				}
+			})
+		}
 	}
 }
 
-func stallingRemoteHeader(t *testing.T, header string) {
+func stallingRemoteHeader(t *testing.T, header string) (string, *http.Client) {
+	t.Helper()
 	release := make(chan struct{})
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -37,10 +71,10 @@ func stallingRemoteHeader(t *testing.T, header string) {
 		case <-release:
 		}
 	}))
-	defer func() {
+	t.Cleanup(func() {
 		close(release)
 		server.Close()
-	}()
+	})
 
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -59,24 +93,8 @@ func stallingRemoteHeader(t *testing.T, header string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	token := input + "." + base64.RawURLEncoding.EncodeToString(signature)
 
 	client := server.Client()
 	client.Timeout = 0
-
-	start := time.Now()
-	_, _, err = VerifyCompactSerialization(context.Background(), token, nil, &model.JoseOptions{
-		UseTokenProvidedKeys: true,
-		HttpClient:           client,
-		FetchTimeout:         100 * time.Millisecond,
-		X509Roots:            x509.NewCertPool(),
-	})
-	elapsed := time.Since(start)
-
-	if err == nil {
-		t.Fatalf("a %s resource that never finishes arriving yields no key, so the token must not verify", header)
-	}
-	if elapsed > 2*time.Second {
-		t.Errorf("[JoseOptions.FetchTimeout] a peer-chosen %s must not hold verification open past the fetch timeout, took %v", header, elapsed)
-	}
+	return input + "." + base64.RawURLEncoding.EncodeToString(signature), client
 }
