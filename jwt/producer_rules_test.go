@@ -191,6 +191,21 @@ func TestNew_RefusesAHeadThatBreaksAJwsProducerRule(t *testing.T) {
 		{name: "a crit of null", head: map[string]any{"crit": nil}, want: joseerror.ErrMalformedClaim, clause: "RFC 7515 4.1.11"},
 		{name: "an empty crit beside a number beyond the float64 range", head: map[string]any{"n": json.Number("1e400"), "crit": []any{}}, want: joseerror.ErrMalformedClaim, clause: "RFC 7515 4.1.11"},
 		{name: "a b64 of false beside a number beyond the float64 range", head: map[string]any{"n": json.Number("-1e400"), "b64": false}, want: joseerror.ErrMissingCriticalClaim, clause: "RFC 7797 3"},
+		{name: "a kid that is a number", head: map[string]any{"kid": 5}, want: joseerror.ErrMalformedClaim, clause: "RFC 7515 4.1.4"},
+		{name: "a kid that is a number beyond the float64 range", head: map[string]any{"kid": json.Number("1e400")}, want: joseerror.ErrMalformedClaim, clause: "RFC 7515 4.1.4"},
+		{name: "an x5t that is a number", head: map[string]any{"x5t": 5}, want: joseerror.ErrMalformedClaim, clause: "RFC 7515 4.1.7"},
+		{name: "an x5t that is not base64url", head: map[string]any{"x5t": "a+b/"}, want: joseerror.ErrMalformedClaim, clause: "RFC 7515 4.1.7"},
+		{name: "an x5t#S256 that is not base64url", head: map[string]any{"x5t#S256": "a+b/"}, want: joseerror.ErrMalformedClaim, clause: "RFC 7515 4.1.8"},
+		{name: "a jku over plain http", head: map[string]any{"jku": "http://example.com/jwks"}, want: joseerror.ErrMalformedClaim, clause: "RFC 7515 4.1.2"},
+		{name: "an x5u over plain http", head: map[string]any{"x5u": "http://example.com/chain.pem"}, want: joseerror.ErrMalformedClaim, clause: "RFC 7515 4.1.5"},
+		{name: "an x5c that is a string", head: map[string]any{"x5c": "abc"}, want: joseerror.ErrMalformedClaim, clause: "RFC 7515 4.1.6"},
+		{name: "an x5c whose entry is not a DER certificate", head: map[string]any{"x5c": []string{"abc"}}, want: joseerror.ErrMalformedClaim, clause: "RFC 7515 4.1.6"},
+		{name: "a jwk that is a string", head: map[string]any{"jwk": "x"}, want: joseerror.ErrMalformedClaim, clause: "RFC 7515 4.1.3"},
+		{name: "a typ that is a number", head: map[string]any{"typ": 5}, want: joseerror.ErrMalformedClaim, clause: "RFC 7515 4.1.9"},
+		{name: "a cty that is a number", head: map[string]any{"cty": 5}, want: joseerror.ErrMalformedClaim, clause: "RFC 7515 4.1.10"},
+		{name: "a b64 that is the string false", head: map[string]any{"b64": "false", "crit": []string{"b64"}}, want: joseerror.ErrMalformedClaim, clause: "RFC 7797 3"},
+		{name: "a b64 of true without crit", head: map[string]any{"b64": true}, want: joseerror.ErrMissingCriticalClaim, clause: "RFC 7797 6"},
+		{name: "a b64 of true with a crit that does not name it", head: map[string]any{"b64": true, "exp": 1, "crit": []string{"exp"}}, want: joseerror.ErrMissingCriticalClaim, clause: "RFC 7797 6"},
 		{name: "a b64 of false", head: map[string]any{"b64": false, "crit": []string{"b64"}}, want: joseerror.ErrMissingCriticalClaim, clause: "RFC 7797 3"},
 		{name: "a b64 of false without crit", head: map[string]any{"b64": false}, want: joseerror.ErrMissingCriticalClaim, clause: "RFC 7797 3"},
 	}
@@ -226,14 +241,16 @@ func TestNew_SignsAHeadThatKeepsTheJwsProducerRules(t *testing.T) {
 	}{
 		{name: "a crit naming one extension the header holds", head: map[string]any{"exp": 1, "crit": []string{"exp"}}, understood: []string{"exp"}},
 		{name: "a crit naming two extensions the header holds", head: map[string]any{"exp": 1, "nbf": 0, "crit": []any{"exp", "nbf"}}, understood: []string{"exp", "nbf"}},
-		{name: "a b64 of true", head: map[string]any{"b64": true}},
+		{name: "a b64 of true named in crit", head: map[string]any{"b64": true, "crit": []string{"b64"}}, understood: []string{"b64"}},
+		{name: "a b64 of true named in crit beside another extension", head: map[string]any{"b64": true, "exp": 1, "crit": []string{"exp", "b64"}}, understood: []string{"exp", "b64"}},
+		{name: "string media types and a kid", head: map[string]any{"typ": "JWT", "cty": "example", "kid": "k1"}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			token, err := New(signer, tt.head, map[string]any{"sub": "a"}, Opts{})
 			if err != nil {
-				t.Fatalf("[RFC 7515 4.1.11, RFC 7797 3] New refused a header that keeps every producer rule: %s", err)
+				t.Fatalf("[RFC 7515 4.1, RFC 7797 3 and 6] New refused a header that keeps every producer rule: %s", err)
 			}
 			if _, _, err := Validate(context.Background(), *token, newTestRetriever(signer.Public()), &model.JoseOptions{UnderstoodCriticalHeaders: tt.understood}); err != nil {
 				t.Errorf("[RFC 7515 5.2] the token does not verify: %s", err)

@@ -15,7 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
-	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
+	"github.com/MichaelFraser99/go-jose/internal/jose/header"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
 	"github.com/MichaelFraser99/go-jose/jws"
@@ -23,6 +23,7 @@ import (
 	"maps"
 	"math/big"
 	"reflect"
+	"slices"
 	"strings"
 )
 
@@ -40,11 +41,14 @@ type Opts struct {
 // ErrUnsupportedAlgorithm. A nil head is an empty header and a nil body an empty claims
 // set. A nil signer, or a nil pointer, is refused with ErrInvalidPrivateKey.
 //
-// The header must keep the producer rules of RFC 7515 section 4.1.11: a "crit" that is
-// not a non-empty array of distinct names, each present in the header and none defined
-// by RFC 7515, is refused with ErrMalformedClaim, or ErrMissingCriticalClaim for a name
-// the header does not hold. A "b64" of false is refused with ErrMissingCriticalClaim:
-// RFC 7797 section 3 then signs the payload unencoded, and New always encodes it.
+// The header must keep the rules Validate applies to the parameters RFC 7515 section 4.1
+// registers, with the same errors: "jku" and "x5u" HTTPS URLs, "kid", "typ" and "cty"
+// strings, "jwk" an object, "x5c" base64 DER certificates, "x5t" and "x5t#S256"
+// base64url, and "crit" a non-empty array of distinct names that the header holds and
+// RFC 7515 does not define. A "b64" of false is refused with ErrMissingCriticalClaim:
+// RFC 7797 section 3 then signs the payload unencoded, and New always encodes it. A
+// "b64" that "crit" does not name is refused with ErrMissingCriticalClaim, as RFC 7797
+// section 6 requires it there.
 //
 // A model.Signer is called in JOSE mode, with the whole JWS Signing Input.
 //
@@ -173,15 +177,17 @@ func standardLibrarySigner(signer crypto.Signer, alg jwa.Algorithm) (crypto.Sign
 }
 
 func checkProducerHeader(headBytes []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(headBytes))
+	decoder.UseNumber()
 	var emitted map[string]any
-	_ = json.Unmarshal(headBytes, &emitted)
-	if _, present := emitted["crit"]; present {
-		if _, err := jsonutils.RetrieveClaim[[]any](emitted, "crit", jsonutils.ValidateNonEmptySlice, jsonutils.ValidateNoDuplicateSliceValues, jsonutils.ValidateNoBannedCriticalValues, jsonutils.ValidateCriticalValuesPresent); err != nil {
-			return err
-		}
+	_ = decoder.Decode(&emitted)
+	if err := header.CheckHeaderShape(emitted); err != nil {
+		return err
 	}
-	if emitted["b64"] == false {
-		return fmt.Errorf("%wthe 'b64' header is false, but the payload is always base64url-encoded", joseerror.ErrMissingCriticalClaim)
+	if _, present := emitted["b64"]; present {
+		if critical, _ := emitted["crit"].([]any); !slices.Contains(critical, any("b64")) {
+			return fmt.Errorf("%wthe 'b64' header is present, so 'crit' must name it", joseerror.ErrMissingCriticalClaim)
+		}
 	}
 	return nil
 }
