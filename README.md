@@ -249,6 +249,10 @@ func jwk.PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error)
 
 The value returned is a pointer to the respective key, such as `*ecdsa.PublicKey` or `*rsa.PublicKey`.
 
+An `OKP` jwk is read only when its `crv` is `Ed25519`, the one OKP subtype this library supports. RFC 8037 section 2 requires `crv`, so a jwk without a string `crv` is refused as an invalid key. Any other subtype is refused with `ErrUnsupportedAlgorithm`. Each of `x` and `d` must be 32 octets. For a private key, `x` must be the public key of `d`.
+
+**This is a breaking change for OKP keys.** Earlier versions ignored the value of `crv`, so an `X25519` or `Ed448` key was returned as an Ed25519 key. They also accepted any length of `x` and `d`, and did not compare `x` with `d`. A key that those versions read can now be refused.
+
 ## JWTs
 This library includes two methods for jwt handling
 
@@ -343,6 +347,7 @@ if errors.Is(err, joseerror.ErrInvalidSignature) {
 
 - An HMAC secret must be at least the hash output size, and a validator for an HMAC algorithm can only be built from a signer.
 - An Ed25519 jwk now carries a `kid`.
+- An `OKP` jwk is read only when it is a well-formed Ed25519 key.
 - `JoseOptions.IgnoreTokenProvidedKeys` replaces `UseTokenProvidedKeys`, inverted so the zero value is the documented default.
 - A `crit` header naming an extension you have not declared in `UnderstoodCriticalHeaders` is refused.
 - `x5c` and `x5u` contribute no key unless `JoseOptions.X509Roots` is configured.

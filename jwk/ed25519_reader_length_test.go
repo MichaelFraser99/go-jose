@@ -24,6 +24,9 @@ func ed25519Jwk(t *testing.T, xLen int, dLen int) map[string]any {
 			t.Fatal(err)
 		}
 		jwk["d"] = base64.RawURLEncoding.EncodeToString(d)
+		if dLen == ed25519.SeedSize && xLen == ed25519.PublicKeySize {
+			jwk["x"] = base64.RawURLEncoding.EncodeToString(ed25519.NewKeyFromSeed(d)[ed25519.SeedSize:])
+		}
 	}
 	return jwk
 }
