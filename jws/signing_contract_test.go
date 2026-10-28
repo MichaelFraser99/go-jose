@@ -3,8 +3,11 @@ package jws
 import (
 	"bytes"
 	"crypto"
+	_ "crypto/md5"
 	"crypto/rand"
+	_ "crypto/sha1"
 	"crypto/sha256"
+	_ "crypto/sha512"
 	"errors"
 	"testing"
 
@@ -96,6 +99,24 @@ func TestSign_EveryAlgorithmHonoursTheDocumentedSigningContract(t *testing.T) {
 		})
 
 		if !test.preHashedMode {
+			for _, foreign := range []crypto.Hash{crypto.MD5, crypto.SHA1, crypto.SHA224, crypto.SHA256, crypto.SHA384, crypto.SHA512, crypto.SHA512_224, crypto.SHA512_256, crypto.SHA3_256, crypto.SHA3_512, crypto.BLAKE2b_256} {
+				if foreign == test.hash {
+					continue
+				}
+				t.Run(alg.String()+", a "+foreign.String()+" digest", func(t *testing.T) {
+					signer := contractSigner(t, alg)
+					digest := make([]byte, foreign.Size())
+					if foreign.Available() {
+						hashed := foreign.New()
+						hashed.Write(input)
+						digest = hashed.Sum(nil)
+					}
+					_, err := signer.Sign(rand.Reader, digest, model.SignerOpts{Hash: foreign})
+					if !errors.Is(err, joseerror.ErrSigningError) {
+						t.Errorf("[RFC 7518 3.2] an hmac is computed over the signing input whole, so %s must refuse a %s digest with the signing error class, got %v", alg, foreign, err)
+					}
+				})
+			}
 			continue
 		}
 
