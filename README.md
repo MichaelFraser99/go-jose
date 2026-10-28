@@ -266,6 +266,10 @@ func jwk.PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error)
 
 The value returned is a pointer to the respective key, such as `*ecdsa.PublicKey` or `*rsa.PublicKey`.
 
+An `OKP` jwk is read only when its `crv` is `Ed25519`, the one OKP subtype this library supports. RFC 8037 section 2 requires `crv`, so a jwk without a string `crv` is refused as an invalid key. Any other subtype is refused with `ErrUnsupportedAlgorithm`. Each of `x` and `d` must be 32 octets, the key sizes RFC 8032 section 5.1.5 sets for Ed25519. For a private key, `x` must be the public key of `d`.
+
+**This is a breaking change for OKP keys.** Earlier versions ignored the value of `crv`, so an `X25519` or `Ed448` key was returned as an Ed25519 key. They also accepted any length of `x` and `d`, and did not compare `x` with `d`. A key that those versions read can now be refused.
+
 ## JWTs
 This library includes two methods for jwt handling
 
@@ -313,7 +317,7 @@ Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 | `ErrMissingCriticalClaim` | A header named in `crit` is absent, or names an extension this library does not understand |
 | `ErrNoKeyIdentifierMatch` | No key could be selected. The `kid` matches nothing, a `jku` set holds no usable key that matches the header, a certificate chain does not reach a configured root, or an `x5t` thumbprint does not match the chain |
 | `ErrKeystoreError` | A `model.Jwks` lookup or addition failed, or the configuration needed to use a key source is absent, such as `X509Roots` for a certificate chain |
-| `ErrApplicationError` | Key material a header named could not be obtained or decoded. Covers a failed `jku` or `x5u` fetch, and a local decode of what one returned |
+| `ErrApplicationError` | Key material a header named could not be obtained, decoded or used. Covers a failed `jku` or `x5u` fetch, a local decode of what one returned, and an inline `jwk` of a key type or curve this library does not support |
 | `ErrMalformedToken` | The token is not a well formed JOSE object |
 
 Each sentinel carries a prefix terminated by `": "`, so wrap one with `%w` immediately followed by the rest of the message and no space:
@@ -360,6 +364,7 @@ if errors.Is(err, joseerror.ErrInvalidSignature) {
 
 - An HMAC secret must be at least the hash output size, and a validator for an HMAC algorithm can only be built from a signer.
 - An Ed25519 jwk now carries a `kid`.
+- An `OKP` jwk is read only when it is a well-formed Ed25519 key.
 - `PublicJwk` and `PrivateJwk` refuse a key they cannot encode, rather than panic or produce a malformed jwk.
 - `JoseOptions.IgnoreTokenProvidedKeys` replaces `UseTokenProvidedKeys`, inverted so the zero value is the documented default.
 - A `crit` header naming an extension you have not declared in `UnderstoodCriticalHeaders` is refused.

@@ -1,6 +1,7 @@
 package common
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
@@ -199,8 +200,9 @@ func JwkFromECDSAPrivateKey(privateKey *ecdsa.PrivateKey) (map[string]any, error
 
 // JwkFromEdDSAPublicKey builds the jwk of an Ed25519 public key.
 //
-// RFC 8037 section 2 fixes "x" at 32 octets, so a key of any other length is
-// refused rather than encoded into a buffer sized for 32.
+// RFC 8032 section 5.1.5 makes an Ed25519 public key 32 octets, and RFC 8037
+// section 2 carries it as "x", so a key of any other length is refused rather
+// than encoded into a buffer sized for 32.
 func JwkFromEdDSAPublicKey(publicKey *ed25519.PublicKey) (map[string]any, error) {
 	if publicKey == nil {
 		return nil, fmt.Errorf("%wan Ed25519 public key is %d bytes, got none", jose_errors.ErrInvalidPublicKey, ed25519.PublicKeySize)
@@ -224,8 +226,9 @@ func JwkFromEdDSAPublicKey(publicKey *ed25519.PublicKey) (map[string]any, error)
 
 // JwkFromEdDSAPrivateKey builds the jwk of an Ed25519 private key.
 //
-// RFC 8037 section 2 fixes "d" at 32 octets and "x" at the 32 octet public key,
-// which is the second half of an ed25519.PrivateKey.
+// RFC 8032 section 5.1.5 makes an Ed25519 private key 32 octets and its public
+// key 32 octets. RFC 8037 section 2 carries them as "d" and "x", the two halves
+// of an ed25519.PrivateKey.
 func JwkFromEdDSAPrivateKey(privateKey *ed25519.PrivateKey) (map[string]any, error) {
 	if privateKey == nil {
 		return nil, fmt.Errorf("%wan Ed25519 private key is %d bytes, got none", jose_errors.ErrInvalidPrivateKey, ed25519.PrivateKeySize)
@@ -252,20 +255,43 @@ func JwkFromEdDSAPrivateKey(privateKey *ed25519.PrivateKey) (map[string]any, err
 	return jwk, nil
 }
 
+func requireEd25519Subtype(jwk map[string]any, class error) error {
+	raw, present := jwk["crv"]
+	if !present {
+		return fmt.Errorf("%wan OKP jwk must carry a 'crv' naming its subtype", class)
+	}
+	crv, ok := raw.(string)
+	if !ok {
+		return fmt.Errorf("%wthe 'crv' claim must be a string", class)
+	}
+	if crv != "Ed25519" {
+		return fmt.Errorf("%wEd25519 is the only OKP subtype supported", jose_errors.ErrUnsupportedAlgorithm)
+	}
+	return nil
+}
+
 func EdDSAPublicKeyFromJwk(jwk map[string]any) (*ed25519.PublicKey, error) {
+	if err := requireEd25519Subtype(jwk, jose_errors.ErrInvalidPublicKey); err != nil {
+		return nil, err
+	}
+
 	xBytes, err := jsonutils.ExtractAndDecodeBase64urlString(jwk, "x")
 	if err != nil {
 		return nil, fmt.Errorf("error extracting 'x' parameter from jwk: %w", err)
 	}
 
-	if _, present := jwk["crv"]; !present { //don't care the value at this stage - the spec is extensible and the curve depends on use
-		return nil, fmt.Errorf("no 'crv' claim present in jwk")
+	if len(xBytes) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf("%wthe 'x' parameter of an Ed25519 jwk is %d bytes, got %d", jose_errors.ErrInvalidPublicKey, ed25519.PublicKeySize, len(xBytes))
 	}
 
 	return model.Pointer(ed25519.PublicKey(xBytes)), nil
 }
 
 func EdDSAPrivateKeyFromJwk(jwk map[string]any) (*ed25519.PrivateKey, error) {
+	if err := requireEd25519Subtype(jwk, jose_errors.ErrInvalidPrivateKey); err != nil {
+		return nil, err
+	}
+
 	xBytes, err := jsonutils.ExtractAndDecodeBase64urlString(jwk, "x")
 	if err != nil {
 		return nil, fmt.Errorf("error extracting 'x' parameter from jwk: %w", err)
@@ -276,11 +302,14 @@ func EdDSAPrivateKeyFromJwk(jwk map[string]any) (*ed25519.PrivateKey, error) {
 		return nil, fmt.Errorf("error extracting 'd' parameter from jwk: %w", err)
 	}
 
-	if _, present := jwk["crv"]; !present { //don't care the value at this stage - the spec is extensible and the curve depends on use
-		return nil, fmt.Errorf("no 'crv' claim present in jwk")
+	if len(dBytes) != ed25519.SeedSize {
+		return nil, fmt.Errorf("%wthe 'd' parameter of an Ed25519 jwk is %d bytes, got %d", jose_errors.ErrInvalidPrivateKey, ed25519.SeedSize, len(dBytes))
 	}
-
-	return model.Pointer(ed25519.PrivateKey(append(dBytes, xBytes...))), nil
+	private := ed25519.NewKeyFromSeed(dBytes)
+	if !bytes.Equal(private[ed25519.SeedSize:], xBytes) {
+		return nil, fmt.Errorf("%wthe 'x' parameter of an Ed25519 jwk is not the public key of its 'd'", jose_errors.ErrInvalidPrivateKey)
+	}
+	return model.Pointer(private), nil
 }
 
 func RSAPrivateKeyFromJwk(jwk map[string]any) (*rsa.PrivateKey, error) {
