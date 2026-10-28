@@ -3,13 +3,49 @@ package jsonutils
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
 	"net/url"
 	"reflect"
 	"slices"
+	"strconv"
+	"unicode/utf8"
 )
+
+// MaxEchoedRunes is how many runes of a peer's value QuoteBounded keeps.
+const MaxEchoedRunes = 64
+
+// QuoteBounded quotes a peer's value for an error message, keeping at most
+// MaxEchoedRunes runes and marking a cut with a trailing "...".
+func QuoteBounded(value string) string {
+	runes := 0
+	for i := range value {
+		if runes == MaxEchoedRunes {
+			return strconv.Quote(value[:i]) + "..."
+		}
+		runes++
+	}
+	return strconv.Quote(value)
+}
+
+// DecodeBase64url decodes Base64url Encoding as RFC 7515 section 2 defines it:
+// the RFC 4648 section 5 alphabet with no padding and no line breaks, whitespace
+// or other characters. Non-zero pad bits are refused, as RFC 4648 section 3.5
+// permits, so each octet sequence has exactly one accepted encoding.
+func DecodeBase64url(encoded string) ([]byte, error) {
+	for i := 0; i < len(encoded); i++ {
+		if !isBase64urlCharacter(encoded[i]) {
+			return nil, fmt.Errorf("the character at offset %d is not in the base64url alphabet", i)
+		}
+	}
+	return base64.RawURLEncoding.Strict().DecodeString(encoded)
+}
+
+func isBase64urlCharacter(c byte) bool {
+	return 'A' <= c && c <= 'Z' || 'a' <= c && c <= 'z' || '0' <= c && c <= '9' || c == '-' || c == '_'
+}
 
 type Validator[T any] func(header map[string]any, retrievedValue T) error
 
@@ -21,7 +57,7 @@ func KeyPresent(m map[string]any, key string) bool {
 func ExtractAndDecodeBase64urlString(m map[string]any, key string) ([]byte, error) {
 	if v, present := m[key]; present {
 		if vString, ok := v.(string); ok {
-			vBytes, err := base64.RawURLEncoding.DecodeString(vString)
+			vBytes, err := DecodeBase64url(vString)
 			if err != nil {
 				return nil, fmt.Errorf("%winvalid base64url in %q claim", joseerror.ErrMalformedClaim, key)
 			}
@@ -34,15 +70,30 @@ func ExtractAndDecodeBase64urlString(m map[string]any, key string) ([]byte, erro
 	}
 }
 
+// DecodeBase64urlMap decodes a base64url segment with DecodeBase64url and parses
+// the octets with DecodeJSONObject.
 func DecodeBase64urlMap(b64u string) (map[string]any, error) {
-	decodedBytes, err := base64.RawURLEncoding.DecodeString(b64u)
+	decodedBytes, err := DecodeBase64url(b64u)
 	if err != nil {
 		return nil, err
 	}
+	return DecodeJSONObject(decodedBytes)
+}
+
+// DecodeJSONObject parses octets that RFC 7515 section 5.2 step 3 and RFC 7519
+// section 7.2 step 10 require to be a UTF-8 representation of a JSON object, so
+// invalid UTF-8 (RFC 8725 section 3.7) and null are refused.
+func DecodeJSONObject(decodedBytes []byte) (map[string]any, error) {
+	if !utf8.Valid(decodedBytes) {
+		return nil, errors.New("the decoded octets are not valid UTF-8")
+	}
 
 	var m map[string]any
-	if err = json.Unmarshal(decodedBytes, &m); err != nil {
+	if err := json.Unmarshal(decodedBytes, &m); err != nil {
 		return nil, err
+	}
+	if m == nil {
+		return nil, errors.New("the decoded JSON is null, not an object")
 	}
 
 	return m, nil
@@ -71,7 +122,7 @@ var (
 	ValidateAlg = func(jsonInput map[string]any, retrievedClaimValue string) error {
 		parsedAlg := jwa.GetAlgorithm(retrievedClaimValue)
 		if parsedAlg == jwa.Unknown {
-			return fmt.Errorf("%w'%s' is not a supported algorithm", joseerror.ErrUnsupportedAlgorithm, retrievedClaimValue)
+			return fmt.Errorf("%w%s is not a supported algorithm", joseerror.ErrUnsupportedAlgorithm, QuoteBounded(retrievedClaimValue))
 		}
 		return nil
 	}
@@ -79,10 +130,10 @@ var (
 	ValidateHttpsUrlClaim = func(jsonInput map[string]any, retrievedClaimValue string) error {
 		parsedUrl, err := url.Parse(retrievedClaimValue)
 		if err != nil {
-			return fmt.Errorf("%w'%s' is not a valid URL", joseerror.ErrMalformedClaim, retrievedClaimValue)
+			return fmt.Errorf("%w%s is not a valid URL", joseerror.ErrMalformedClaim, QuoteBounded(retrievedClaimValue))
 		}
 		if parsedUrl.Scheme != "https" {
-			return fmt.Errorf("%w'%s' is not a valid HTTPS URL", joseerror.ErrMalformedClaim, retrievedClaimValue)
+			return fmt.Errorf("%w%s is not a valid HTTPS URL", joseerror.ErrMalformedClaim, QuoteBounded(retrievedClaimValue))
 		}
 		return nil
 	}
@@ -91,9 +142,9 @@ var (
 		if retrievedClaimValue == "" {
 			return fmt.Errorf("%wthe claim's value is an empty string", joseerror.ErrMalformedClaim)
 		}
-		_, err := base64.RawURLEncoding.DecodeString(retrievedClaimValue)
+		_, err := DecodeBase64url(retrievedClaimValue)
 		if err != nil {
-			return fmt.Errorf("%w'%s' is not valid base64url", joseerror.ErrMalformedClaim, retrievedClaimValue)
+			return fmt.Errorf("%w%s is not valid base64url", joseerror.ErrMalformedClaim, QuoteBounded(retrievedClaimValue))
 		}
 		return nil
 	}
@@ -185,7 +236,7 @@ func UnderstoodCriticalValues(understood []string) Validator[[]any] {
 				return fmt.Errorf("%wthe 'crit' array contains one or more non-string values", joseerror.ErrMalformedClaim)
 			}
 			if !slices.Contains(understood, name) {
-				return fmt.Errorf("%wthe 'crit' array names %q, which this recipient does not understand", joseerror.ErrMissingCriticalClaim, name)
+				return fmt.Errorf("%wthe 'crit' array names %s, which this recipient does not understand", joseerror.ErrMissingCriticalClaim, QuoteBounded(name))
 			}
 		}
 		return nil

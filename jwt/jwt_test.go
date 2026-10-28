@@ -1242,7 +1242,7 @@ func TestValidate(t *testing.T) {
 				if err == nil {
 					t.Fatal("an error should be thrown")
 				}
-				if err.Error() != "failed to verify jws compact serialization: malformed token: error validating header: unsupported algorithm: 'foobar' is not a supported algorithm" {
+				if err.Error() != "failed to verify jws compact serialization: malformed token: error validating header: unsupported algorithm: \"foobar\" is not a supported algorithm" {
 					t.Errorf("wrong error returned: %s", err.Error())
 				}
 			},

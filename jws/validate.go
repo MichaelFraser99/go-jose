@@ -28,42 +28,35 @@ import (
 //
 // publicKey - `crypto.PublicKey` implementation to be used by the validator
 func GetValidator(alg jwa.Algorithm, publicKey crypto.PublicKey) (model.Validator, error) {
-	var v model.Validator
-	var err error
-	switch alg {
-	case jwa.ES256:
-		v, err = es256.NewValidator(publicKey)
-	case jwa.ES384:
-		v, err = es384.NewValidator(publicKey)
-	case jwa.ES512:
-		v, err = es512.NewValidator(publicKey)
-	case jwa.RS256:
-		v, err = rs256.NewValidator(publicKey)
-	case jwa.RS384:
-		v, err = rs384.NewValidator(publicKey)
-	case jwa.RS512:
-		v, err = rs512.NewValidator(publicKey)
-	case jwa.PS256:
-		v, err = ps256.NewValidator(publicKey)
-	case jwa.PS384:
-		v, err = ps384.NewValidator(publicKey)
-	case jwa.PS512:
-		v, err = ps512.NewValidator(publicKey)
-	case jwa.HS256:
-		v, err = hs256.NewValidator(publicKey)
-	case jwa.HS384:
-		v, err = hs384.NewValidator(publicKey)
-	case jwa.HS512:
-		v, err = hs512.NewValidator(publicKey)
-	case jwa.EdDSA, jwa.Unknown:
-		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg.String())
-	default:
+	construct, ok := validatorConstructors[alg]
+	if !ok {
 		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg.String())
 	}
+	v, err := construct(publicKey)
 	if err != nil {
 		return nil, err
 	}
 	return v, nil
+}
+
+var validatorConstructors = map[jwa.Algorithm]func(crypto.PublicKey) (model.Validator, error){
+	jwa.ES256: func(k crypto.PublicKey) (model.Validator, error) { return es256.NewValidator(k) },
+	jwa.ES384: func(k crypto.PublicKey) (model.Validator, error) { return es384.NewValidator(k) },
+	jwa.ES512: func(k crypto.PublicKey) (model.Validator, error) { return es512.NewValidator(k) },
+	jwa.RS256: func(k crypto.PublicKey) (model.Validator, error) { return rs256.NewValidator(k) },
+	jwa.RS384: func(k crypto.PublicKey) (model.Validator, error) { return rs384.NewValidator(k) },
+	jwa.RS512: func(k crypto.PublicKey) (model.Validator, error) { return rs512.NewValidator(k) },
+	jwa.PS256: func(k crypto.PublicKey) (model.Validator, error) { return ps256.NewValidator(k) },
+	jwa.PS384: func(k crypto.PublicKey) (model.Validator, error) { return ps384.NewValidator(k) },
+	jwa.PS512: func(k crypto.PublicKey) (model.Validator, error) { return ps512.NewValidator(k) },
+	jwa.HS256: func(k crypto.PublicKey) (model.Validator, error) { return hs256.NewValidator(k) },
+	jwa.HS384: func(k crypto.PublicKey) (model.Validator, error) { return hs384.NewValidator(k) },
+	jwa.HS512: func(k crypto.PublicKey) (model.Validator, error) { return hs512.NewValidator(k) },
+}
+
+func hasValidator(alg jwa.Algorithm) bool {
+	_, ok := validatorConstructors[alg]
+	return ok
 }
 
 // GetValidatorFromJwk
