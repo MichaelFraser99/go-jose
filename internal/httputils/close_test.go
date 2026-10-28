@@ -85,6 +85,36 @@ func TestReadBody_ClosesTheBodyWhateverHappens(t *testing.T) {
 	}
 }
 
+func TestReadBody_ABodyThatExactlyFillsTheCapIsReadAndOneByteMoreIsRefused(t *testing.T) {
+	tests := map[string]struct {
+		size    int64
+		refused bool
+	}{
+		"exactly MaxBodyBytes":  {size: MaxBodyBytes},
+		"one byte past the cap": {size: MaxBodyBytes + 1, refused: true},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			closed := false
+			body := closeRecordingBody{Reader: io.LimitReader(endlessReader{}, test.size), closed: &closed}
+			read, err := ReadBody(&http.Response{Body: body}, "jku")
+			if test.refused {
+				if !errors.Is(err, joseerror.ErrApplicationError) {
+					t.Errorf("[MaxBodyBytes] a body past the cap must be refused with ErrApplicationError, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("[MaxBodyBytes] a body that exactly fills the cap is within it, got %v", err)
+			}
+			if int64(len(read)) != test.size {
+				t.Errorf("[MaxBodyBytes] expected all %d bytes, got %d", test.size, len(read))
+			}
+		})
+	}
+}
+
 func TestReadBody_RefusesAResponseWithNoBody(t *testing.T) {
 	_, err := ReadBody(&http.Response{}, "jku")
 	if err == nil {
