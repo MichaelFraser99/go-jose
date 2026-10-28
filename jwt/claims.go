@@ -68,6 +68,13 @@ func validateClaims(body map[string]any, opts *model.JoseOptions) error {
 	return fmt.Errorf("%wthe 'aud' claim does not name this recipient", joseerror.ErrAudienceMismatch)
 }
 
+func validateOptions(opts *model.JoseOptions) error {
+	if opts != nil && slices.Contains(opts.ExpectedAudience, "") {
+		return fmt.Errorf("%wExpectedAudience holds an empty string, which names no recipient", joseerror.ErrInvalidOptions)
+	}
+	return nil
+}
+
 func numericDate(body map[string]any, name string, absent float64) (float64, error) {
 	value, present := body[name]
 	if !present {

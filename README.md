@@ -316,7 +316,7 @@ The token's `alg` header always names the algorithm that made the signature, as 
 
 A `crypto.Signer` from elsewhere, such as an `*ecdsa.PrivateKey`, an `*rsa.PrivateKey`, an `ed25519.PrivateKey` or a KMS signer, is called as Go's `crypto.Signer` contract defines:
 
-- For ES256, ES384 and ES512, `New` converts the ASN.1 DER signature the signer returns to the fixed-length R||S form of RFC 7518 section 3.4. The key must be on P-256, P-384 or P-521 respectively. Output that is not DER is refused with `ErrSigningError`.
+- For ES256, ES384 and ES512, `New` converts the ASN.1 DER signature the signer returns to the fixed-length R||S form of RFC 7518 section 3.4. The key must be on P-256, P-384 or P-521 respectively. Output that is not DER, or an R or S outside 1 to n-1 (FIPS 186-5 section 6.4.1), is refused with `ErrSigningError`.
 - For PS256, PS384 and PS512, `New` asks for RSASSA-PSS with a salt the size of the hash, as RFC 7518 section 3.5 requires. For RS256, RS384 and RS512 it asks for RSASSA-PKCS1-v1_5.
 - For EdDSA, the key must be Ed25519.
 - A key that does not suit the algorithm, and any HS algorithm, is refused with `ErrInvalidPrivateKey`.
@@ -352,7 +352,11 @@ To check the audience, name this recipient in `JoseOptions.ExpectedAudience`:
 opts := &model.JoseOptions{ExpectedAudience: []string{"https://rp.example"}}
 ```
 
-`aud` must then hold a value equal to one of these, compared exactly and case-sensitively, as RFC 7519 section 4.1.3 requires. A token with no `aud` is refused with `ErrMissingClaim`, as RFC 8725 section 3.9 requires. A token naming only other recipients is refused with `ErrAudienceMismatch`. With `ExpectedAudience` unset, `aud` is not compared, though its type is still checked. RFC 8725 section 3.9 requires the check whenever one issuer issues tokens for more than one audience, so set it unless every token your issuer signs is meant for you.
+`aud` must then hold a value equal to one of these, compared exactly and case-sensitively, as RFC 7519 section 4.1.3 requires. A token with no `aud` is refused with `ErrMissingClaim`, as RFC 8725 section 3.9 requires. A token naming only other recipients is refused with `ErrAudienceMismatch`.
+
+An empty string names no recipient. If `ExpectedAudience` holds one, `Validate` refuses every token with `ErrInvalidOptions`. This catches a value read from an unset environment variable, which would otherwise match a token whose `aud` is `""`.
+
+**With `ExpectedAudience` unset, this library does not meet RFC 7519 section 4.1.3.** That section says: "If the principal processing the claim does not identify itself with a value in the "aud" claim when this claim is present, then the JWT MUST be rejected." By default, `Validate` checks only the type of `aud` and accepts a token whatever it names. Set `ExpectedAudience` to meet that MUST. RFC 8725 section 3.9 also requires the check whenever one issuer issues tokens for more than one audience.
 
 ## Errors
 Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
@@ -375,6 +379,7 @@ Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 | `ErrExpired` | The current time is not before the token's `exp`, allowing for `ClockSkewLeeway` |
 | `ErrNotYetValid` | The token's `nbf` or `iat` is after the current time, allowing for `ClockSkewLeeway` |
 | `ErrAudienceMismatch` | `JoseOptions.ExpectedAudience` is set and the token's `aud` names none of its values |
+| `ErrInvalidOptions` | The options passed are themselves wrong, whatever the token. `JoseOptions.ExpectedAudience` holding an empty string is one case |
 
 Each sentinel carries a prefix terminated by `": "`, so wrap one with `%w` immediately followed by the rest of the message and no space:
 
@@ -387,7 +392,10 @@ That reads `invalid private key: should be an instance of *ecdsa.PrivateKey`, an
 ## Upgrading from 0.10.x
 
 - `jwt.New` refuses a head whose `alg` names a different algorithm from the one that signs, and an `alg` that is not a string, with `ErrUnsupportedAlgorithm`. It also refuses `Opts.Algorithm` naming a different algorithm from a signer of this library. Earlier versions wrote the caller's `alg` into the header unchecked.
-- `jwt.New` with a `crypto.Signer` from outside this library needs an algorithm, from `Opts.Algorithm` or the head's `alg`, and a key that suits it. Earlier versions emitted a token with no `alg`, and an ES or PS signature no verifier would accept.
+- `jwt.New` with a `crypto.Signer` from outside this library needs an algorithm, from `Opts.Algorithm` or the head's `alg`, and a key that suits it. Earlier versions emitted a token with no `alg`. With a standard library ECDSA or RSA key, they also emitted an ES or PS signature no verifier would accept.
+- `jwt.New` expects a `crypto.Signer` from outside this library to follow Go's `crypto.Signer` contract. For ES256, ES384 and ES512 that means ASN.1 DER output, which `New` converts to R||S. A signer that already returns raw R||S is now refused with `ErrSigningError`. Earlier versions passed its output through unchanged, so such a signer worked. Make it return DER, or make it a `model.Signer`.
+- `jwt.New` refuses a `crypto.Signer` from outside this library for HS256, HS384 and HS512 with `ErrInvalidPrivateKey`. Earlier versions passed it the whole signing input. Build an HMAC signer with `jws.GetSigner` instead.
+- `jwt.New` now always calls a `model.Signer` in JOSE mode, with the whole signing input. Earlier versions called it in pre-hashed mode, with a digest, when `Opts.Algorithm` named an ES, RS or PS algorithm. A `model.Signer` of your own must accept the whole signing input.
 - `jwt.New` no longer writes `alg` and `typ` into the head map you pass.
 - `jwt.Validate` refuses a token at the instant its `exp` names, and judges a fractional `iat`, `nbf` or `exp` without dropping the fraction. Earlier versions accepted a token for up to a second past `exp`, and up to a second before `nbf`.
 - `jwt.Validate` refuses an `iss`, `sub`, `jti` or `aud` of the wrong JSON type with `ErrMalformedClaim`.

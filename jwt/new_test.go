@@ -268,8 +268,8 @@ func TestNew_StandardLibrarySignersProduceJwsSignatures(t *testing.T) {
 }
 
 func TestNew_AnECDSASignatureIsRAndSAtTheCurvesFixedWidth(t *testing.T) {
-	widest := func(bits uint) *big.Int {
-		return new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), bits), big.NewInt(1))
+	belowOrder := func(curve elliptic.Curve) *big.Int {
+		return new(big.Int).Sub(curve.Params().N, big.NewInt(1))
 	}
 	tests := []struct {
 		name  string
@@ -281,8 +281,9 @@ func TestNew_AnECDSASignatureIsRAndSAtTheCurvesFixedWidth(t *testing.T) {
 		{name: "ES256 keeps the leading zero octets of a small R and S", curve: elliptic.P256(), alg: jwa.ES256, r: big.NewInt(1), s: big.NewInt(2), want: append(append(make([]byte, 31), 1), append(make([]byte, 31), 2)...)},
 		{name: "ES384 keeps the leading zero octets of a small R and S", curve: elliptic.P384(), alg: jwa.ES384, r: big.NewInt(1), s: big.NewInt(2), want: append(append(make([]byte, 47), 1), append(make([]byte, 47), 2)...)},
 		{name: "ES512 keeps the leading zero octets of a small R and S", curve: elliptic.P521(), alg: jwa.ES512, r: big.NewInt(1), s: big.NewInt(2), want: append(append(make([]byte, 65), 1), append(make([]byte, 65), 2)...)},
-		{name: "ES256 takes an R and S of the full 256 bits", curve: elliptic.P256(), alg: jwa.ES256, r: widest(256), s: widest(256), want: bytes.Repeat([]byte{0xff}, 64)},
-		{name: "ES512 takes an R and S of the full 521 bits", curve: elliptic.P521(), alg: jwa.ES512, r: widest(521), s: widest(521), want: bytes.Repeat(append([]byte{0x01}, bytes.Repeat([]byte{0xff}, 65)...), 2)},
+		{name: "ES256 takes an R and S of n-1", curve: elliptic.P256(), alg: jwa.ES256, r: belowOrder(elliptic.P256()), s: belowOrder(elliptic.P256()), want: bytes.Repeat(belowOrder(elliptic.P256()).FillBytes(make([]byte, 32)), 2)},
+		{name: "ES384 takes an R and S of n-1", curve: elliptic.P384(), alg: jwa.ES384, r: belowOrder(elliptic.P384()), s: belowOrder(elliptic.P384()), want: bytes.Repeat(belowOrder(elliptic.P384()).FillBytes(make([]byte, 48)), 2)},
+		{name: "ES512 takes an R and S of n-1", curve: elliptic.P521(), alg: jwa.ES512, r: belowOrder(elliptic.P521()), s: belowOrder(elliptic.P521()), want: bytes.Repeat(belowOrder(elliptic.P521()).FillBytes(make([]byte, 66)), 2)},
 	}
 
 	for _, tt := range tests {
@@ -293,7 +294,7 @@ func TestNew_AnECDSASignatureIsRAndSAtTheCurvesFixedWidth(t *testing.T) {
 			}
 			token, err := New(signer, map[string]any{}, map[string]any{}, Opts{Algorithm: tt.alg})
 			if err != nil {
-				t.Fatalf("[RFC 7518 3.4] New refused a well formed DER signature: %s", err)
+				t.Fatalf("[RFC 7518 3.4, FIPS 186-5 6.4.1] New refused a well formed DER signature: %s", err)
 			}
 			if got := newTestSegment(t, *token, 2); !bytes.Equal(got, tt.want) {
 				t.Errorf("[RFC 7518 3.4 step 2] want %x, got %x", tt.want, got)
@@ -309,9 +310,16 @@ func TestNew_RefusesAStandardLibrarySignerThatCannotSignTheAlgorithm(t *testing.
 	if err != nil {
 		t.Fatalf("generating an rsa key: %s", err)
 	}
+	p521 := newTestECDSAKey(t, elliptic.P521())
 	oversized := new(big.Int).Lsh(big.NewInt(1), 256)
+	p256Order := elliptic.P256().Params().N
+	p521Order := elliptic.P521().Params().N
+	widest528 := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 528), big.NewInt(1))
 	der := func(r, s *big.Int) fixedOutputSigner {
 		return fixedOutputSigner{public: &p256.PublicKey, output: newTestDER(t, r, s)}
+	}
+	derP521 := func(r, s *big.Int) fixedOutputSigner {
+		return fixedOutputSigner{public: &p521.PublicKey, output: newTestDER(t, r, s)}
 	}
 	threeIntegers, err := asn1.Marshal(struct{ R, S, X *big.Int }{big.NewInt(1), big.NewInt(2), big.NewInt(3)})
 	if err != nil {
@@ -342,6 +350,13 @@ func TestNew_RefusesAStandardLibrarySignerThatCannotSignTheAlgorithm(t *testing.
 		{name: "ES256 DER with an S of zero", signer: der(big.NewInt(1), big.NewInt(0)), alg: jwa.ES256, want: joseerror.ErrSigningError, clause: "RFC 7518 3.4"},
 		{name: "ES256 DER with an R of 257 bits", signer: der(oversized, big.NewInt(2)), alg: jwa.ES256, want: joseerror.ErrSigningError, clause: "RFC 7518 3.4"},
 		{name: "ES256 DER with an S of 257 bits", signer: der(big.NewInt(1), oversized), alg: jwa.ES256, want: joseerror.ErrSigningError, clause: "RFC 7518 3.4"},
+		{name: "ES256 DER with an R of n", signer: der(p256Order, big.NewInt(2)), alg: jwa.ES256, want: joseerror.ErrSigningError, clause: "FIPS 186-5 6.4.1"},
+		{name: "ES256 DER with an S of n", signer: der(big.NewInt(1), p256Order), alg: jwa.ES256, want: joseerror.ErrSigningError, clause: "FIPS 186-5 6.4.1"},
+		{name: "ES256 DER with an R of 2^256-1", signer: der(new(big.Int).Sub(oversized, big.NewInt(1)), big.NewInt(2)), alg: jwa.ES256, want: joseerror.ErrSigningError, clause: "FIPS 186-5 6.4.1"},
+		{name: "ES512 DER with an R of n", signer: derP521(p521Order, big.NewInt(2)), alg: jwa.ES512, want: joseerror.ErrSigningError, clause: "FIPS 186-5 6.4.1"},
+		{name: "ES512 DER with an S of n", signer: derP521(big.NewInt(1), p521Order), alg: jwa.ES512, want: joseerror.ErrSigningError, clause: "FIPS 186-5 6.4.1"},
+		{name: "ES512 DER with an R of 528 bits", signer: derP521(widest528, big.NewInt(2)), alg: jwa.ES512, want: joseerror.ErrSigningError, clause: "FIPS 186-5 6.4.1"},
+		{name: "ES512 DER with an S of 528 bits", signer: derP521(big.NewInt(1), widest528), alg: jwa.ES512, want: joseerror.ErrSigningError, clause: "FIPS 186-5 6.4.1"},
 	}
 
 	for _, tt := range tests {

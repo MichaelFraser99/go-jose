@@ -26,4 +26,5 @@ var (
 	ErrExpired              = errors.New("expired: ")
 	ErrNotYetValid          = errors.New("not yet valid: ")
 	ErrAudienceMismatch     = errors.New("audience mismatch: ")
+	ErrInvalidOptions       = errors.New("invalid options: ")
 )

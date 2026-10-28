@@ -6,6 +6,7 @@ import (
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/asn1"
@@ -37,9 +38,10 @@ type Opts struct {
 // A model.Signer is called in JOSE mode, with the whole JWS Signing Input.
 //
 // Any other crypto.Signer is called as Go's crypto.Signer contract defines. Its ASN.1
-// DER ECDSA output becomes R||S (RFC 7518 section 3.4), and a PS algorithm requests
-// RSASSA-PSS with a salt the size of the hash (RFC 7518 section 3.5). Its public key
-// must suit the algorithm, and it cannot sign an HS algorithm.
+// DER ECDSA output becomes R||S (RFC 7518 section 3.4), each of R and S in [1, n-1]
+// (FIPS 186-5 section 6.4.1). A PS algorithm requests RSASSA-PSS with a salt the size
+// of the hash (RFC 7518 section 3.5). Its public key must suit the algorithm, and it
+// cannot sign an HS algorithm.
 func New(signer crypto.Signer, head, body map[string]any, opts Opts) (*string, error) {
 	h := maps.Clone(head)
 	if h == nil {
@@ -67,7 +69,12 @@ func New(signer crypto.Signer, head, body map[string]any, opts Opts) (*string, e
 // current time is also refused with ErrNotYetValid: RFC 7519 section 4.1.6 sets no such
 // rule, but a token issued in the future signals a clock fault or a forged timestamp.
 // When opts.ExpectedAudience is set, aud must name one of its values (section 4.1.3).
+// Options whose ExpectedAudience holds an empty string are refused with
+// ErrInvalidOptions, whatever the token.
 func Validate(ctx context.Context, token string, outOfBoundsPublicKey model.Retriever, opts *model.JoseOptions) (head, body map[string]any, err error) {
+	if err := validateOptions(opts); err != nil {
+		return nil, nil, err
+	}
 	segments := strings.Split(token, ".")
 	if len(segments) == 3 {
 		head, body, err = jws.VerifyCompactSerialization(ctx, token, outOfBoundsPublicKey, opts)
@@ -177,7 +184,7 @@ func signWithCryptoSigner(signer crypto.Signer, alg jwa.Algorithm, signingInput 
 		if err != nil {
 			return nil, err
 		}
-		return concatenatedRS(der, (public.Curve.Params().BitSize+7)/8)
+		return concatenatedRS(der, public.Params())
 	case jwa.RS256, jwa.RS384, jwa.RS512, jwa.PS256, jwa.PS384, jwa.PS512:
 		if _, ok := signer.Public().(*rsa.PublicKey); !ok {
 			return nil, fmt.Errorf("%w%s needs an rsa key", joseerror.ErrInvalidPrivateKey, alg)
@@ -196,15 +203,16 @@ func signWithCryptoSigner(signer crypto.Signer, alg jwa.Algorithm, signingInput 
 	return nil, fmt.Errorf("%wonly a signer from this library can sign %s", joseerror.ErrInvalidPrivateKey, alg)
 }
 
-func concatenatedRS(der []byte, size int) ([]byte, error) {
+func concatenatedRS(der []byte, curve *elliptic.CurveParams) ([]byte, error) {
 	var signature struct{ R, S *big.Int }
 	if _, err := asn1.Unmarshal(der, &signature); err != nil || !isDER(signature, der) {
 		return nil, fmt.Errorf("%wthe signer did not return an ASN.1 DER ECDSA signature", joseerror.ErrSigningError)
 	}
+	size := (curve.BitSize + 7) / 8
 	concatenated := make([]byte, 2*size)
 	for i, v := range []*big.Int{signature.R, signature.S} {
-		if v.Sign() <= 0 || v.BitLen() > 8*size {
-			return nil, fmt.Errorf("%wthe signer returned an ECDSA signature value outside the curve's range", joseerror.ErrSigningError)
+		if v.Sign() <= 0 || v.Cmp(curve.N) >= 0 {
+			return nil, fmt.Errorf("%wthe signer returned an ECDSA signature value outside [1, n-1]", joseerror.ErrSigningError)
 		}
 		v.FillBytes(concatenated[i*size : (i+1)*size])
 	}

@@ -157,5 +157,18 @@ func TestValidate_ExpectedAudience(t *testing.T) {
 		{name: "an aud of the wrong type", payload: `{"aud":5}`, opts: expect("https://rp.example"), want: joseerror.ErrMalformedClaim, clause: "RFC 7519 4.1.3"},
 		{name: "an array holding this recipient and a number", payload: `{"aud":["https://rp.example",5]}`, opts: expect("https://rp.example"), want: joseerror.ErrMalformedClaim, clause: "RFC 7519 4.1.3"},
 		{name: "an array holding this recipient and null", payload: `{"aud":["https://rp.example",null]}`, opts: expect("https://rp.example"), want: joseerror.ErrMalformedClaim, clause: "RFC 7519 4.1.3"},
+		{name: "an empty expected value against an empty string", payload: `{"aud":""}`, opts: expect(""), want: joseerror.ErrInvalidOptions, clause: "RFC 7519 4.1.3"},
+		{name: "an empty expected value against an array holding an empty string", payload: `{"aud":[""]}`, opts: expect(""), want: joseerror.ErrInvalidOptions, clause: "RFC 7519 4.1.3"},
+		{name: "an empty expected value beside one the token names", payload: `{"aud":"https://rp.example"}`, opts: expect("https://rp.example", ""), want: joseerror.ErrInvalidOptions, clause: "RFC 7519 4.1.3"},
+		{name: "an empty expected value against a token with no aud", payload: `{"sub":"a"}`, opts: expect(""), want: joseerror.ErrInvalidOptions, clause: "RFC 7519 4.1.3"},
 	})
+}
+
+func TestValidate_AnEmptyExpectedAudienceIsRefusedBeforeTheTokenIsRead(t *testing.T) {
+	for _, token := range []string{"", "not a token", "a.b.c"} {
+		_, _, err := Validate(context.Background(), token, nil, &model.JoseOptions{ExpectedAudience: []string{""}})
+		if !errors.Is(err, joseerror.ErrInvalidOptions) {
+			t.Errorf("[RFC 7519 4.1.3] an empty string names no recipient, so the options are refused whatever the token %q: want %q, got %v", token, joseerror.ErrInvalidOptions, err)
+		}
+	}
 }
