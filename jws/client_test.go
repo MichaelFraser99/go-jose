@@ -1,6 +1,7 @@
 package jws
 
 import (
+	"context"
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
@@ -57,7 +58,7 @@ func TestVerifyCompactSerialization_ARemoteHeaderWithoutAClientCannotTurnARefusa
 			token := input + "." + base64.RawURLEncoding.EncodeToString(signature)
 
 			callersRetriever := func() ([]crypto.PublicKey, error) { return []crypto.PublicKey{&callersKey.PublicKey}, nil }
-			_, _, err = VerifyCompactSerialization(token, callersRetriever, test.opts)
+			_, _, err = VerifyCompactSerialization(context.Background(), token, callersRetriever, test.opts)
 			if err == nil {
 				t.Fatal("a token signed by a key the caller does not hold must not verify")
 			}

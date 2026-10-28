@@ -162,7 +162,7 @@ A JOSE header can name the key that signed the token, through `jwk`, `jku`, `x5c
 `jwk` and `jku` are off by default, including when you pass no options, because anyone can sign a token and name their own key. A token that verifies against such a key proves only that its signer holds that key. Turn `UseTokenProvidedKeys` on only when your application ties those keys to a party you trust some other way:
 
 ```go
-head, body, err := jwt.Validate(token, nil, &model.JoseOptions{UseTokenProvidedKeys: true})
+head, body, err := jwt.Validate(ctx, token, nil, &model.JoseOptions{UseTokenProvidedKeys: true})
 ```
 
 Setting `X509Roots` does not turn `jwk` or `jku` on.
@@ -176,13 +176,17 @@ When you supply your own retriever and also use a header source, both are tried.
 The two remote headers name a URL this library fetches. Supply the client it should use. The example below uses `x5u`; `jku` also needs `UseTokenProvidedKeys`:
 
 ```go
-head, body, err := jwt.Validate(token, nil, &model.JoseOptions{
-    HttpClient: &http.Client{Timeout: 10 * time.Second, Transport: yourGuardedTransport},
+head, body, err := jwt.Validate(ctx, token, nil, &model.JoseOptions{
+    HttpClient: &http.Client{Transport: yourGuardedTransport},
     X509Roots:  roots,
 })
 ```
 
-Both URLs come from the header of the token being verified, so this library makes an outbound request to an address a peer chose, before the signature is checked. Give the client a transport that rejects the destinations your deployment will not allow — private, loopback, link-local and other reserved ranges — and a timeout. The body is capped at 4 MiB whatever client you supply.
+Both URLs come from the header of the token being verified, so this library makes an outbound request to an address a peer chose, before the signature is checked. Give the client a transport that rejects the destinations your deployment will not allow, such as private, loopback, link-local and other reserved ranges. The body is capped at 4 MiB whatever client you supply.
+
+Each fetch is also bounded in time, provided your client's transport honours the request's context. `JoseOptions.FetchTimeout` covers the whole fetch, from sending the request to reading the last byte of the body. When it is zero, the limit is 10 seconds. A deadline or cancellation on the `ctx` you pass to `jwt.Validate` or `jws.VerifyCompactSerialization` also stops the fetch. The limit applies to each fetch, so a token naming both `jku` and `x5u` can take two of them. Use `ctx` to bound the whole call.
+
+A fetch stopped by either limit returns an error that matches `ErrApplicationError` and `context.DeadlineExceeded`. One stopped by cancelling `ctx` matches `context.Canceled`.
 
 With no client, `jku` and `x5u` contribute no key. The members of a `jku` set are first narrowed by the token's `kid` and `alg`. Then any remaining member this library cannot read is skipped, as RFC 7517 section 5 recommends, and the rest are used. Because narrowing comes first, an unreadable member can still match the `kid` or `alg` and so keep a readable member out. A set whose `keys` array holds a number, string, boolean or array is not a JWK Set, so the whole set is refused. `jku` must be `https`, as RFC 7515 section 4.1.2 requires integrity protection, and an `x5u` resource is read as the PEM encoding section 4.1.5 requires. A server that sends raw DER instead is still read: a body that parses as DER certificates is taken as exactly those certificates, and is never searched for PEM text. Any other body is read as PEM text, so a body whose explanatory text is not valid UTF-8 is refused.
 
@@ -191,7 +195,7 @@ With no client, `jku` and `x5u` contribute no key. The members of a `jku` set ar
 Most JOSE profiles pin their own `typ`, many require a `kid`, and RFC 7515 section 4.1.11 says a JWS whose `crit` lists an extension the recipient does not understand **MUST** be rejected. Rather than decoding the header yourself to check those, say what you expect:
 
 ```go
-head, body, err := jwt.Validate(token, retriever, &model.JoseOptions{
+head, body, err := jwt.Validate(ctx, token, retriever, &model.JoseOptions{
     AcceptedTypes:             []string{"example+jwt"},
     RequireKeyIdentifier:      true,
     UnderstoodCriticalHeaders: []string{"x-example"},
@@ -221,7 +225,7 @@ RFC 5280 path validation takes a trust anchor as an **input**. A chain cannot vo
 roots := x509.NewCertPool()
 roots.AppendCertsFromPEM(issuerRootPEM)
 
-head, body, err := jwt.Validate(token, nil, &model.JoseOptions{X509Roots: roots})
+head, body, err := jwt.Validate(ctx, token, nil, &model.JoseOptions{X509Roots: roots})
 ```
 
 With no `X509Roots` configured, a token's `x5c` and `x5u` headers contribute no key. They are not an error — section 4.1.6 makes use of the header OPTIONAL — so the token still verifies if another key source does, and fails with `no cyptographic material provided for signature validation` if none does.
@@ -309,7 +313,7 @@ Give it the algorithm the signer was built for. `New` hashes the signing input o
 The second validates a jwt and returns the decoded head and body:
 
 ```go
-func jwt.Validate(token string, outOfBoundsPublicKey model.Retriever, opts *model.JoseOptions) (head, body map[string]any, err error)
+func jwt.Validate(ctx context.Context, token string, outOfBoundsPublicKey model.Retriever, opts *model.JoseOptions) (head, body map[string]any, err error)
 ```
 
 The retriever supplies key material of your own. Pass nil only when you have turned on `UseTokenProvidedKeys`, so the token's header names the key. `model.JoseOptions` carries everything described under [Keys a token carries](#keys-a-token-carries), and may be nil for the defaults.
@@ -332,7 +336,7 @@ Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 | `ErrMissingCriticalClaim` | A header named in `crit` is absent, or names an extension this library does not understand |
 | `ErrNoKeyIdentifierMatch` | No key could be selected. The `kid` matches nothing, a `jku` set holds no usable key that matches the header, a certificate chain does not reach a configured root, or an `x5t` thumbprint does not match the chain |
 | `ErrKeystoreError` | A `model.Jwks` lookup or addition failed, or the configuration needed to use a key source is absent, such as `X509Roots` for a certificate chain |
-| `ErrApplicationError` | Key material a header named could not be obtained, decoded or used. Covers a failed `jku` or `x5u` fetch, a local decode of what one returned, and an inline `jwk` of a key type or curve this library does not support |
+| `ErrApplicationError` | Key material a header named could not be obtained, decoded or used. Covers a failed `jku` or `x5u` fetch, a local decode of what one returned, and an inline `jwk` of a key type or curve this library does not support. A fetch that ran out of time also matches `context.DeadlineExceeded`, and one cancelled through `ctx` matches `context.Canceled` |
 | `ErrMalformedToken` | The token is not a well formed JOSE object |
 
 Each sentinel carries a prefix terminated by `": "`, so wrap one with `%w` immediately followed by the rest of the message and no space:
@@ -371,7 +375,8 @@ if errors.Is(err, joseerror.ErrInvalidSignature) {
 | --- | --- |
 | `jwa.GetAlgorithm` | Returns `Algorithm`, not `*Algorithm`. Returns `jwa.Unknown` rather than nil for an unknown name, and the comparison is now case sensitive |
 | `jwt.New` | Takes a fourth parameter, `jwt.Opts`, naming the algorithm to sign with |
-| `jwt.Validate` | Takes `(token string, retriever model.Retriever, opts *model.JoseOptions)`. The `publicKey` parameter is gone: supply key material through the retriever, or turn on `UseTokenProvidedKeys` to use what the token's header names |
+| `jwt.Validate` | Takes `(ctx context.Context, token string, retriever model.Retriever, opts *model.JoseOptions)`. The `publicKey` parameter is gone: supply key material through the retriever, or turn on `UseTokenProvidedKeys` to use what the token's header names |
+| `jws.VerifyCompactSerialization` | Takes a `context.Context` first. It bounds any `jku` or `x5u` fetch |
 | `jws.GetValidatorFromJwk` | Takes `map[string]any`, not `[]byte` |
 | `jwk.PublicJwk`, `jwk.PrivateJwk` | Return `*map[string]any`, not `map[string]string` |
 

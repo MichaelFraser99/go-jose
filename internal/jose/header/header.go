@@ -1,11 +1,13 @@
 package header
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strings"
 
 	"errors"
+	"github.com/MichaelFraser99/go-jose/internal/httputils"
 	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
 	"github.com/MichaelFraser99/go-jose/internal/jose/jwk"
 	"github.com/MichaelFraser99/go-jose/internal/jose/x5"
@@ -19,7 +21,7 @@ import (
 //
 // On success, a series of Retriever functions are returned which will yield key(s) for validation purposes.
 // On failure, an error object is returned
-func ValidateHeader(header map[string]any, client *http.Client, mode model.Mode, opts *model.JoseOptions) ([]model.Retriever, error) {
+func ValidateHeader(ctx context.Context, header map[string]any, client *http.Client, mode model.Mode, opts *model.JoseOptions) ([]model.Retriever, error) {
 	if opts == nil {
 		opts = &model.JoseOptions{}
 	}
@@ -118,10 +120,10 @@ func ValidateHeader(header map[string]any, client *http.Client, mode model.Mode,
 		jwkRetrievers = append(jwkRetrievers, x5.InlineCertificate(*x5c, x5t, x5ts256, opts.X509Roots))
 	}
 	if jku != nil && opts.UseTokenProvidedKeys && client != nil { // check for specified keystore
-		jwkRetrievers = append(jwkRetrievers, jwk.RetrieveJKU(*jku, client, kid, *alg))
+		jwkRetrievers = append(jwkRetrievers, jwk.RetrieveJKU(*jku, httputils.Fetcher(ctx, client, opts.FetchTimeout), kid, *alg))
 	}
 	if x5u != nil && opts.X509Roots != nil && client != nil { // check for specified remote certificate chain, if a trust anchor is configured for it
-		jwkRetrievers = append(jwkRetrievers, x5.RetrieveX5U(*x5u, client, x5t, x5ts256, opts.X509Roots))
+		jwkRetrievers = append(jwkRetrievers, x5.RetrieveX5U(*x5u, httputils.Fetcher(ctx, client, opts.FetchTimeout), x5t, x5ts256, opts.X509Roots))
 	}
 
 	return jwkRetrievers, nil

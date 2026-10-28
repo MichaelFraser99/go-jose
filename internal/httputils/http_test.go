@@ -2,6 +2,7 @@ package httputils
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -56,7 +57,7 @@ func TestRetrieveResource_ReadsNoMoreThanTheCapPlusOneByte(t *testing.T) {
 			}))
 			defer server.Close()
 
-			response, err := RetrieveResource(server.Client(), server.URL, "test")
+			response, err := RetrieveResource(context.Background(), server.Client(), 0, server.URL, "test")
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -87,7 +88,7 @@ func TestRetrieveResource_ClosingTheWrappedBodyClosesTheUnderlyingOne(t *testing
 		body: closeRecordingBody{Reader: bytes.NewReader([]byte("a key set")), closed: &closed},
 	}}
 
-	response, err := RetrieveResource(client, "https://example.com/jwks", "test")
+	response, err := RetrieveResource(context.Background(), client, 0, "https://example.com/jwks", "test")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -106,7 +107,7 @@ func TestRetrieveResource_ClosingTheWrappedBodyClosesTheUnderlyingOne(t *testing
 func TestRetrieveResource_AResponseWithNoBodyIsStillUsable(t *testing.T) {
 	client := &http.Client{Transport: stubTransport{body: nil}}
 
-	response, err := RetrieveResource(client, "https://example.com/jwks", "test")
+	response, err := RetrieveResource(context.Background(), client, 0, "https://example.com/jwks", "test")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -126,7 +127,7 @@ func TestRetrieveResource_AResponseWithNoBodyIsStillUsable(t *testing.T) {
 }
 
 func TestRetrieveResource_RefusesWithoutAClient(t *testing.T) {
-	_, err := RetrieveResource(nil, "https://example.com/jwks", "jku")
+	_, err := RetrieveResource(context.Background(), nil, 0, "https://example.com/jwks", "jku")
 	if err == nil {
 		t.Fatal("expected an error with no client")
 	}

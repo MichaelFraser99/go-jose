@@ -8,8 +8,6 @@ import (
 	"github.com/MichaelFraser99/go-jose/internal/httputils"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/model"
-	"io"
-	"net/http"
 )
 
 func InlineJWK(jwk map[string]any, kid *string, alg string) model.Retriever {
@@ -45,28 +43,16 @@ func InlineJWK(jwk map[string]any, kid *string, alg string) model.Retriever {
 	}
 }
 
-func RetrieveJKU(jku string, client *http.Client, kid *string, alg string) model.Retriever {
+func RetrieveJKU(jku string, fetch httputils.Fetch, kid *string, alg string) model.Retriever {
 	return func() ([]crypto.PublicKey, error) {
-		response, err := httputils.RetrieveResource(client, jku, "jku")
+		response, err := fetch(jku, "jku")
 		if err != nil {
 			return nil, err
 		}
 
-		if response.Body == nil {
-			return nil, fmt.Errorf("%wfailed to retrieve jku: response body is nil", joseerror.ErrApplicationError)
-		}
-
-		responseBytes, err := io.ReadAll(response.Body)
+		responseBytes, err := httputils.ReadBody(response, "jku")
 		if err != nil {
-			return nil, fmt.Errorf("%wfailed to read jku response: %w", joseerror.ErrApplicationError, err)
-		}
-
-		err = response.Body.Close()
-		if err != nil {
-			return nil, fmt.Errorf("%wfailed to close jku response: %w", joseerror.ErrApplicationError, err)
-		}
-		if int64(len(responseBytes)) > httputils.MaxBodyBytes {
-			return nil, fmt.Errorf("%wjku response exceeded the %d byte limit", joseerror.ErrApplicationError, httputils.MaxBodyBytes)
+			return nil, err
 		}
 
 		var returnedKeystore model.Jwks

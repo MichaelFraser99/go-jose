@@ -1,6 +1,7 @@
 package x5
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha1"
@@ -11,6 +12,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"github.com/MichaelFraser99/go-jose/internal/httputils"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"math/big"
 	"net/http"
@@ -315,7 +317,7 @@ func TestRetrieveX5U_HoldsTheCertificateToItsThumbprint(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			keys, err := RetrieveX5U(server.URL, server.Client(), tc.x5t, tc.x5ts256, poolOf(t, cert))()
+			keys, err := RetrieveX5U(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0), tc.x5t, tc.x5ts256, poolOf(t, cert))()
 			if tc.accept {
 				if err != nil {
 					t.Fatalf("[%s] the certificate this URL serves carries that thumbprint, so it must be accepted, got %v", tc.reference, err)
@@ -528,7 +530,7 @@ func TestRetrieveX5U_ReadsThePemEncodingTheClauseRequires(t *testing.T) {
 			}))
 			defer server.Close()
 
-			keys, err := RetrieveX5U(server.URL, server.Client(), nil, nil, roots)()
+			keys, err := RetrieveX5U(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0), nil, nil, roots)()
 			if tc.accept {
 				if err != nil {
 					t.Fatalf("[%s] the clause requires the resource be PEM-encoded, so %s must be read, got %v", tc.reference, name, err)

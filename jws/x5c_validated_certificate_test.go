@@ -1,6 +1,7 @@
 package jws_test
 
 import (
+	"context"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -121,7 +122,7 @@ func TestVerifyCompactSerialization_AnX5cCertificateCannotBorrowTrustFromAPemCer
 	}, attackerKey, nil)
 
 	token := signWithX5c(t, jwa.ES256, attackerKey, []string{der64(forged)})
-	if _, _, err := jws.VerifyCompactSerialization(token, nil, &model.JoseOptions{X509Roots: roots(ca)}); err == nil {
+	if _, _, err := jws.VerifyCompactSerialization(context.Background(), token, nil, &model.JoseOptions{X509Roots: roots(ca)}); err == nil {
 		t.Error("[RFC 7515 4.1.6] the recipient MUST validate the chain whose first certificate holds the signing key, so a self-signed certificate that only embeds a trusted one as PEM text must not verify")
 	}
 }
@@ -133,7 +134,7 @@ func TestVerifyCompactSerialization_AnX5cEntryIsExactlyOneCertificate(t *testing
 
 	twoInOne := base64.StdEncoding.EncodeToString(append(append([]byte{}, signingLeaf.cert.Raw...), ca.cert.Raw...))
 	token := signWithX5c(t, jwa.ES256, signingKey, []string{twoInOne})
-	if _, _, err := jws.VerifyCompactSerialization(token, nil, &model.JoseOptions{X509Roots: roots(ca)}); err == nil {
+	if _, _, err := jws.VerifyCompactSerialization(context.Background(), token, nil, &model.JoseOptions{X509Roots: roots(ca)}); err == nil {
 		t.Error("[RFC 7515 4.1.6] each string in the x5c array is one base64-encoded DER certificate, so an entry holding two must be refused")
 	}
 }
@@ -156,7 +157,7 @@ func TestVerifyCompactSerialization_AnX5cLeafIsUsableWhateverAlgorithmItsIssuerS
 			signingKey := p256Key(t)
 			signingLeaf := leaf(t, signingKey, test.ca)
 			token := signWithX5c(t, test.alg, signingKey, []string{der64(signingLeaf)})
-			if _, _, err := jws.VerifyCompactSerialization(token, nil, &model.JoseOptions{X509Roots: roots(test.ca)}); err != nil {
+			if _, _, err := jws.VerifyCompactSerialization(context.Background(), token, nil, &model.JoseOptions{X509Roots: roots(test.ca)}); err != nil {
 				t.Errorf("[RFC 7515 4.1.6] the first certificate holds the signing key, and the algorithm its issuer signed it with says nothing about that key, got %v", err)
 			}
 		})
@@ -170,7 +171,7 @@ func TestVerifyCompactSerialization_AnX5cEntryHoldingPemIsRefused(t *testing.T) 
 
 	entry := base64.StdEncoding.EncodeToString(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: signingLeaf.cert.Raw}))
 	token := signWithX5c(t, jwa.ES256, signingKey, []string{entry})
-	if _, _, err := jws.VerifyCompactSerialization(token, nil, &model.JoseOptions{X509Roots: roots(ca)}); err == nil {
+	if _, _, err := jws.VerifyCompactSerialization(context.Background(), token, nil, &model.JoseOptions{X509Roots: roots(ca)}); err == nil {
 		t.Error("[RFC 7515 4.1.6] each x5c entry is base64-encoded DER, so an entry holding base64 of PEM text must be refused")
 	}
 }
@@ -206,7 +207,7 @@ func TestVerifyCompactSerialization_AnX5uDerBodyIsNotReplacedByAPemCertificateIt
 			defer server.Close()
 
 			token := signWithHeader(t, jwa.ES256, trustedKey, map[string]any{"x5u": server.URL})
-			_, _, err := jws.VerifyCompactSerialization(token, nil, &model.JoseOptions{X509Roots: roots(ca), HttpClient: server.Client()})
+			_, _, err := jws.VerifyCompactSerialization(context.Background(), token, nil, &model.JoseOptions{X509Roots: roots(ca), HttpClient: server.Client()})
 			if tc.accept {
 				if err != nil {
 					t.Errorf("[RFC 7515 4.1.5] %s holds the signing key and chains to the root, so it must verify, got %v", name, err)

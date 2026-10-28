@@ -2,6 +2,7 @@ package jws
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
@@ -533,7 +534,7 @@ func TestGetSigner_AnUnsetAlgorithmIsRefused(t *testing.T) {
 func TestVerifyCompactSerialization_ADeclinedAlgorithmNamesTheAlgorithmFault(t *testing.T) {
 	token := "eyJhbGciOiJSUzI1NiJ9.eyJhIjoiYiJ9.c2ln"
 
-	_, _, err := VerifyCompactSerialization(token, nil, &model.JoseOptions{
+	_, _, err := VerifyCompactSerialization(context.Background(), token, nil, &model.JoseOptions{
 		AllowedSigningAlgorithms: []jwa.Algorithm{jwa.ES256},
 	})
 	if err == nil {

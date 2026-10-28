@@ -1,9 +1,11 @@
 package x5
 
 import (
+	"context"
 	"crypto/x509"
 	"encoding/base64"
 	"errors"
+	"github.com/MichaelFraser99/go-jose/internal/httputils"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -94,7 +96,7 @@ func TestRetrieveX5U_AnEmptyBodyIsRefusedNotPanicked(t *testing.T) {
 			}))
 			defer server.Close()
 
-			keys, err := RetrieveX5U(server.URL, server.Client(), nil, nil, x509.NewCertPool())()
+			keys, err := RetrieveX5U(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0), nil, nil, x509.NewCertPool())()
 			if err == nil && len(keys) != 0 {
 				t.Fatalf("[%s] a response carrying no certificate must not yield a key, got %d", tc.reference, len(keys))
 			}

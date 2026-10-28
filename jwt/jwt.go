@@ -1,6 +1,7 @@
 package jwt
 
 import (
+	"context"
 	"crypto"
 	"crypto/rand"
 	"encoding/base64"
@@ -31,10 +32,10 @@ func New(signer crypto.Signer, head, body map[string]any, opts Opts) (*string, e
 }
 
 // Validate verifies a token's structure, claims, and signature, returning its header and body or an error if validation fails.
-func Validate(token string, outOfBoundsPublicKey model.Retriever, opts *model.JoseOptions) (head, body map[string]any, err error) {
+func Validate(ctx context.Context, token string, outOfBoundsPublicKey model.Retriever, opts *model.JoseOptions) (head, body map[string]any, err error) {
 	segments := strings.Split(token, ".")
 	if len(segments) == 3 {
-		head, body, err = jws.VerifyCompactSerialization(token, outOfBoundsPublicKey, opts)
+		head, body, err = jws.VerifyCompactSerialization(ctx, token, outOfBoundsPublicKey, opts)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to verify jws compact serialization: %w", err)
 		}

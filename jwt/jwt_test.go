@@ -2,6 +2,7 @@ package jwt
 
 import (
 	"bytes"
+	"context"
 	"crypto"
 	"crypto/rand"
 	"encoding/base64"
@@ -1485,7 +1486,7 @@ func TestValidate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			signer := tt.signer(t)
-			head, body, err := Validate(tt.jwt(t, signer), func() ([]crypto.PublicKey, error) {
+			head, body, err := Validate(context.Background(), tt.jwt(t, signer), func() ([]crypto.PublicKey, error) {
 				return []crypto.PublicKey{tt.publicKey(t, signer)}, nil
 			}, nil)
 			tt.validate(t, head, body, err)
@@ -1679,7 +1680,7 @@ func TestValidateClockSkewLeeway(t *testing.T) {
 				t.Fatalf("no error should be thrown: %s", err.Error())
 			}
 
-			_, _, err = Validate(*token, retriever, tt.opts)
+			_, _, err = Validate(context.Background(), *token, retriever, tt.opts)
 			if tt.expectErr == "" {
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())

@@ -1,6 +1,7 @@
 package header
 
 import (
+	"context"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -263,7 +264,7 @@ func TestValidateHeader(t *testing.T) {
 
 	for testName, test := range tests {
 		t.Run(testName, func(t *testing.T) {
-			retrievers, err := ValidateHeader(test.protectedHeader, test.client, model.JWS, &model.JoseOptions{X509Roots: testRoots, UseTokenProvidedKeys: true}) //todo extract mode and test for both
+			retrievers, err := ValidateHeader(context.Background(), test.protectedHeader, test.client, model.JWS, &model.JoseOptions{X509Roots: testRoots, UseTokenProvidedKeys: true}) //todo extract mode and test for both
 			if err != nil {
 				if test.errMsg == "" {
 					t.Fatalf("unexpected error: %v", err)

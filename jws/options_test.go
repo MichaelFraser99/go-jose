@@ -1,6 +1,7 @@
 package jws
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -64,7 +65,7 @@ func TestVerifyCompactSerialization_ATokenCarriesNoTrustedKeyUnlessTheCallerOpts
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			_, _, err := VerifyCompactSerialization(token, nil, tc.opts)
+			_, _, err := VerifyCompactSerialization(context.Background(), token, nil, tc.opts)
 			if tc.verifies {
 				if err != nil {
 					t.Errorf("[JoseOptions.UseTokenProvidedKeys] a caller who opted in must have the token's own key used, got %v", err)
@@ -122,7 +123,7 @@ func TestVerifyCompactSerialization_AJkuIsFetchedWithTheConfiguredClient(t *test
 	token := input + "." + base64.RawURLEncoding.EncodeToString(signature)
 
 	t.Run("with a client configured", func(t *testing.T) {
-		_, _, err := VerifyCompactSerialization(token, nil, &model.JoseOptions{HttpClient: server.Client(), UseTokenProvidedKeys: true})
+		_, _, err := VerifyCompactSerialization(context.Background(), token, nil, &model.JoseOptions{HttpClient: server.Client(), UseTokenProvidedKeys: true})
 		if err != nil {
 			t.Fatalf("[RFC 7515 4.1.2] a jku names where the key set lives, so a caller supplying a client must have it fetched, got %v", err)
 		}
@@ -133,7 +134,7 @@ func TestVerifyCompactSerialization_AJkuIsFetchedWithTheConfiguredClient(t *test
 
 	t.Run("with a client configured but the token's keys not opted in to", func(t *testing.T) {
 		before := fetched.Load()
-		_, _, err := VerifyCompactSerialization(token, nil, &model.JoseOptions{HttpClient: server.Client()})
+		_, _, err := VerifyCompactSerialization(context.Background(), token, nil, &model.JoseOptions{HttpClient: server.Client()})
 		if err == nil {
 			t.Error("[JoseOptions.UseTokenProvidedKeys] a jku is a key the token names for itself, so it must not verify the token unless the caller opts in")
 		}
@@ -143,7 +144,7 @@ func TestVerifyCompactSerialization_AJkuIsFetchedWithTheConfiguredClient(t *test
 	})
 
 	t.Run("with no client configured", func(t *testing.T) {
-		_, _, err := VerifyCompactSerialization(token, nil, &model.JoseOptions{UseTokenProvidedKeys: true})
+		_, _, err := VerifyCompactSerialization(context.Background(), token, nil, &model.JoseOptions{UseTokenProvidedKeys: true})
 		if err == nil {
 			t.Fatal("[RFC 7515 4.1.2] with no client the key set cannot be fetched, so the token must not verify")
 		}

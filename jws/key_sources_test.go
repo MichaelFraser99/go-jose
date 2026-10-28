@@ -1,6 +1,7 @@
 package jws
 
 import (
+	"context"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -111,7 +112,7 @@ func TestVerifyCompactSerialization_EachHeaderKeySourceNeedsItsOwnAnchor(t *test
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			_, _, err := VerifyCompactSerialization(test.token, nil, test.opts)
+			_, _, err := VerifyCompactSerialization(context.Background(), test.token, nil, test.opts)
 			if test.verifies && err != nil {
 				t.Errorf("[%s] expected the token to verify, got %v", test.reference, err)
 			}
@@ -137,7 +138,7 @@ func TestVerifyCompactSerialization_AnX5uIsUsedWithRootsAndAClientAlone(t *testi
 	defer server.Close()
 
 	token := es256Token(t, leafKey, map[string]any{"x5u": server.URL})
-	if _, _, err := VerifyCompactSerialization(token, nil, &model.JoseOptions{X509Roots: roots, HttpClient: server.Client()}); err != nil {
+	if _, _, err := VerifyCompactSerialization(context.Background(), token, nil, &model.JoseOptions{X509Roots: roots, HttpClient: server.Client()}); err != nil {
 		t.Errorf("[RFC 7515 4.1.5] a chain that validates against the configured roots authenticates the key, so x5u needs no further opt-in, got %v", err)
 	}
 }
@@ -157,7 +158,7 @@ func TestVerifyCompactSerialization_OnceOptedInEitherTheCallersKeyOrAHeaderKeyMa
 	for name, signingKey := range tests {
 		t.Run(name, func(t *testing.T) {
 			token := es256Token(t, signingKey, head())
-			if _, _, err := VerifyCompactSerialization(token, retriever, &model.JoseOptions{UseTokenProvidedKeys: true}); err != nil {
+			if _, _, err := VerifyCompactSerialization(context.Background(), token, retriever, &model.JoseOptions{UseTokenProvidedKeys: true}); err != nil {
 				t.Errorf("[JoseOptions.UseTokenProvidedKeys] a caller who opts in with a retriever accepts either source, got %v", err)
 			}
 		})
@@ -227,7 +228,7 @@ func TestVerifyCompactSerialization_ARemoteSourceIsFetchedOnlyUnderItsOwnAnchor(
 			defer server.Close()
 
 			token := es256Token(t, test.key, map[string]any{test.header: server.URL})
-			_, _, err := VerifyCompactSerialization(token, nil, test.opts(server.Client()))
+			_, _, err := VerifyCompactSerialization(context.Background(), token, nil, test.opts(server.Client()))
 
 			wantFetches := int64(0)
 			if test.verifies {
