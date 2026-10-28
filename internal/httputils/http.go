@@ -2,6 +2,7 @@ package httputils
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -36,7 +37,18 @@ func Fetcher(ctx context.Context, client *http.Client, timeout time.Duration) Fe
 type limitedReadCloser struct {
 	io.Reader
 	closer io.Closer
+	ctx    context.Context
 	cancel context.CancelFunc
+}
+
+func (l limitedReadCloser) Read(p []byte) (int, error) {
+	n, err := l.Reader.Read(p)
+	if errors.Is(err, io.EOF) {
+		if cause := l.ctx.Err(); cause != nil {
+			return n, cause
+		}
+	}
+	return n, err
 }
 
 func (l limitedReadCloser) Close() error {
@@ -83,6 +95,7 @@ func RetrieveResource(ctx context.Context, client *http.Client, timeout time.Dur
 	response.Body = limitedReadCloser{
 		Reader: io.LimitReader(response.Body, MaxBodyBytes+1),
 		closer: response.Body,
+		ctx:    ctx,
 		cancel: cancel,
 	}
 	return response, nil
