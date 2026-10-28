@@ -228,7 +228,15 @@ func jwk.PublicJwk(publicKey crypto.PublicKey) (*map[string]any, error)
 func jwk.PrivateJwk(privateKey crypto.PrivateKey) (*map[string]any, error)
 ```
 
-Pass a pointer to the key. An `*ecdsa.PublicKey`, an `*rsa.PublicKey` or an `*ed25519.PublicKey` is accepted; anything else is refused with `ErrInvalidPublicKey`.
+Pass the key in the form the standard library gives it. An `*ecdsa.PublicKey`, an `*rsa.PublicKey`, or an `ed25519.PublicKey` (or a pointer to one) is accepted. `PrivateJwk` takes the private equivalents. Anything else is refused with `ErrInvalidPublicKey` or `ErrInvalidPrivateKey`.
+
+A key that cannot be encoded is refused with the same errors:
+
+- A nil key, or a key with a missing field.
+- An EC key on a curve other than P-256, P-384 and P-521, the curves RFC 7518 section 6.2.1.1 registers.
+- An RSA private key with more than two primes. RFC 7518 section 6.3.2.7 says a consumer that does not support such a key MUST NOT use it, and `PrivateFromJwk` refuses a jwk that carries `oth`.
+
+An EC private key's `d` is padded to the length of the curve order, as RFC 7518 section 6.2.2.1 requires.
 
 ```go
 // Direct from a public key
@@ -343,6 +351,7 @@ if errors.Is(err, joseerror.ErrInvalidSignature) {
 
 - An HMAC secret must be at least the hash output size, and a validator for an HMAC algorithm can only be built from a signer.
 - An Ed25519 jwk now carries a `kid`.
+- `PublicJwk` and `PrivateJwk` refuse a key they cannot encode, rather than panic or produce a malformed jwk.
 - `JoseOptions.IgnoreTokenProvidedKeys` replaces `UseTokenProvidedKeys`, inverted so the zero value is the documented default.
 - A `crit` header naming an extension you have not declared in `UnderstoodCriticalHeaders` is refused.
 - `x5c` and `x5u` contribute no key unless `JoseOptions.X509Roots` is configured.

@@ -126,32 +126,15 @@ func extractECDSACoordinatesFromJwk(jwk map[string]any) (*big.Int, *big.Int, *bi
 	}
 }
 
-func JwkFromECDSAPublicKey(publicKey *ecdsa.PublicKey) map[string]any {
+func JwkFromECDSAPublicKey(publicKey *ecdsa.PublicKey) (map[string]any, error) {
+	if err := checkECDSAPublicKey(publicKey, jose_errors.ErrInvalidPublicKey); err != nil {
+		return nil, err
+	}
 	jwk := map[string]any{}
 
-	curveBits := publicKey.Curve.Params().BitSize
-	curveBytes := curveBits / 8
-	if curveBits%8 > 0 {
-		curveBytes++
-	}
-
-	xBytes := publicKey.X.Bytes()
-	yBytes := publicKey.Y.Bytes()
-
-	if len(xBytes) < curveBytes {
-		padding := make([]byte, curveBytes-len(xBytes))
-		xBytes = append(padding, xBytes...)
-	}
-	if len(yBytes) < curveBytes {
-		padding := make([]byte, curveBytes-len(yBytes))
-		yBytes = append(padding, yBytes...)
-	}
-
-	b64X := make([]byte, base64.RawURLEncoding.EncodedLen(len(xBytes)))
-	base64.RawURLEncoding.Encode(b64X, xBytes)
-
-	b64Y := make([]byte, base64.RawURLEncoding.EncodedLen(len(yBytes)))
-	base64.RawURLEncoding.Encode(b64Y, yBytes)
+	coordinateBytes := (publicKey.Curve.Params().BitSize + 7) / 8
+	b64X := []byte(base64.RawURLEncoding.EncodeToString(publicKey.X.FillBytes(make([]byte, coordinateBytes))))
+	b64Y := []byte(base64.RawURLEncoding.EncodeToString(publicKey.Y.FillBytes(make([]byte, coordinateBytes))))
 
 	h := sha256.New()
 	h.Write(append(b64X, b64Y...))
@@ -160,49 +143,39 @@ func JwkFromECDSAPublicKey(publicKey *ecdsa.PublicKey) map[string]any {
 	jwk["kty"] = "EC"
 	jwk["crv"] = publicKey.Curve.Params().Name
 	jwk["kid"] = base64.RawURLEncoding.EncodeToString(h.Sum(nil))
-	return jwk
+	return jwk, nil
 }
 
-func JwkFromECDSAPrivateKey(privateKey *ecdsa.PrivateKey) map[string]any {
-	jwk := map[string]any{}
+func checkECDSAPublicKey(publicKey *ecdsa.PublicKey, class error) error {
+	if publicKey == nil || publicKey.Curve == nil || publicKey.X == nil || publicKey.Y == nil {
+		return fmt.Errorf("%wan ECDSA key needs a curve and a point", class)
+	}
+	switch publicKey.Curve.Params().Name {
+	case "P-256", "P-384", "P-521":
+		return nil
+	default:
+		return fmt.Errorf("%wthe curve of an EC jwk is one of P-256, P-384 and P-521", class)
+	}
+}
 
-	curveBits := privateKey.Curve.Params().BitSize
-	curveBytes := curveBits / 8
-	if curveBits%8 > 0 {
-		curveBytes++
+func JwkFromECDSAPrivateKey(privateKey *ecdsa.PrivateKey) (map[string]any, error) {
+	if privateKey == nil {
+		return nil, fmt.Errorf("%wan ECDSA key needs a curve and a point", jose_errors.ErrInvalidPrivateKey)
+	}
+	if err := checkECDSAPublicKey(&privateKey.PublicKey, jose_errors.ErrInvalidPrivateKey); err != nil {
+		return nil, err
+	}
+	if privateKey.D == nil {
+		return nil, fmt.Errorf("%wan ECDSA private key needs its scalar d", jose_errors.ErrInvalidPrivateKey)
 	}
 
-	xBytes := privateKey.X.Bytes()
-	yBytes := privateKey.Y.Bytes()
-	dBytes := privateKey.D.Bytes()
-
-	if len(xBytes) < curveBytes {
-		padding := make([]byte, curveBytes-len(xBytes))
-		xBytes = append(padding, xBytes...)
+	jwk, err := JwkFromECDSAPublicKey(&privateKey.PublicKey)
+	if err != nil {
+		return nil, err
 	}
-	if len(yBytes) < curveBytes {
-		padding := make([]byte, curveBytes-len(yBytes))
-		yBytes = append(padding, yBytes...)
-	}
-
-	b64X := make([]byte, base64.RawURLEncoding.EncodedLen(len(xBytes)))
-	base64.RawURLEncoding.Encode(b64X, xBytes)
-
-	b64Y := make([]byte, base64.RawURLEncoding.EncodedLen(len(yBytes)))
-	base64.RawURLEncoding.Encode(b64Y, yBytes)
-
-	b64D := make([]byte, base64.RawURLEncoding.EncodedLen(len(dBytes)))
-	base64.RawURLEncoding.Encode(b64D, dBytes)
-
-	h := sha256.New()
-	h.Write(append(b64X, b64Y...))
-	jwk["x"] = string(b64X)
-	jwk["y"] = string(b64Y)
-	jwk["d"] = string(b64D)
-	jwk["kty"] = "EC"
-	jwk["crv"] = privateKey.Curve.Params().Name
-	jwk["kid"] = base64.RawURLEncoding.EncodeToString(h.Sum(nil))
-	return jwk
+	scalarBytes := (privateKey.Params().N.BitLen() + 7) / 8
+	jwk["d"] = base64.RawURLEncoding.EncodeToString(privateKey.D.FillBytes(make([]byte, scalarBytes)))
+	return jwk, nil
 }
 
 //todo: pull out kid calculation from these methods and break out into a different function
@@ -214,7 +187,10 @@ func JwkFromECDSAPrivateKey(privateKey *ecdsa.PrivateKey) map[string]any {
 // RFC 8037 section 2 fixes "x" at 32 octets, so a key of any other length is
 // refused rather than encoded into a buffer sized for 32.
 func JwkFromEdDSAPublicKey(publicKey *ed25519.PublicKey) (map[string]any, error) {
-	if publicKey == nil || len(*publicKey) != ed25519.PublicKeySize {
+	if publicKey == nil {
+		return nil, fmt.Errorf("%wan Ed25519 public key is %d bytes, got none", jose_errors.ErrInvalidPublicKey, ed25519.PublicKeySize)
+	}
+	if len(*publicKey) != ed25519.PublicKeySize {
 		return nil, fmt.Errorf("%wan Ed25519 public key is %d bytes, got %d", jose_errors.ErrInvalidPublicKey, ed25519.PublicKeySize, len(*publicKey))
 	}
 	jwk := map[string]any{}
@@ -236,7 +212,10 @@ func JwkFromEdDSAPublicKey(publicKey *ed25519.PublicKey) (map[string]any, error)
 // RFC 8037 section 2 fixes "d" at 32 octets and "x" at the 32 octet public key,
 // which is the second half of an ed25519.PrivateKey.
 func JwkFromEdDSAPrivateKey(privateKey *ed25519.PrivateKey) (map[string]any, error) {
-	if privateKey == nil || len(*privateKey) != ed25519.PrivateKeySize {
+	if privateKey == nil {
+		return nil, fmt.Errorf("%wan Ed25519 private key is %d bytes, got none", jose_errors.ErrInvalidPrivateKey, ed25519.PrivateKeySize)
+	}
+	if len(*privateKey) != ed25519.PrivateKeySize {
 		return nil, fmt.Errorf("%wan Ed25519 private key is %d bytes, got %d", jose_errors.ErrInvalidPrivateKey, ed25519.PrivateKeySize, len(*privateKey))
 	}
 	jwk := map[string]any{}
@@ -310,6 +289,10 @@ func RSAPrivateKeyFromJwk(jwk map[string]any) (*rsa.PrivateKey, error) {
 		return nil, fmt.Errorf("error extracting 'q' parameter from jwk: %w", err)
 	}
 
+	if jsonutils.KeyPresent(jwk, "oth") {
+		return nil, fmt.Errorf("%wan RSA jwk with more than two primes is not supported", jose_errors.ErrInvalidPrivateKey)
+	}
+
 	pPresent := jsonutils.KeyPresent(jwk, "p") //if one additional value is present, they all must be
 	for _, v := range []string{"q", "dp", "dq", "qi"} {
 		present := jsonutils.KeyPresent(jwk, v)
@@ -347,17 +330,14 @@ func RSAPublicKeyFromJwk(jwk map[string]any) (*rsa.PublicKey, error) {
 	}, nil
 }
 
-func JwkFromRSAPublicKey(publicKey *rsa.PublicKey) map[string]any {
+func JwkFromRSAPublicKey(publicKey *rsa.PublicKey) (map[string]any, error) {
+	if err := checkRSAPublicKey(publicKey, jose_errors.ErrInvalidPublicKey); err != nil {
+		return nil, err
+	}
 	jwk := map[string]any{}
 
-	nBytes := publicKey.N.Bytes()
-	eBytes := big.NewInt(int64(publicKey.E)).Bytes()
-
-	b64N := make([]byte, base64.RawURLEncoding.EncodedLen(len(nBytes)))
-	base64.RawURLEncoding.Encode(b64N, nBytes)
-
-	b64E := make([]byte, base64.RawURLEncoding.EncodedLen(len(eBytes)))
-	base64.RawURLEncoding.Encode(b64E, eBytes)
+	b64N := []byte(base64.RawURLEncoding.EncodeToString(publicKey.N.Bytes()))
+	b64E := []byte(base64.RawURLEncoding.EncodeToString(big.NewInt(int64(publicKey.E)).Bytes()))
 
 	h := sha256.New()
 	h.Write(append(b64N, b64E...))
@@ -365,84 +345,50 @@ func JwkFromRSAPublicKey(publicKey *rsa.PublicKey) map[string]any {
 	jwk["e"] = string(b64E)
 	jwk["kty"] = "RSA"
 	jwk["kid"] = base64.RawURLEncoding.EncodeToString(h.Sum(nil))
-	return jwk
+	return jwk, nil
 }
 
-func JwkFromRSAPrivateKey(privateKey *rsa.PrivateKey) map[string]any {
-	jwk := map[string]any{}
+func checkRSAPublicKey(publicKey *rsa.PublicKey, class error) error {
+	if publicKey == nil || publicKey.N == nil || publicKey.N.Sign() <= 0 || publicKey.E < 1 {
+		return fmt.Errorf("%wan RSA key needs a positive modulus and exponent", class)
+	}
+	return nil
+}
 
-	nBytes := privateKey.N.Bytes()
-	eBytes := big.NewInt(int64(privateKey.E)).Bytes()
-	dBytes := privateKey.D.Bytes()
-	dpBytes := privateKey.Precomputed.Dp.Bytes()
-	dqBytes := privateKey.Precomputed.Dq.Bytes()
-	qiBytes := privateKey.Precomputed.Qinv.Bytes()
-
-	b64N := make([]byte, base64.RawURLEncoding.EncodedLen(len(nBytes)))
-	base64.RawURLEncoding.Encode(b64N, nBytes)
-
-	b64E := make([]byte, base64.RawURLEncoding.EncodedLen(len(eBytes)))
-	base64.RawURLEncoding.Encode(b64E, eBytes)
-
-	b64D := make([]byte, base64.RawURLEncoding.EncodedLen(len(dBytes)))
-	base64.RawURLEncoding.Encode(b64D, dBytes)
-
-	b64Dp := make([]byte, base64.RawURLEncoding.EncodedLen(len(dpBytes)))
-	base64.RawURLEncoding.Encode(b64Dp, dpBytes)
-
-	b64Dq := make([]byte, base64.RawURLEncoding.EncodedLen(len(dqBytes)))
-	base64.RawURLEncoding.Encode(b64Dq, dqBytes)
-
-	b64Qi := make([]byte, base64.RawURLEncoding.EncodedLen(len(qiBytes)))
-	base64.RawURLEncoding.Encode(b64Qi, qiBytes)
-
-	//retrieve primes
-	b64Primes := make([][]byte, len(privateKey.Primes))
-	for i, b := range privateKey.Primes {
-		b64Primes[i] = make([]byte, base64.RawURLEncoding.EncodedLen(len(b.Bytes())))
-		base64.RawURLEncoding.Encode(b64Primes[i], b.Bytes())
+// JwkFromRSAPrivateKey builds the jwk of a two-prime RSA private key.
+//
+// RFC 7518 section 6.3.2.7 says a consumer without multi-prime support MUST NOT
+// use a key carrying "oth". The readers here have none, so a key with more than
+// two primes is refused rather than produced.
+func JwkFromRSAPrivateKey(privateKey *rsa.PrivateKey) (map[string]any, error) {
+	if privateKey == nil {
+		return nil, fmt.Errorf("%wan RSA key needs a positive modulus and exponent", jose_errors.ErrInvalidPrivateKey)
+	}
+	if err := checkRSAPublicKey(&privateKey.PublicKey, jose_errors.ErrInvalidPrivateKey); err != nil {
+		return nil, err
+	}
+	if privateKey.D == nil || len(privateKey.Primes) != 2 || privateKey.Primes[0] == nil || privateKey.Primes[1] == nil {
+		return nil, fmt.Errorf("%wan RSA private key needs d and exactly two primes", jose_errors.ErrInvalidPrivateKey)
 	}
 
-	// This is deprecated but until the spec formally eliminates them, this must stay
-	// nolint:staticcheck
-	if len(privateKey.Precomputed.CRTValues) > 0 {
-		var oth []map[string]string
-		// nolint:staticcheck
-		for _, prime := range privateKey.Precomputed.CRTValues {
-			rBytes := prime.R.Bytes()
-			expBytes := prime.Exp.Bytes()
-			coeffBytes := prime.Coeff.Bytes()
-
-			b64r := make([]byte, base64.RawURLEncoding.EncodedLen(len(rBytes)))
-			base64.RawURLEncoding.Encode(b64r, rBytes)
-
-			b64exp := make([]byte, base64.RawURLEncoding.EncodedLen(len(expBytes)))
-			base64.RawURLEncoding.Encode(b64exp, expBytes)
-
-			b64coeff := make([]byte, base64.RawURLEncoding.EncodedLen(len(coeffBytes)))
-			base64.RawURLEncoding.Encode(b64coeff, coeffBytes)
-
-			oth = append(oth, map[string]string{
-				"r": string(rBytes),
-				"d": string(b64exp),
-				"t": string(b64coeff),
-			})
-		}
-		jwk["oth"] = oth
+	precomputed := *privateKey
+	precomputed.Precompute()
+	if precomputed.Precomputed.Dp == nil || precomputed.Precomputed.Dq == nil || precomputed.Precomputed.Qinv == nil {
+		return nil, fmt.Errorf("%wthe CRT values of the RSA private key cannot be computed", jose_errors.ErrInvalidPrivateKey)
 	}
-	h := sha256.New()
-	h.Write(append(b64N, b64E...))
-	jwk["n"] = string(b64N)
-	jwk["e"] = string(b64E)
-	jwk["d"] = string(b64D)
-	jwk["dp"] = string(b64Dp)
-	jwk["dq"] = string(b64Dq)
-	jwk["qi"] = string(b64Qi)
-	jwk["p"] = string(b64Primes[0])
-	jwk["q"] = string(b64Primes[1])
-	jwk["kty"] = "RSA"
-	jwk["kid"] = base64.RawURLEncoding.EncodeToString(h.Sum(nil))
-	return jwk
+
+	jwk, err := JwkFromRSAPublicKey(&privateKey.PublicKey)
+	if err != nil {
+		return nil, err
+	}
+	encode := func(i *big.Int) string { return base64.RawURLEncoding.EncodeToString(i.Bytes()) }
+	jwk["d"] = encode(privateKey.D)
+	jwk["p"] = encode(privateKey.Primes[0])
+	jwk["q"] = encode(privateKey.Primes[1])
+	jwk["dp"] = encode(precomputed.Precomputed.Dp)
+	jwk["dq"] = encode(precomputed.Precomputed.Dq)
+	jwk["qi"] = encode(precomputed.Precomputed.Qinv)
+	return jwk, nil
 }
 
 func ExtractRSFromSignature(signature []byte, keySize int) (*big.Int, *big.Int, error) {
