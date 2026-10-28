@@ -2,7 +2,7 @@
 A Go implementation of the JOSE suite of specifications — JWS ([RFC 7515](https://www.rfc-editor.org/rfc/rfc7515)), JWA ([RFC 7518](https://www.rfc-editor.org/rfc/rfc7518)), JWK ([RFC 7517](https://www.rfc-editor.org/rfc/rfc7517)), and JWT ([RFC 7519](https://www.rfc-editor.org/rfc/rfc7519)).
 
 ## Requirements
-- Go 1.21 or higher
+- Go 1.27 or higher
 
 ## Import paths
 
@@ -101,7 +101,7 @@ signer, err := jws.GetSignerFromPrivateKey(jwa.ES256, privateKey)
 `GetSigner`, `GetSignerFromPrivateKey`, `GetValidator` and `GetValidatorFromJwk` refuse a key the algorithm cannot use, with `ErrInvalidPrivateKey` or `ErrInvalidPublicKey`:
 
 - **RS and PS:** the modulus must be 2048 to 8192 bits. RFC 7518 sections 3.3 and 3.5 make 2048 bits a MUST. The 8192-bit ceiling is this library's: the cost of an RSA verification grows with the square of the modulus, and a token can name its own key, so an unbounded modulus lets a peer hold a core for seconds. 8192 bits is also the default cap `crypto/tls` puts on a peer's RSA key. `Opts.BitSize` takes the same range.
-- **RS and PS exponent:** the public exponent must be odd and between 3 and 2^31 - 1. RFC 8017 section 3.1 puts e between 3 and n - 1 with GCD(e, λ(n)) = 1, and λ(n) is even, so e is odd. With e = 1 a signature is its own encoded message, so anyone could forge one. `crypto/rsa` applies this same rule itself only from Go 1.24, and Go 1.21 verifies such a forgery as valid, so the key is refused when the signer or validator is built.
+- **RS and PS exponent:** the public exponent must be odd and between 3 and 2^31 - 1. RFC 8017 section 3.1 puts e between 3 and n - 1 with GCD(e, λ(n)) = 1, and λ(n) is even, so e is odd. With e = 1 a signature is its own encoded message, so anyone could forge one. `crypto/rsa` refuses such a key when it verifies, and this library refuses it earlier, when the signer or validator is built.
 - **ES:** the key must lie on the algorithm's own curve: P-256 for ES256, P-384 for ES384 and P-521 for ES512. RFC 7518 section 3.1 defines each algorithm by its curve.
 - **Every family:** a nil key, or one missing the modulus, exponent, curve, coordinates or private scalar, is refused when the signer or validator is built rather than panicking later. An RSA private key needs only `D`: RFC 7518 section 6.3.2 makes the primes optional.
 
@@ -359,7 +359,7 @@ An `OKP` jwk is read only when its `crv` is `Ed25519`, the one OKP subtype this 
 
 An `EC` jwk is read only when its `crv` is P-256, P-384 or P-521. Any other curve is refused with `ErrUnsupportedAlgorithm`. Each of `x` and `y` must be the full size of a coordinate of the curve: 32, 48 or 66 octets. RFC 7518 sections 6.2.1.2 and 6.2.1.3 require this, so a coordinate with a leading zero octet dropped or added is refused. The point must be on the curve. A private key must carry `d`, which RFC 7518 section 6.2.2 makes REQUIRED. `d` must be the length of the curve order, in `[1, n-1]`, and `x` and `y` must be its public point.
 
-An `RSA` jwk's `e` must be an odd integer from 3 to 2^31-1. RFC 3447 section 3.1 sets the lower bound and requires an odd value, and `crypto/rsa` refuses a larger one. A private key's `d` must be a positive integer less than `n`, as RFC 3447 section 3.2 defines it. When `p` and `q` are present, `n` must be odd, the key must pass `rsa.PrivateKey.Validate`, and `dp`, `dq` and `qi` must be the CRT values of `p`, `q` and `d`. When they are absent, `d` must undo `e`. The reader cannot compute lambda(n) without the primes, so `crypto/rsa` signs 32 random 32-byte messages with the key and verifies each signature under `n` and `e`. A wrong `d` passes only if all 32 signatures come out right. Each signature costs one full-size private exponentiation, so reading a key with no primes takes noticeably longer than reading one with them. From Go 1.24, `crypto/rsa` refuses a key under 1024 bits when the main module's `go` line is 1.24 or later and `GODEBUG=rsa1024min=0` is not set. Such a key with no primes is then refused when it is read, as it could not sign either. `PrivateFromJwk` refuses a bad `n` or `e` in an RSA private key with `ErrInvalidPrivateKey`, and a refused `e` also matches `ErrInvalidPublicKey`.
+An `RSA` jwk's `e` must be an odd integer from 3 to 2^31-1. RFC 3447 section 3.1 sets the lower bound and requires an odd value, and `crypto/rsa` refuses a larger one. A private key's `d` must be a positive integer less than `n`, as RFC 3447 section 3.2 defines it. When `p` and `q` are present, the key must pass `rsa.PrivateKey.Validate`, and `dp`, `dq` and `qi` must be the CRT values of `p`, `q` and `d`. When they are absent, `d` must undo `e`. The reader cannot compute lambda(n) without the primes, so `crypto/rsa` signs 32 random 32-byte messages with the key and verifies each signature under `n` and `e`. A wrong `d` passes only if all 32 signatures come out right. Each signature costs one full-size private exponentiation, so reading a key with no primes takes noticeably longer than reading one with them. `crypto/rsa` refuses a key under 1024 bits unless `GODEBUG=rsa1024min=0` is set, so such a key with no primes is refused when it is read, as it could not sign either. `PrivateFromJwk` refuses a bad `n` or `e` in an RSA private key with `ErrInvalidPrivateKey`, and a refused `e` also matches `ErrInvalidPublicKey`.
 
 The error for an unsupported `kty` or `crv` names the values this library supports. It does not repeat the value the jwk carried, so a peer's text does not reach your logs.
 
@@ -475,6 +475,7 @@ When a header check echoes a value from the token in its error, the value is quo
 
 Every change below is a compile error or a silent behaviour change for a consumer of v0.10.0.
 
+- This module now requires Go 1.27. v0.10.0 declared Go 1.21, which Go no longer supports.
 - `jwt.Validate` and `jws.VerifyCompactSerialization` take a `context.Context` first. It bounds any `jku` or `x5u` fetch.
 - `model.Jwks.RetrieveByKeyID` returns `[]map[string]any`, every key carrying the `kid` in set order, not one `map[string]any`. It returns an error only when no key carries the `kid`. To keep the old exactly-one meaning, check `len(keys) == 1` and use `keys[0]`.
 - Every error sentinel's message now ends in `": "`, so it composes with the text that wraps it. A match on an error string breaks; match with `errors.Is` instead.
