@@ -70,7 +70,7 @@ func Test_validateCertificateChain(t *testing.T) {
 		},
 		"an entry that decodes to no certificate": {
 			certificates: []string{""},
-			errMsg:       "the provided values carry no certificate",
+			errMsg:       "entry 0 of the chain is not exactly one certificate: x509: malformed certificate",
 			errTypes:     []error{joseerror.ErrMalformedClaim},
 		},
 		"a chain whose links do not join still parses": {
@@ -225,7 +225,7 @@ func TestInlineCertificate_AcceptsTheThumbprintTheRFCDefines(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			keys, err := InlineCertificate([]string{base64.StdEncoding.EncodeToString(cert)}, tc.x5t, tc.x5ts256, "RS256", poolOf(t, cert))()
+			keys, err := InlineCertificate([]string{base64.StdEncoding.EncodeToString(cert)}, tc.x5t, tc.x5ts256, poolOf(t, cert))()
 			if err != nil {
 				t.Fatalf("[%s] a header carrying the thumbprint this clause defines must be accepted, got %v", tc.reference, err)
 			}
@@ -268,7 +268,7 @@ func TestInlineCertificate_RefusesAThumbprintThatDoesNotMatch(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			keys, err := InlineCertificate([]string{base64.StdEncoding.EncodeToString(cert)}, tc.x5t, tc.x5ts256, "RS256", poolOf(t, cert))()
+			keys, err := InlineCertificate([]string{base64.StdEncoding.EncodeToString(cert)}, tc.x5t, tc.x5ts256, poolOf(t, cert))()
 			if err == nil {
 				t.Fatalf("[%s] a thumbprint that is not this certificate's must be refused, got %d keys", tc.reference, len(keys))
 			}
@@ -315,7 +315,7 @@ func TestRetrieveX5U_HoldsTheCertificateToItsThumbprint(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			keys, err := RetrieveX5U(server.URL, server.Client(), tc.x5t, tc.x5ts256, "RS256", poolOf(t, cert))()
+			keys, err := RetrieveX5U(server.URL, server.Client(), tc.x5t, tc.x5ts256, poolOf(t, cert))()
 			if tc.accept {
 				if err != nil {
 					t.Fatalf("[%s] the certificate this URL serves carries that thumbprint, so it must be accepted, got %v", tc.reference, err)
@@ -399,7 +399,7 @@ func TestInlineCertificate_AChainIsValidatedAgainstTheConfiguredRootsNotItself(t
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			keys, err := InlineCertificate(tc.chain, nil, nil, "RS256", tc.roots)()
+			keys, err := InlineCertificate(tc.chain, nil, nil, tc.roots)()
 			if tc.accept {
 				if err != nil {
 					t.Fatalf("[%s] a chain that validates to a configured trust anchor must yield its key, got %v", tc.reference, err)
@@ -528,7 +528,7 @@ func TestRetrieveX5U_ReadsThePemEncodingTheClauseRequires(t *testing.T) {
 			}))
 			defer server.Close()
 
-			keys, err := RetrieveX5U(server.URL, server.Client(), nil, nil, "RS256", roots)()
+			keys, err := RetrieveX5U(server.URL, server.Client(), nil, nil, roots)()
 			if tc.accept {
 				if err != nil {
 					t.Fatalf("[%s] the clause requires the resource be PEM-encoded, so %s must be read, got %v", tc.reference, name, err)
@@ -539,7 +539,10 @@ func TestRetrieveX5U_ReadsThePemEncodingTheClauseRequires(t *testing.T) {
 				return
 			}
 			if err == nil {
-				t.Errorf("[%s] %s names no certificate, so it must be refused, got %d keys", tc.reference, name, len(keys))
+				t.Fatalf("[%s] %s names no certificate, so it must be refused, got %d keys", tc.reference, name, len(keys))
+			}
+			if !errors.Is(err, joseerror.ErrApplicationError) {
+				t.Errorf("[%s] %s is what the x5u resource returned, so failing to decode it is ErrApplicationError, got %v", tc.reference, name, err)
 			}
 		})
 	}

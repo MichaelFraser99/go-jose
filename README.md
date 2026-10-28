@@ -171,7 +171,7 @@ head, body, err := jwt.Validate(token, nil, &model.JoseOptions{
 
 Both URLs come from the header of the token being verified, so this library makes an outbound request to an address a peer chose, before the signature is checked. Give the client a transport that rejects the destinations your deployment will not allow — private, loopback, link-local and other reserved ranges — and a timeout. The body is capped at 4 MiB whatever client you supply.
 
-With no client, `jku` and `x5u` contribute no key. The members of a `jku` set are first narrowed by the token's `kid` and `alg`. Then any remaining member this library cannot read is skipped, as RFC 7517 section 5 recommends, and the rest are used. Because narrowing comes first, an unreadable member can still match the `kid` or `alg` and so keep a readable member out. A set whose `keys` array holds a number, string, boolean or array is not a JWK Set, so the whole set is refused. `jku` must be `https`, as RFC 7515 section 4.1.2 requires integrity protection, and an `x5u` resource is read as the PEM encoding section 4.1.5 requires, falling back to raw DER for a server that sends that instead.
+With no client, `jku` and `x5u` contribute no key. The members of a `jku` set are first narrowed by the token's `kid` and `alg`. Then any remaining member this library cannot read is skipped, as RFC 7517 section 5 recommends, and the rest are used. Because narrowing comes first, an unreadable member can still match the `kid` or `alg` and so keep a readable member out. A set whose `keys` array holds a number, string, boolean or array is not a JWK Set, so the whole set is refused. `jku` must be `https`, as RFC 7515 section 4.1.2 requires integrity protection, and an `x5u` resource is read as the PEM encoding section 4.1.5 requires. A server that sends raw DER instead is still read: a body that parses as DER certificates is taken as exactly those certificates, and is never searched for PEM text. Any other body is read as PEM text, so a body whose explanatory text is not valid UTF-8 is refused.
 
 ### Stating what you expect of a header
 
@@ -213,7 +213,9 @@ head, body, err := jwt.Validate(token, nil, &model.JoseOptions{X509Roots: roots}
 
 With no `X509Roots` configured, a token's `x5c` and `x5u` headers contribute no key. They are not an error — section 4.1.6 makes use of the header OPTIONAL — so the token still verifies if another key source does, and fails with `no cyptographic material provided for signature validation` if none does.
 
-A malformed `x5c` is refused whether or not roots are configured, because its shape is a property of the claim rather than of your trust configuration. An array that is not an array of strings, an empty array, or an entry that is not base64-encoded DER is `ErrMalformedClaim`.
+A malformed `x5c` is refused whether or not roots are configured, because its shape is a property of the claim rather than of your trust configuration. An array that is not an array of strings, an empty array, or an entry that is not exactly one base64-encoded DER certificate is `ErrMalformedClaim`.
+
+The signing key is taken from the first certificate, and that certificate is the one validated against your roots, as section 4.1.6 requires. The algorithm the issuer used to sign that certificate is not compared with the token's `alg`. An ES256 key in a certificate issued by an RSA root is usable.
 
 `jwk` and `jku` are deliberately left alone by this. Neither carries a validation MUST, and an inline `jwk` is transparently "here is my key, check against it" — a caller reading the header knows no trust is being conferred. An `x5c` chain looks like PKI, which is why it is the one that needs the anchor made explicit.
 
