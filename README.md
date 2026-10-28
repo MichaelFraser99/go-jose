@@ -169,7 +169,7 @@ head, body, err := jwt.Validate(token, nil, &model.JoseOptions{
 
 Both URLs come from the header of the token being verified, so this library makes an outbound request to an address a peer chose, before the signature is checked. Give the client a transport that rejects the destinations your deployment will not allow — private, loopback, link-local and other reserved ranges — and a timeout. The body is capped at 4 MiB whatever client you supply.
 
-With no client, `jku` and `x5u` contribute no key. `jku` must be `https`, as RFC 7515 section 4.1.2 requires integrity protection, and an `x5u` resource is read as the PEM encoding section 4.1.5 requires, falling back to raw DER for a server that sends that instead.
+With no client, `jku` and `x5u` contribute no key. A member of a `jku` set that this library cannot read is ignored, as RFC 7517 section 5 recommends. The other members of the set are still used. `jku` must be `https`, as RFC 7515 section 4.1.2 requires integrity protection, and an `x5u` resource is read as the PEM encoding section 4.1.5 requires, falling back to raw DER for a server that sends that instead.
 
 ### Stating what you expect of a header
 
@@ -294,8 +294,8 @@ Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 | `ErrMalformedClaim` | A claim is present but its type or value is wrong |
 | `ErrMissingClaim` | A required claim is absent |
 | `ErrMissingCriticalClaim` | A header named in `crit` is absent, or names an extension this library does not understand |
-| `ErrNoKeyIdentifierMatch` | No key could be selected. The `kid` matches nothing, a certificate chain does not reach a configured root, or an `x5t` thumbprint does not match the chain |
-| `ErrKeystoreError` | A key set could not be read, holds no usable key, or the configuration needed to use it is absent, such as `X509Roots` for a certificate chain |
+| `ErrNoKeyIdentifierMatch` | No key could be selected. The `kid` matches nothing, a `jku` set holds no usable key that matches the header, a certificate chain does not reach a configured root, or an `x5t` thumbprint does not match the chain |
+| `ErrKeystoreError` | A `model.Jwks` lookup or addition failed, or the configuration needed to use a key source is absent, such as `X509Roots` for a certificate chain |
 | `ErrApplicationError` | Key material a header named could not be obtained or decoded. Covers a failed `jku` or `x5u` fetch, and a local decode of what one returned |
 | `ErrMalformedToken` | The token is not a well formed JOSE object |
 
