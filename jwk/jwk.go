@@ -4,6 +4,7 @@ import (
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/mldsa"
 	"crypto/rsa"
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
@@ -27,6 +28,8 @@ func PublicJwk(publicKey crypto.PublicKey) (*map[string]any, error) {
 		m, err = common.JwkFromEdDSAPublicKey(key)
 	case ed25519.PublicKey:
 		m, err = common.JwkFromEdDSAPublicKey(&key)
+	case *mldsa.PublicKey:
+		m, err = common.JwkFromMLDSAPublicKey(key)
 	default:
 		return nil, fmt.Errorf("%wunknown public key format provided", joseerror.ErrInvalidPublicKey)
 	}
@@ -52,6 +55,8 @@ func PrivateJwk(privateKey crypto.PrivateKey) (*map[string]any, error) {
 		m, err = common.JwkFromEdDSAPrivateKey(key)
 	case ed25519.PrivateKey:
 		m, err = common.JwkFromEdDSAPrivateKey(&key)
+	case *mldsa.PrivateKey:
+		m, err = common.JwkFromMLDSAPrivateKey(key)
 	default:
 		return nil, fmt.Errorf("%wunknown private key format provided", joseerror.ErrInvalidPrivateKey)
 	}

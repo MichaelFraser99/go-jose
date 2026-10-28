@@ -10,6 +10,7 @@ import (
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/hs256"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/hs384"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/hs512"
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/mldsa"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/ps256"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/ps384"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/ps512"
@@ -77,6 +78,8 @@ func GetSigner(alg jwa.Algorithm, opts *model.Opts) (model.Signer, error) {
 		s, err = hs512.NewSigner(opts.SecretKey)
 	case jwa.Ed25519:
 		s, err = eddsa.NewSigner()
+	case jwa.MLDSA44, jwa.MLDSA65, jwa.MLDSA87:
+		s, err = mldsa.NewSigner(alg)
 
 	case jwa.EdDSA:
 		return nil, errSignWithEdDSA
@@ -126,6 +129,8 @@ func GetSignerFromPrivateKey(alg jwa.Algorithm, privateKey crypto.PrivateKey) (m
 		return nil, fmt.Errorf("%wHMAC Signers cannot be created this way - please use GetSigner and specify the secret key using the Opts function", joseerror.ErrUnsupportedAlgorithm)
 	case jwa.Ed25519:
 		s, err = eddsa.NewSignerFromPrivateKey(privateKey)
+	case jwa.MLDSA44, jwa.MLDSA65, jwa.MLDSA87:
+		s, err = mldsa.NewSignerFromPrivateKey(alg, privateKey)
 
 	case jwa.EdDSA:
 		return nil, errSignWithEdDSA

@@ -27,6 +27,15 @@ const (
 	// Ed25519 is EdDSA with the Ed25519 parameters of RFC 8032 section 5.1, as
 	// RFC 9864 section 4.1.1 registers it.
 	Ed25519
+	// MLDSA44 is ML-DSA with the ML-DSA-44 parameters of FIPS 204, as RFC 9964
+	// section 5 registers it.
+	MLDSA44
+	// MLDSA65 is ML-DSA with the ML-DSA-65 parameters of FIPS 204, as RFC 9964
+	// section 5 registers it.
+	MLDSA65
+	// MLDSA87 is ML-DSA with the ML-DSA-87 parameters of FIPS 204, as RFC 9964
+	// section 5 registers it.
+	MLDSA87
 )
 
 func (a Algorithm) String() string {
@@ -61,6 +70,12 @@ func (a Algorithm) String() string {
 		return "EdDSA"
 	case Ed25519:
 		return "Ed25519"
+	case MLDSA44:
+		return "ML-DSA-44"
+	case MLDSA65:
+		return "ML-DSA-65"
+	case MLDSA87:
+		return "ML-DSA-87"
 	default:
 		return ""
 	}
@@ -98,6 +113,12 @@ func GetAlgorithm(alg string) Algorithm {
 		return EdDSA
 	case "Ed25519":
 		return Ed25519
+	case "ML-DSA-44":
+		return MLDSA44
+	case "ML-DSA-65":
+		return MLDSA65
+	case "ML-DSA-87":
+		return MLDSA87
 	default:
 		return Unknown
 	}

@@ -10,6 +10,7 @@ import (
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/hs256"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/hs384"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/hs512"
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/mldsa"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/ps256"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/ps384"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/ps512"
@@ -64,6 +65,9 @@ var validatorConstructors = map[jwa.Algorithm]func(crypto.PublicKey) (model.Vali
 	jwa.HS512:   func(k crypto.PublicKey) (model.Validator, error) { return hs512.NewValidator(k) },
 	jwa.EdDSA:   func(k crypto.PublicKey) (model.Validator, error) { return eddsa.NewValidator(k) },
 	jwa.Ed25519: func(k crypto.PublicKey) (model.Validator, error) { return eddsa.NewValidator(k) },
+	jwa.MLDSA44: func(k crypto.PublicKey) (model.Validator, error) { return mldsa.NewValidator(jwa.MLDSA44, k) },
+	jwa.MLDSA65: func(k crypto.PublicKey) (model.Validator, error) { return mldsa.NewValidator(jwa.MLDSA65, k) },
+	jwa.MLDSA87: func(k crypto.PublicKey) (model.Validator, error) { return mldsa.NewValidator(jwa.MLDSA87, k) },
 }
 
 func hasValidator(alg jwa.Algorithm) bool {
@@ -83,7 +87,7 @@ func hasValidator(alg jwa.Algorithm) bool {
 // refused unless that member is the string alg names.
 func GetValidatorFromJwk(alg jwa.Algorithm, publicJwk map[string]any) (model.Validator, error) {
 	switch alg {
-	case jwa.ES256, jwa.ES384, jwa.ES512, jwa.RS256, jwa.RS384, jwa.RS512, jwa.PS256, jwa.PS384, jwa.PS512, jwa.EdDSA, jwa.Ed25519:
+	case jwa.ES256, jwa.ES384, jwa.ES512, jwa.RS256, jwa.RS384, jwa.RS512, jwa.PS256, jwa.PS384, jwa.PS512, jwa.EdDSA, jwa.Ed25519, jwa.MLDSA44, jwa.MLDSA65, jwa.MLDSA87:
 	case jwa.HS256, jwa.HS384, jwa.HS512:
 		return nil, fmt.Errorf("%wvalidators cannot be created for symmetric algorithms", joseerror.ErrUnsupportedAlgorithm)
 	case jwa.Unknown:

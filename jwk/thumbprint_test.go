@@ -152,21 +152,21 @@ func TestThumbprint_RefusesAJwkWhoseThumbprintIsUndefined(t *testing.T) {
 		jwk  map[string]any
 		want error
 	}{
-		"a nil jwk":                    {jwk: nil, want: joseerror.ErrMalformedClaim},
-		"no kty":                       {jwk: map[string]any{"n": "AQAB", "e": "AQAB"}, want: joseerror.ErrMalformedClaim},
-		"a null kty":                   {jwk: map[string]any{"kty": nil}, want: joseerror.ErrMalformedClaim},
-		"an RSA key with a null n":     {jwk: map[string]any{"kty": "RSA", "n": nil, "e": "AQAB"}, want: joseerror.ErrMalformedClaim},
-		"the ML-DSA key type AKP":      {jwk: map[string]any{"kty": "AKP", "alg": "ML-DSA-65", "pub": "AQAB"}, want: joseerror.ErrUnsupportedAlgorithm},
-		"a kty that is not a string":   {jwk: map[string]any{"kty": 7}, want: joseerror.ErrMalformedClaim},
-		"an unsupported kty":           {jwk: map[string]any{"kty": "nonsense"}, want: joseerror.ErrUnsupportedAlgorithm},
-		"an RSA key with no e":         {jwk: map[string]any{"kty": "RSA", "n": "AQAB"}, want: joseerror.ErrMalformedClaim},
-		"an EC key with a numeric x":   {jwk: map[string]any{"kty": "EC", "crv": "P-256", "x": 7, "y": "AQAB"}, want: joseerror.ErrMalformedClaim},
-		"an OKP key with no crv":       {jwk: map[string]any{"kty": "OKP", "x": "AQAB"}, want: joseerror.ErrMalformedClaim},
-		"an oct key with no k":         {jwk: map[string]any{"kty": "oct"}, want: joseerror.ErrMalformedClaim},
-		"a value holding a quote":      {jwk: map[string]any{"kty": "RSA", "n": `AQ"AB`, "e": "AQAB"}, want: joseerror.ErrMalformedClaim},
-		"a value holding a backslash":  {jwk: map[string]any{"kty": "RSA", "n": `AQ\AB`, "e": "AQAB"}, want: joseerror.ErrMalformedClaim},
-		"a value holding a line break": {jwk: map[string]any{"kty": "RSA", "n": "AQ\nAB", "e": "AQAB"}, want: joseerror.ErrMalformedClaim},
-		"a value that is not UTF-8":    {jwk: map[string]any{"kty": "RSA", "n": "AQ\xffAB", "e": "AQAB"}, want: joseerror.ErrMalformedClaim},
+		"a nil jwk":                     {jwk: nil, want: joseerror.ErrMalformedClaim},
+		"no kty":                        {jwk: map[string]any{"n": "AQAB", "e": "AQAB"}, want: joseerror.ErrMalformedClaim},
+		"a null kty":                    {jwk: map[string]any{"kty": nil}, want: joseerror.ErrMalformedClaim},
+		"an RSA key with a null n":      {jwk: map[string]any{"kty": "RSA", "n": nil, "e": "AQAB"}, want: joseerror.ErrMalformedClaim},
+		"a key type no one has defined": {jwk: map[string]any{"kty": "a-future-type", "pub": "AQAB"}, want: joseerror.ErrUnsupportedAlgorithm},
+		"a kty that is not a string":    {jwk: map[string]any{"kty": 7}, want: joseerror.ErrMalformedClaim},
+		"an unsupported kty":            {jwk: map[string]any{"kty": "nonsense"}, want: joseerror.ErrUnsupportedAlgorithm},
+		"an RSA key with no e":          {jwk: map[string]any{"kty": "RSA", "n": "AQAB"}, want: joseerror.ErrMalformedClaim},
+		"an EC key with a numeric x":    {jwk: map[string]any{"kty": "EC", "crv": "P-256", "x": 7, "y": "AQAB"}, want: joseerror.ErrMalformedClaim},
+		"an OKP key with no crv":        {jwk: map[string]any{"kty": "OKP", "x": "AQAB"}, want: joseerror.ErrMalformedClaim},
+		"an oct key with no k":          {jwk: map[string]any{"kty": "oct"}, want: joseerror.ErrMalformedClaim},
+		"a value holding a quote":       {jwk: map[string]any{"kty": "RSA", "n": `AQ"AB`, "e": "AQAB"}, want: joseerror.ErrMalformedClaim},
+		"a value holding a backslash":   {jwk: map[string]any{"kty": "RSA", "n": `AQ\AB`, "e": "AQAB"}, want: joseerror.ErrMalformedClaim},
+		"a value holding a line break":  {jwk: map[string]any{"kty": "RSA", "n": "AQ\nAB", "e": "AQAB"}, want: joseerror.ErrMalformedClaim},
+		"a value that is not UTF-8":     {jwk: map[string]any{"kty": "RSA", "n": "AQ\xffAB", "e": "AQAB"}, want: joseerror.ErrMalformedClaim},
 	}
 
 	for name, test := range tests {

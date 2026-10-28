@@ -7,12 +7,14 @@ import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
+	"crypto/mldsa"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/asn1"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
 	"github.com/MichaelFraser99/go-jose/jws"
@@ -127,7 +129,7 @@ func signingHash(alg jwa.Algorithm) crypto.Hash {
 		return crypto.SHA384
 	case jwa.RS512, jwa.PS512, jwa.ES512:
 		return crypto.SHA512
-	case jwa.HS256, jwa.HS384, jwa.HS512, jwa.EdDSA, jwa.Ed25519, jwa.Unknown:
+	case jwa.HS256, jwa.HS384, jwa.HS512, jwa.EdDSA, jwa.Ed25519, jwa.MLDSA44, jwa.MLDSA65, jwa.MLDSA87, jwa.Unknown:
 		return 0
 	}
 	return 0
@@ -201,6 +203,13 @@ func signWithCryptoSigner(signer crypto.Signer, alg jwa.Algorithm, signingInput 
 			return nil, fmt.Errorf("%w%s needs an ed25519 key", joseerror.ErrInvalidPrivateKey, alg)
 		}
 		return signer.Sign(rand.Reader, digest, crypto.Hash(0))
+	case jwa.MLDSA44, jwa.MLDSA65, jwa.MLDSA87:
+		public, ok := signer.Public().(*mldsa.PublicKey)
+		params, _ := common.MLDSAParameters(alg.String())
+		if _, err := common.UsableMLDSAPublicKey(public, params, joseerror.ErrInvalidPrivateKey); !ok || err != nil {
+			return nil, fmt.Errorf("%w%s needs an %s key", joseerror.ErrInvalidPrivateKey, alg, alg)
+		}
+		return signer.Sign(rand.Reader, signingInput, crypto.Hash(0))
 	case jwa.HS256, jwa.HS384, jwa.HS512, jwa.EdDSA, jwa.Unknown:
 	}
 	return nil, fmt.Errorf("%wonly a signer from this library can sign %s", joseerror.ErrInvalidPrivateKey, alg)
