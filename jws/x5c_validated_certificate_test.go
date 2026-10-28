@@ -13,6 +13,8 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"math/big"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -70,7 +72,13 @@ func p256Key(t *testing.T) *ecdsa.PrivateKey {
 
 func signWithX5c(t *testing.T, alg jwa.Algorithm, key crypto.PrivateKey, x5c []string) string {
 	t.Helper()
-	head, err := json.Marshal(map[string]any{"alg": alg.String(), "x5c": x5c})
+	return signWithHeader(t, alg, key, map[string]any{"x5c": x5c})
+}
+
+func signWithHeader(t *testing.T, alg jwa.Algorithm, key crypto.PrivateKey, header map[string]any) string {
+	t.Helper()
+	header["alg"] = alg.String()
+	head, err := json.Marshal(header)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,6 +158,63 @@ func TestVerifyCompactSerialization_AnX5cLeafIsUsableWhateverAlgorithmItsIssuerS
 			token := signWithX5c(t, test.alg, signingKey, []string{der64(signingLeaf)})
 			if _, _, err := jws.VerifyCompactSerialization(token, nil, &model.JoseOptions{X509Roots: roots(test.ca)}); err != nil {
 				t.Errorf("[RFC 7515 4.1.6] the first certificate holds the signing key, and the algorithm its issuer signed it with says nothing about that key, got %v", err)
+			}
+		})
+	}
+}
+
+func TestVerifyCompactSerialization_AnX5cEntryHoldingPemIsRefused(t *testing.T) {
+	ca := rootCA(t, p256Key(t))
+	signingKey := p256Key(t)
+	signingLeaf := leaf(t, signingKey, ca)
+
+	entry := base64.StdEncoding.EncodeToString(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: signingLeaf.cert.Raw}))
+	token := signWithX5c(t, jwa.ES256, signingKey, []string{entry})
+	if _, _, err := jws.VerifyCompactSerialization(token, nil, &model.JoseOptions{X509Roots: roots(ca)}); err == nil {
+		t.Error("[RFC 7515 4.1.6] each x5c entry is base64-encoded DER, so an entry holding base64 of PEM text must be refused")
+	}
+}
+
+func TestVerifyCompactSerialization_AnX5uDerBodyIsNotReplacedByAPemCertificateItEmbeds(t *testing.T) {
+	ca := rootCA(t, p256Key(t))
+	trustedKey := p256Key(t)
+	trusted := leaf(t, trustedKey, ca)
+	served := issue(t, &x509.Certificate{
+		Subject: pkix.Name{CommonName: "outer"},
+		ExtraExtensions: []pkix.Extension{{
+			Id:    asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 99999, 1},
+			Value: append([]byte("\n"), pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: trusted.cert.Raw})...),
+		}},
+	}, p256Key(t), nil)
+
+	tests := map[string]struct {
+		body   []byte
+		accept bool
+	}{
+		"the trusted certificate itself":           {body: trusted.cert.Raw, accept: true},
+		"one raw DER certificate":                  {body: served.cert.Raw},
+		"one raw DER certificate and a stray byte": {body: append(append([]byte{}, served.cert.Raw...), 0)},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if _, err := w.Write(tc.body); err != nil {
+					return
+				}
+			}))
+			defer server.Close()
+
+			token := signWithHeader(t, jwa.ES256, trustedKey, map[string]any{"x5u": server.URL})
+			_, _, err := jws.VerifyCompactSerialization(token, nil, &model.JoseOptions{X509Roots: roots(ca), HttpClient: server.Client()})
+			if tc.accept {
+				if err != nil {
+					t.Errorf("[RFC 7515 4.1.5] %s holds the signing key and chains to the root, so it must verify, got %v", name, err)
+				}
+				return
+			}
+			if err == nil {
+				t.Errorf("[RFC 7515 4.1.5] the served certificate holds the signing key, so %s must not verify with the key of a certificate embedded in it as PEM text", name)
 			}
 		})
 	}

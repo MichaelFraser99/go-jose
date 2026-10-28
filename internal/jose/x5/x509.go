@@ -12,6 +12,7 @@ import (
 	"github.com/MichaelFraser99/go-jose/model"
 	"io"
 	"net/http"
+	"unicode/utf8"
 )
 
 var (
@@ -59,7 +60,7 @@ func CertificateChainStrings(value any) ([]string, error) {
 func parseCertificateChain(certificateChain []string) ([]*x509.Certificate, error) {
 	certificates := make([]*x509.Certificate, 0, len(certificateChain))
 	for i, entry := range certificateChain {
-		der, err := base64.StdEncoding.DecodeString(entry) // certificates are base64 encoded DER - not base64url
+		der, err := base64.StdEncoding.DecodeString(entry)
 		if err != nil {
 			return nil, fmt.Errorf("%wone or more entries in the chain is not a valid base64 string: %s", joseerror.ErrMalformedClaim, err.Error())
 		}
@@ -72,15 +73,19 @@ func parseCertificateChain(certificateChain []string) ([]*x509.Certificate, erro
 	return certificates, nil
 }
 
-// derFromPem reads the PEM encoding RFC 7515 section 4.1.5 requires of an x5u
-// resource, returning the concatenated DER of every CERTIFICATE block.
-//
-// A body carrying no PEM block at all is returned unchanged, so a server sending
-// raw DER is still read. One carrying PEM blocks but no certificate among them is
-// an error: it is a PEM document about something other than certificates.
-func derFromPem(body []byte) ([]byte, error) {
+// certificatesFromX5uBody reads an x5u resource, which RFC 7515 section 4.1.5
+// requires to be PEM. A body that parses as DER certificates is read as DER.
+// Any other body must be UTF-8 text, as RFC 7468 PEM is, and its CERTIFICATE
+// blocks are read in order.
+func certificatesFromX5uBody(body []byte) ([]*x509.Certificate, error) {
+	if certificates, err := x509.ParseCertificates(body); err == nil {
+		return certificates, nil
+	}
+	if !utf8.Valid(body) {
+		return nil, fmt.Errorf("%wthe retrieved resource is neither DER certificates nor PEM text", joseerror.ErrMalformedClaim)
+	}
+
 	var der []byte
-	var sawBlock bool
 	rest := body
 	for {
 		var block *pem.Block
@@ -88,19 +93,15 @@ func derFromPem(body []byte) ([]byte, error) {
 		if block == nil {
 			break
 		}
-		sawBlock = true
 		if block.Type == "CERTIFICATE" {
 			der = append(der, block.Bytes...)
 		}
 	}
 
-	if !sawBlock {
-		return body, nil
-	}
 	if len(der) == 0 {
 		return nil, fmt.Errorf("%wthe retrieved resource carries no PEM certificate block", joseerror.ErrMalformedClaim)
 	}
-	return der, nil
+	return x509.ParseCertificates(der)
 }
 
 func validateCertificateChain(certificates []*x509.Certificate, roots *x509.CertPool) error {
@@ -181,11 +182,7 @@ func RetrieveX5U(x5u string, client *http.Client, x5t, x5ts256 *string, roots *x
 			return nil, fmt.Errorf("%wx5u response exceeded the %d byte limit", joseerror.ErrApplicationError, httputils.MaxBodyBytes)
 		}
 
-		der, err := derFromPem(responseBytes)
-		if err != nil {
-			return nil, fmt.Errorf("%wunable to parse retrieved x5u response as a certificate chain: %w", joseerror.ErrApplicationError, err)
-		}
-		certificates, err := x509.ParseCertificates(der)
+		certificates, err := certificatesFromX5uBody(responseBytes)
 		if err != nil {
 			return nil, fmt.Errorf("%wunable to parse retrieved x5u response as a certificate chain: %w", joseerror.ErrApplicationError, err)
 		}

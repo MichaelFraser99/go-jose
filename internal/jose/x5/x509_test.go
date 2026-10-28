@@ -539,7 +539,10 @@ func TestRetrieveX5U_ReadsThePemEncodingTheClauseRequires(t *testing.T) {
 				return
 			}
 			if err == nil {
-				t.Errorf("[%s] %s names no certificate, so it must be refused, got %d keys", tc.reference, name, len(keys))
+				t.Fatalf("[%s] %s names no certificate, so it must be refused, got %d keys", tc.reference, name, len(keys))
+			}
+			if !errors.Is(err, joseerror.ErrApplicationError) {
+				t.Errorf("[%s] %s is what the x5u resource returned, so failing to decode it is ErrApplicationError, got %v", tc.reference, name, err)
 			}
 		})
 	}
