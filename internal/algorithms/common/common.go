@@ -3,7 +3,6 @@ package common
 import (
 	"bytes"
 	"crypto"
-	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -50,7 +49,7 @@ func (s SecretKey) Equal(x crypto.PublicKey) bool {
 // "x", "y", so a d outside [1, n-1] or whose public point is not x, y is
 // refused.
 func ECDSAPrivateKeyFromJwk(jwk map[string]any) (*ecdsa.PrivateKey, error) {
-	publicKey, ecdhPublic, err := readECDSAPublicKey(jwk, jose_errors.ErrInvalidPrivateKey)
+	publicKey, err := readECDSAPublicKey(jwk, jose_errors.ErrInvalidPrivateKey)
 	if err != nil {
 		return nil, err
 	}
@@ -59,15 +58,15 @@ func ECDSAPrivateKeyFromJwk(jwk map[string]any) (*ecdsa.PrivateKey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%wan EC private key jwk must carry 'd': %w", jose_errors.ErrInvalidPrivateKey, err)
 	}
-	ecdhPrivate, err := ecdhPublic.Curve().NewPrivateKey(dBytes)
+	privateKey, err := ecdsa.ParseRawPrivateKey(publicKey.Curve, dBytes)
 	if err != nil {
 		return nil, fmt.Errorf("%wthe 'd' of a %s jwk is %d octets in [1, n-1]: %w", jose_errors.ErrInvalidPrivateKey, publicKey.Params().Name, (publicKey.Params().N.BitLen()+7)/8, err)
 	}
-	if !ecdhPrivate.PublicKey().Equal(ecdhPublic) {
+	if !privateKey.PublicKey.Equal(publicKey) {
 		return nil, fmt.Errorf("%wthe 'x' and 'y' of an EC jwk are not the public point of its 'd'", jose_errors.ErrInvalidPrivateKey)
 	}
 
-	return &ecdsa.PrivateKey{PublicKey: *publicKey, D: new(big.Int).SetBytes(dBytes)}, nil
+	return privateKey, nil
 }
 
 // ECDSAPublicKeyFromJwk reads the jwk of an ECDSA public key.
@@ -77,43 +76,39 @@ func ECDSAPrivateKeyFromJwk(jwk map[string]any) (*ecdsa.PrivateKey, error) {
 // point on it, so a coordinate of any other length or a point off the curve is
 // refused.
 func ECDSAPublicKeyFromJwk(jwk map[string]any) (*ecdsa.PublicKey, error) {
-	publicKey, _, err := readECDSAPublicKey(jwk, jose_errors.ErrInvalidPublicKey)
+	publicKey, err := readECDSAPublicKey(jwk, jose_errors.ErrInvalidPublicKey)
 	if err != nil {
 		return nil, err
 	}
 	return publicKey, nil
 }
 
-func readECDSAPublicKey(jwk map[string]any, class error) (*ecdsa.PublicKey, *ecdh.PublicKey, error) {
+func readECDSAPublicKey(jwk map[string]any, class error) (*ecdsa.PublicKey, error) {
 	curve, err := extractECDSACurveFromJwk(jwk)
 	if err != nil {
-		return nil, nil, fmt.Errorf("error extracting curve from ECDSA jwk: %w", err)
+		return nil, fmt.Errorf("error extracting curve from ECDSA jwk: %w", err)
 	}
 
 	xBytes, err := jsonutils.ExtractAndDecodeBase64urlString(jwk, "x")
 	if err != nil {
-		return nil, nil, fmt.Errorf("error extracting 'x' coordinate from jwk: %w", err)
+		return nil, fmt.Errorf("error extracting 'x' coordinate from jwk: %w", err)
 	}
 	yBytes, err := jsonutils.ExtractAndDecodeBase64urlString(jwk, "y")
 	if err != nil {
-		return nil, nil, fmt.Errorf("error extracting 'y' coordinate from jwk: %w", err)
+		return nil, fmt.Errorf("error extracting 'y' coordinate from jwk: %w", err)
 	}
 
 	coordinateBytes := (curve.Params().BitSize + 7) / 8
 	if len(xBytes) != coordinateBytes || len(yBytes) != coordinateBytes {
-		return nil, nil, fmt.Errorf("%wthe 'x' and 'y' of a %s jwk are %d octets each, got %d and %d", class, curve.Params().Name, coordinateBytes, len(xBytes), len(yBytes))
+		return nil, fmt.Errorf("%wthe 'x' and 'y' of a %s jwk are %d octets each, got %d and %d", class, curve.Params().Name, coordinateBytes, len(xBytes), len(yBytes))
 	}
 
-	publicKey := &ecdsa.PublicKey{
-		Curve: curve,
-		X:     new(big.Int).SetBytes(xBytes),
-		Y:     new(big.Int).SetBytes(yBytes),
-	}
-	ecdhPublic, err := publicKey.ECDH()
+	uncompressed := append(append([]byte{4}, xBytes...), yBytes...)
+	publicKey, err := ecdsa.ParseUncompressedPublicKey(curve, uncompressed)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%wthe point of an EC jwk is not on its curve: %w", class, err)
+		return nil, fmt.Errorf("%wthe point of an EC jwk is not on its curve: %w", class, err)
 	}
-	return publicKey, ecdhPublic, nil
+	return publicKey, nil
 }
 
 func extractECDSACurveFromJwk(jwk map[string]any) (elliptic.Curve, error) {
@@ -144,9 +139,13 @@ func JwkFromECDSAPublicKey(publicKey *ecdsa.PublicKey) (map[string]any, error) {
 	}
 	jwk := map[string]any{}
 
-	coordinateBytes := (publicKey.Curve.Params().BitSize + 7) / 8
-	b64X := []byte(base64.RawURLEncoding.EncodeToString(publicKey.X.FillBytes(make([]byte, coordinateBytes))))
-	b64Y := []byte(base64.RawURLEncoding.EncodeToString(publicKey.Y.FillBytes(make([]byte, coordinateBytes))))
+	uncompressed, err := publicKey.Bytes()
+	if err != nil {
+		return nil, fmt.Errorf("%wthe point of an ECDSA key is not on its curve: %w", jose_errors.ErrInvalidPublicKey, err)
+	}
+	coordinateBytes := (len(uncompressed) - 1) / 2
+	b64X := []byte(base64.RawURLEncoding.EncodeToString(uncompressed[1 : 1+coordinateBytes]))
+	b64Y := []byte(base64.RawURLEncoding.EncodeToString(uncompressed[1+coordinateBytes:]))
 
 	h := sha256.New()
 	h.Write(append(b64X, b64Y...))
@@ -161,7 +160,7 @@ func JwkFromECDSAPublicKey(publicKey *ecdsa.PublicKey) (map[string]any, error) {
 const jwkCurves = "the curve of an EC jwk is one of P-256, P-384 and P-521"
 
 func checkECDSAPublicKey(publicKey *ecdsa.PublicKey, class error, unsupportedCurve string) error {
-	if publicKey == nil || publicKey.Curve == nil || publicKey.X == nil || publicKey.Y == nil {
+	if publicKey == nil || publicKey.Curve == nil || publicKey.X == nil || publicKey.Y == nil { //nolint:staticcheck
 		return fmt.Errorf("%wan ECDSA key needs a curve and a point", class)
 	}
 	switch publicKey.Curve {
@@ -169,7 +168,7 @@ func checkECDSAPublicKey(publicKey *ecdsa.PublicKey, class error, unsupportedCur
 	default:
 		return fmt.Errorf("%w%s", class, unsupportedCurve)
 	}
-	if _, err := publicKey.ECDH(); err != nil {
+	if _, err := publicKey.Bytes(); err != nil {
 		return fmt.Errorf("%wthe point of an ECDSA key is not on its curve: %w", class, err)
 	}
 	return nil
@@ -186,19 +185,19 @@ func JwkFromECDSAPrivateKey(privateKey *ecdsa.PrivateKey) (map[string]any, error
 	if err := checkECDSAPublicKey(&privateKey.PublicKey, jose_errors.ErrInvalidPrivateKey, jwkCurves); err != nil {
 		return nil, err
 	}
-	if privateKey.D == nil {
+	if privateKey.D == nil { //nolint:staticcheck
 		return nil, fmt.Errorf("%wan ECDSA private key needs its scalar d", jose_errors.ErrInvalidPrivateKey)
 	}
-	if privateKey.D.Sign() <= 0 || privateKey.D.Cmp(privateKey.Params().N) >= 0 {
-		return nil, fmt.Errorf("%wan ECDSA private key's scalar d is in [1, n-1]", jose_errors.ErrInvalidPrivateKey)
+	scalar, err := privateKey.Bytes()
+	if err != nil {
+		return nil, fmt.Errorf("%wan ECDSA private key's scalar d is in [1, n-1]: %w", jose_errors.ErrInvalidPrivateKey, err)
 	}
 
 	jwk, err := JwkFromECDSAPublicKey(&privateKey.PublicKey)
 	if err != nil {
 		return nil, err
 	}
-	scalarBytes := (privateKey.Params().N.BitLen() + 7) / 8
-	jwk["d"] = base64.RawURLEncoding.EncodeToString(privateKey.D.FillBytes(make([]byte, scalarBytes)))
+	jwk["d"] = base64.RawURLEncoding.EncodeToString(scalar)
 	return jwk, nil
 }
 
@@ -325,8 +324,8 @@ func EdDSAPrivateKeyFromJwk(jwk map[string]any) (*ed25519.PrivateKey, error) {
 //
 // RFC 7518 section 6.3 gives the members the semantics of RFC 3447 sections
 // 3.1 and 3.2: d is a positive integer less than n with e*d == 1
-// (mod lambda(n)). "d" must be in [1, n-1]. With "p" and "q", n must be odd, the
-// key must pass rsa.PrivateKey.Validate, and "dp", "dq" and "qi" must equal
+// (mod lambda(n)). "d" must be in [1, n-1]. With "p" and "q", the key must pass
+// rsa.PrivateKey.Validate, and "dp", "dq" and "qi" must equal
 // the CRT values crypto/rsa computes from p, q and d. With no primes, lambda(n)
 // is unknown, so crypto/rsa must sign 32 random 32-byte messages with the key
 // under PKCS #1 v1.5 and verify each signature under n and e. A wrong d passes
@@ -378,9 +377,6 @@ func RSAPrivateKeyFromJwk(jwk map[string]any) (*rsa.PrivateKey, error) {
 		members[v] = new(big.Int).SetBytes(b)
 	}
 
-	if privateKey.N.Bit(0) == 0 {
-		return nil, fmt.Errorf("%wthe 'n' of an RSA jwk is a product of odd primes", jose_errors.ErrInvalidPrivateKey)
-	}
 	privateKey.Primes = []*big.Int{members["p"], members["q"]}
 	if err := privateKey.Validate(); err != nil {
 		return nil, fmt.Errorf("%wthe members of an RSA jwk are not one key: %w", jose_errors.ErrInvalidPrivateKey, err)
@@ -506,9 +502,6 @@ func JwkFromRSAPrivateKey(privateKey *rsa.PrivateKey) (map[string]any, error) {
 		return nil, fmt.Errorf("%wthe RSA private key is inconsistent: %w", jose_errors.ErrInvalidPrivateKey, err)
 	}
 	precomputed.Precompute()
-	if precomputed.Precomputed.Dp == nil || precomputed.Precomputed.Dq == nil || precomputed.Precomputed.Qinv == nil {
-		return nil, fmt.Errorf("%wthe CRT values of the RSA private key cannot be computed", jose_errors.ErrInvalidPrivateKey)
-	}
 
 	jwk["p"] = encode(privateKey.Primes[0])
 	jwk["q"] = encode(privateKey.Primes[1])

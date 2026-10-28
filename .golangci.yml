@@ -6,3 +6,9 @@ linters:
     exhaustive:
       ignore-types:
         - "^crypto/x509\\."
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - staticcheck
+        text: 'SA1019: \(crypto/ecdsa\.(PublicKey|PrivateKey)\)\.(X|Y|D) has been deprecated'

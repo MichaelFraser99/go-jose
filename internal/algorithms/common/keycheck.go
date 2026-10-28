@@ -19,7 +19,7 @@ const MinimumRSAModulusBits = 2048
 const MaximumRSAModulusBits = 8192
 
 // MaximumRSAPublicExponent is the largest public exponent the RS and PS
-// algorithms accept, the same bound crypto/rsa applies from Go 1.24.
+// algorithms accept, the same bound crypto/rsa applies.
 const MaximumRSAPublicExponent = 1<<31 - 1
 
 // CheckRSAPublicKey refuses, with the error class given, an RSA public key a
@@ -79,8 +79,11 @@ func CheckECDSAPrivateKey(privateKey *ecdsa.PrivateKey, curve elliptic.Curve) er
 	if err := CheckECDSAPublicKey(&privateKey.PublicKey, curve, jose_errors.ErrInvalidPrivateKey); err != nil {
 		return err
 	}
-	if privateKey.D == nil || privateKey.D.Sign() <= 0 || privateKey.D.Cmp(curve.Params().N) >= 0 {
+	if privateKey.D == nil { //nolint:staticcheck
 		return fmt.Errorf("%wan ECDSA private key's scalar d is in [1, n-1]", jose_errors.ErrInvalidPrivateKey)
+	}
+	if _, err := privateKey.Bytes(); err != nil {
+		return fmt.Errorf("%wan ECDSA private key's scalar d is in [1, n-1]: %w", jose_errors.ErrInvalidPrivateKey, err)
 	}
 	return nil
 }
