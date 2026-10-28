@@ -1,43 +1,10 @@
 package x5
 
 import (
-	"crypto/ecdsa"
-	"crypto/ed25519"
-	"crypto/rsa"
 	"crypto/x509"
 	"fmt"
-	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 )
-
-func CertificateToJwk(certificate x509.Certificate) (map[string]any, error) {
-	var jwk map[string]any
-
-	switch certificate.PublicKeyAlgorithm {
-	case x509.RSA:
-		jwk = common.JwkFromRSAPublicKey(certificate.PublicKey.(*rsa.PublicKey))
-	case x509.ECDSA:
-		jwk = common.JwkFromECDSAPublicKey(certificate.PublicKey.(*ecdsa.PublicKey))
-	case x509.Ed25519:
-		var err error
-		jwk, err = common.JwkFromEdDSAPublicKey(certificate.PublicKey.(*ed25519.PublicKey))
-		if err != nil {
-			return nil, err
-		}
-	case x509.DSA:
-		return nil, fmt.Errorf("%wcertificates signed with the DSA algorithm are not supported", joseerror.ErrApplicationError)
-	default:
-		return nil, fmt.Errorf("%wunknown / unsupported certificate public key algorithm: %s", joseerror.ErrUnsupportedAlgorithm, certificate.PublicKeyAlgorithm)
-	}
-
-	alg, err := CertificateSigningAlgorithmToJoseIdentifier(certificate.SignatureAlgorithm)
-	if err != nil {
-		return nil, err
-	}
-
-	jwk["alg"] = alg
-	return jwk, nil
-}
 
 func CertificateSigningAlgorithmToJoseIdentifier(x509Alg x509.SignatureAlgorithm) (string, error) {
 	var alg string

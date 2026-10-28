@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/base64"
+	"math/big"
 	"testing"
 )
 
@@ -159,10 +160,10 @@ func TestJwk_TheIdentifierCoversEveryPublicParameter(t *testing.T) {
 			a:         &rsa.PublicKey{N: rsaKey.N, E: 65537},
 			b:         &rsa.PublicKey{N: rsaKey.N, E: 3},
 		},
-		"EC, the same coordinates in the other order": {
-			parameter: "x and y",
+		"EC, the same x with its other y": {
+			parameter: "y",
 			a:         &ecdsa.PublicKey{Curve: elliptic.P256(), X: ecKey.X, Y: ecKey.Y},
-			b:         &ecdsa.PublicKey{Curve: elliptic.P256(), X: ecKey.Y, Y: ecKey.X},
+			b:         &ecdsa.PublicKey{Curve: elliptic.P256(), X: ecKey.X, Y: new(big.Int).Sub(elliptic.P256().Params().P, ecKey.Y)},
 		},
 		"Ed25519, one byte of the key changed": {
 			parameter: "x",
