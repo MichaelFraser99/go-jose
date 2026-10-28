@@ -184,7 +184,7 @@ head, body, err := jwt.Validate(token, nil, &model.JoseOptions{
 
 Both URLs come from the header of the token being verified, so this library makes an outbound request to an address a peer chose, before the signature is checked. Give the client a transport that rejects the destinations your deployment will not allow — private, loopback, link-local and other reserved ranges — and a timeout. The body is capped at 4 MiB whatever client you supply.
 
-With no client, `jku` and `x5u` contribute no key. The members of a `jku` set are first narrowed by the token's `kid` and `alg`. Then any remaining member this library cannot read is skipped, as RFC 7517 section 5 recommends, and the rest are used. Because narrowing comes first, an unreadable member can still match the `kid` or `alg` and so keep a readable member out. A set whose `keys` array holds a number, string, boolean or array is not a JWK Set, so the whole set is refused. `jku` must be `https`, as RFC 7515 section 4.1.2 requires integrity protection, and an `x5u` resource is read as the PEM encoding section 4.1.5 requires, falling back to raw DER for a server that sends that instead.
+With no client, `jku` and `x5u` contribute no key. The members of a `jku` set are first narrowed by the token's `kid` and `alg`. Then any remaining member this library cannot read is skipped, as RFC 7517 section 5 recommends, and the rest are used. Because narrowing comes first, an unreadable member can still match the `kid` or `alg` and so keep a readable member out. A set whose `keys` array holds a number, string, boolean or array is not a JWK Set, so the whole set is refused. `jku` must be `https`, as RFC 7515 section 4.1.2 requires integrity protection, and an `x5u` resource is read as the PEM encoding section 4.1.5 requires. A server that sends raw DER instead is still read: a body that parses as DER certificates is taken as exactly those certificates, and is never searched for PEM text. Any other body is read as PEM text, so a body whose explanatory text is not valid UTF-8 is refused.
 
 ### Stating what you expect of a header
 
@@ -226,7 +226,9 @@ head, body, err := jwt.Validate(token, nil, &model.JoseOptions{X509Roots: roots}
 
 With no `X509Roots` configured, a token's `x5c` and `x5u` headers contribute no key. They are not an error — section 4.1.6 makes use of the header OPTIONAL — so the token still verifies if another key source does, and fails with `no cyptographic material provided for signature validation` if none does.
 
-A malformed `x5c` is refused whether or not roots are configured, because its shape is a property of the claim rather than of your trust configuration. An array that is not an array of strings, an empty array, or an entry that is not base64-encoded DER is `ErrMalformedClaim`.
+A malformed `x5c` is refused whether or not roots are configured, because its shape is a property of the claim rather than of your trust configuration. An array that is not an array of strings, an empty array, or an entry that is not exactly one base64-encoded DER certificate is `ErrMalformedClaim`.
+
+The signing key is taken from the first certificate, and that certificate is the one validated against your roots, as section 4.1.6 requires. The algorithm the issuer used to sign that certificate is not compared with the token's `alg`. An ES256 key in a certificate issued by an RSA root is usable.
 
 Configuring roots does not make `jwk` or `jku` usable. Nothing anchors those keys, so they need `UseTokenProvidedKeys`, as described under [Keys a token carries](#keys-a-token-carries).
 
@@ -279,6 +281,10 @@ func jwk.PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error)
 
 The value returned is a pointer to the respective key, such as `*ecdsa.PublicKey` or `*rsa.PublicKey`.
 
+An `OKP` jwk is read only when its `crv` is `Ed25519`, the one OKP subtype this library supports. RFC 8037 section 2 requires `crv`, so a jwk without a string `crv` is refused as an invalid key. Any other subtype is refused with `ErrUnsupportedAlgorithm`. Each of `x` and `d` must be 32 octets, the key sizes RFC 8032 section 5.1.5 sets for Ed25519. For a private key, `x` must be the public key of `d`.
+
+**This is a breaking change for OKP keys.** Earlier versions ignored the value of `crv`, so an `X25519` or `Ed448` key was returned as an Ed25519 key. They also accepted any length of `x` and `d`, and did not compare `x` with `d`. A key that those versions read can now be refused.
+
 ## JWTs
 This library includes two methods for jwt handling
 
@@ -326,7 +332,7 @@ Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 | `ErrMissingCriticalClaim` | A header named in `crit` is absent, or names an extension this library does not understand |
 | `ErrNoKeyIdentifierMatch` | No key could be selected. The `kid` matches nothing, a `jku` set holds no usable key that matches the header, a certificate chain does not reach a configured root, or an `x5t` thumbprint does not match the chain |
 | `ErrKeystoreError` | A `model.Jwks` lookup or addition failed, or the configuration needed to use a key source is absent, such as `X509Roots` for a certificate chain |
-| `ErrApplicationError` | Key material a header named could not be obtained or decoded. Covers a failed `jku` or `x5u` fetch, and a local decode of what one returned |
+| `ErrApplicationError` | Key material a header named could not be obtained, decoded or used. Covers a failed `jku` or `x5u` fetch, a local decode of what one returned, and an inline `jwk` of a key type or curve this library does not support |
 | `ErrMalformedToken` | The token is not a well formed JOSE object |
 
 Each sentinel carries a prefix terminated by `": "`, so wrap one with `%w` immediately followed by the rest of the message and no space:
@@ -373,6 +379,7 @@ if errors.Is(err, joseerror.ErrInvalidSignature) {
 
 - An HMAC secret must be at least the hash output size, and a validator for an HMAC algorithm can only be built from a signer.
 - An Ed25519 jwk now carries a `kid`.
+- An `OKP` jwk is read only when it is a well-formed Ed25519 key.
 - `PublicJwk` and `PrivateJwk` refuse a key they cannot encode, rather than panic or produce a malformed jwk.
 - `JoseOptions.UseTokenProvidedKeys` is off unless set, including when `opts` is `nil`, and now covers only `jwk` and `jku`. `x5c` and `x5u` are used when `X509Roots` is set.
 - A `crit` header naming an extension you have not declared in `UnderstoodCriticalHeaders` is refused.
