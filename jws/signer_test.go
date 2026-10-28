@@ -1,6 +1,7 @@
 package jws
 
 import (
+	"bytes"
 	"errors"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
@@ -9,7 +10,7 @@ import (
 )
 
 func TestGetSigner(t *testing.T) {
-	secretKey := []byte("a super secret key")
+	secretKey := bytes.Repeat([]byte("k"), 64)
 	tests := []struct {
 		algorithm jwa.Algorithm
 		opts      *model.Opts
@@ -382,8 +383,8 @@ func TestGetSigner(t *testing.T) {
 				if err == nil {
 					t.Fatalf("an error should have been thrown")
 				}
-				if err.Error() != "secret key must be specified for HS algorithms" {
-					t.Errorf("wrong error returned: %s", err.Error())
+				if !errors.Is(err, joseerror.ErrInvalidPrivateKey) {
+					t.Errorf("a missing secret is a private key fault, so the refusal must carry ErrInvalidPrivateKey, got %v", err)
 				}
 			},
 		},
@@ -408,8 +409,8 @@ func TestGetSigner(t *testing.T) {
 				if err == nil {
 					t.Fatalf("an error should have been thrown")
 				}
-				if err.Error() != "secret key must be specified for HS algorithms" {
-					t.Errorf("wrong error returned: %s", err.Error())
+				if !errors.Is(err, joseerror.ErrInvalidPrivateKey) {
+					t.Errorf("a missing secret is a private key fault, so the refusal must carry ErrInvalidPrivateKey, got %v", err)
 				}
 			},
 		},
@@ -420,8 +421,8 @@ func TestGetSigner(t *testing.T) {
 				if err == nil {
 					t.Fatalf("an error should have been thrown")
 				}
-				if err.Error() != "secret key must be specified for HS algorithms" {
-					t.Errorf("wrong error returned: %s", err.Error())
+				if !errors.Is(err, joseerror.ErrInvalidPrivateKey) {
+					t.Errorf("a missing secret is a private key fault, so the refusal must carry ErrInvalidPrivateKey, got %v", err)
 				}
 			},
 		},
@@ -446,8 +447,8 @@ func TestGetSigner(t *testing.T) {
 				if err == nil {
 					t.Fatalf("an error should have been thrown")
 				}
-				if err.Error() != "secret key must be specified for HS algorithms" {
-					t.Errorf("wrong error returned: %s", err.Error())
+				if !errors.Is(err, joseerror.ErrInvalidPrivateKey) {
+					t.Errorf("a missing secret is a private key fault, so the refusal must carry ErrInvalidPrivateKey, got %v", err)
 				}
 			},
 		},
@@ -458,8 +459,8 @@ func TestGetSigner(t *testing.T) {
 				if err == nil {
 					t.Fatalf("an error should have been thrown")
 				}
-				if err.Error() != "secret key must be specified for HS algorithms" {
-					t.Errorf("wrong error returned: %s", err.Error())
+				if !errors.Is(err, joseerror.ErrInvalidPrivateKey) {
+					t.Errorf("a missing secret is a private key fault, so the refusal must carry ErrInvalidPrivateKey, got %v", err)
 				}
 			},
 		},
@@ -484,8 +485,8 @@ func TestGetSigner(t *testing.T) {
 				if err == nil {
 					t.Fatalf("an error should have been thrown")
 				}
-				if err.Error() != "secret key must be specified for HS algorithms" {
-					t.Errorf("wrong error returned: %s", err.Error())
+				if !errors.Is(err, joseerror.ErrInvalidPrivateKey) {
+					t.Errorf("a missing secret is a private key fault, so the refusal must carry ErrInvalidPrivateKey, got %v", err)
 				}
 			},
 		},
@@ -500,7 +501,7 @@ func TestGetSigner(t *testing.T) {
 }
 
 func TestGetSigner_AnUnsetAlgorithmIsRefused(t *testing.T) {
-	secret := []byte("a-secret-for-the-unset-algorithm-test")
+	secret := bytes.Repeat([]byte("k"), 64)
 
 	tests := map[string]jwa.Algorithm{
 		"the zero value":      jwa.Algorithm(0),

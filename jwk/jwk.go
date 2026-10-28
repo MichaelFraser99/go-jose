@@ -29,7 +29,10 @@ func PublicJwk(publicKey crypto.PublicKey) (*map[string]any, error) {
 		return &m, nil
 	}
 	if eddsaOk {
-		m := common.JwkFromEdDSAPublicKey(eddsaPK)
+		m, err := common.JwkFromEdDSAPublicKey(eddsaPK)
+		if err != nil {
+			return nil, err
+		}
 		return &m, nil
 	}
 
@@ -54,7 +57,10 @@ func PrivateJwk(privateKey crypto.PrivateKey) (*map[string]any, error) {
 		return &m, nil
 	}
 	if ed25519Ok { //is just a byte array - should be the last check
-		m := common.JwkFromEdDSAPrivateKey(ed25519PK)
+		m, err := common.JwkFromEdDSAPrivateKey(ed25519PK)
+		if err != nil {
+			return nil, err
+		}
 		return &m, nil
 	}
 

@@ -1,13 +1,13 @@
 package common
 
 import (
-	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -21,13 +21,24 @@ import (
 
 type SecretKey []byte
 
-func (s *SecretKey) Equal(x crypto.PublicKey) bool {
-	secretKey, ok := x.(*SecretKey)
-	if !ok {
+// Equal reports, in constant time, whether x holds the same bytes. x may be a
+// SecretKey or a *SecretKey.
+//
+// It answers on the bytes, not on what HMAC treats as one key: HMAC pads a key
+// shorter than its block size and hashes a longer one, so two distinct byte
+// strings can key identically.
+func (s SecretKey) Equal(x crypto.PublicKey) bool {
+	switch other := x.(type) {
+	case SecretKey:
+		return subtle.ConstantTimeCompare(s, other) == 1
+	case *SecretKey:
+		if other == nil {
+			return false
+		}
+		return subtle.ConstantTimeCompare(s, *other) == 1
+	default:
 		return false
 	}
-
-	return bytes.Equal(*s, *secretKey)
 }
 
 func ECDSAPrivateKeyFromJwk(jwk map[string]any) (*ecdsa.PrivateKey, error) {
@@ -198,7 +209,14 @@ func JwkFromECDSAPrivateKey(privateKey *ecdsa.PrivateKey) map[string]any {
 // this can be completely algorithm agnostic and doesn't impose a particular method of calculating
 // the kid on the consumer
 
-func JwkFromEdDSAPublicKey(publicKey *ed25519.PublicKey) map[string]any {
+// JwkFromEdDSAPublicKey builds the jwk of an Ed25519 public key.
+//
+// RFC 8037 section 2 fixes "x" at 32 octets, so a key of any other length is
+// refused rather than encoded into a buffer sized for 32.
+func JwkFromEdDSAPublicKey(publicKey *ed25519.PublicKey) (map[string]any, error) {
+	if publicKey == nil || len(*publicKey) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf("%wan Ed25519 public key is %d bytes, got %d", jose_errors.ErrInvalidPublicKey, ed25519.PublicKeySize, len(*publicKey))
+	}
 	jwk := map[string]any{}
 
 	b64X := make([]byte, base64.RawURLEncoding.EncodedLen(ed25519.PublicKeySize))
@@ -209,10 +227,18 @@ func JwkFromEdDSAPublicKey(publicKey *ed25519.PublicKey) map[string]any {
 	jwk["x"] = string(b64X)
 	jwk["kty"] = "OKP"
 	jwk["crv"] = "Ed25519" //Ed448 not supported - prevailing opinion amongst the crypto peeps is there is no point
-	return jwk
+	jwk["kid"] = base64.RawURLEncoding.EncodeToString(h.Sum(nil))
+	return jwk, nil
 }
 
-func JwkFromEdDSAPrivateKey(privateKey *ed25519.PrivateKey) map[string]any {
+// JwkFromEdDSAPrivateKey builds the jwk of an Ed25519 private key.
+//
+// RFC 8037 section 2 fixes "d" at 32 octets and "x" at the 32 octet public key,
+// which is the second half of an ed25519.PrivateKey.
+func JwkFromEdDSAPrivateKey(privateKey *ed25519.PrivateKey) (map[string]any, error) {
+	if privateKey == nil || len(*privateKey) != ed25519.PrivateKeySize {
+		return nil, fmt.Errorf("%wan Ed25519 private key is %d bytes, got %d", jose_errors.ErrInvalidPrivateKey, ed25519.PrivateKeySize, len(*privateKey))
+	}
 	jwk := map[string]any{}
 
 	b64X := make([]byte, base64.RawURLEncoding.EncodedLen(ed25519.PublicKeySize))
@@ -221,11 +247,15 @@ func JwkFromEdDSAPrivateKey(privateKey *ed25519.PrivateKey) map[string]any {
 	b64D := make([]byte, base64.RawURLEncoding.EncodedLen(ed25519.PrivateKeySize-ed25519.PublicKeySize))
 	base64.RawURLEncoding.Encode(b64D, (*privateKey)[:ed25519.PublicKeySize])
 
+	h := sha256.New()
+	h.Write(b64X)
+
 	jwk["x"] = string(b64X)
 	jwk["d"] = string(b64D)
 	jwk["kty"] = "OKP"
 	jwk["crv"] = "Ed25519" //Ed448 not supported - prevailing opinion amongst the crypto peeps is there is no point
-	return jwk
+	jwk["kid"] = base64.RawURLEncoding.EncodeToString(h.Sum(nil))
+	return jwk, nil
 }
 
 func EdDSAPublicKeyFromJwk(jwk map[string]any) (*ed25519.PublicKey, error) {

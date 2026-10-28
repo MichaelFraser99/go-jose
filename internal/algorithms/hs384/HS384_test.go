@@ -2,12 +2,17 @@ package hs384
 
 import (
 	"bytes"
+	"crypto"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha512"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
+	"github.com/MichaelFraser99/go-jose/joseerror"
 	"sync"
 	"testing"
 )
@@ -38,7 +43,7 @@ func TestHS384_Sign(t *testing.T) {
 
 	digest := fmt.Sprintf("%s.%s", b64Header, b64Body)
 
-	secretKey := []byte("your-384-bit-secret")
+	secretKey := bytes.Repeat([]byte("k"), MinimumSecretBytes)
 	hs384, err := NewSigner(&secretKey)
 	if err != nil {
 		t.Fatal("no error should be thrown:", err)
@@ -55,8 +60,13 @@ func TestHS384_Sign(t *testing.T) {
 	stringSignature := base64.RawURLEncoding.EncodeToString(signature)
 	t.Logf("%s.%s", digest, stringSignature)
 
-	if stringSignature != "OIKd9Q0-kcZbDVhIUuXW6HKy5yfnCE6zZyue96IXXEAkNEnboTbPxbYw6E0dE0H_" {
-		t.Errorf("unexpected signature produced: %s", stringSignature)
+	expected := func() string {
+		mac := hmac.New(sha512.New384, secretKey)
+		mac.Write([]byte(digest))
+		return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	}()
+	if stringSignature != expected {
+		t.Errorf("[RFC 7515 5.1] the signature is the HMAC of the signing input under the key, want %s, got %s", expected, stringSignature)
 	}
 }
 
@@ -126,7 +136,7 @@ func TestHS384_SignGeneratedSecret(t *testing.T) {
 }
 
 func TestSigner_OneSignerServesConcurrentCallers(t *testing.T) {
-	secret := []byte("a-secret-shared-across-goroutines")
+	secret := bytes.Repeat([]byte("k"), MinimumSecretBytes)
 	signer, err := NewSigner(&secret)
 	if err != nil {
 		t.Fatalf("failed to build the signer: %v", err)
@@ -162,7 +172,7 @@ func TestSigner_OneSignerServesConcurrentCallers(t *testing.T) {
 }
 
 func TestValidator_OneValidatorServesConcurrentCallers(t *testing.T) {
-	secret := []byte("a-secret-shared-across-goroutines")
+	secret := bytes.Repeat([]byte("k"), MinimumSecretBytes)
 	signer, err := NewSigner(&secret)
 	if err != nil {
 		t.Fatalf("failed to build the signer: %v", err)
@@ -201,26 +211,27 @@ func TestValidator_OneValidatorServesConcurrentCallers(t *testing.T) {
 	}
 }
 
-func TestSigner_MatchesTheRFC4231Vector(t *testing.T) {
-	key := []byte("Jefe")
+func TestSigner_MatchesTheRFC4231LongKeyVector(t *testing.T) {
+	key := bytes.Repeat([]byte{0xaa}, 131)
 	signer, err := NewSigner(&key)
 	if err != nil {
 		t.Fatalf("failed to build the signer: %v", err)
 	}
 
-	mac, err := signer.Sign(nil, []byte("what do ya want for nothing?"), nil)
+	const data = "Test Using Larger Than Block-Size Key - Hash Key First"
+	mac, err := signer.Sign(nil, []byte(data), nil)
 	if err != nil {
 		t.Fatalf("failed to sign: %v", err)
 	}
 
-	const want = "af45d2e376484031617f78d2b58a6b1b9c7ef464f5a01b47e42ec3736322445e8e2240ca5e69e2c78b3239ecfab21649"
+	const want = "4ece084485813e9088d2c63a041bc5b44f9ef1012a2b588f3cd11f05033ac4c60c2ef6ab4030fe8296248df163f44952"
 	if got := hex.EncodeToString(mac); got != want {
-		t.Errorf("[RFC 4231 test case 2] HMAC-SHA-384 of %q under key %q is %s, got %s", "what do ya want for nothing?", "Jefe", want, got)
+		t.Errorf("[RFC 4231 test case 6] HMAC-SHA-384 of %q under a 131 byte key of 0xaa is %s, got %s", data, want, got)
 	}
 }
 
 func TestValidator_RefusesAMacThatIsNotTheRightOne(t *testing.T) {
-	secret := []byte("Jefe")
+	secret := bytes.Repeat([]byte("k"), MinimumSecretBytes)
 	signer, err := NewSigner(&secret)
 	if err != nil {
 		t.Fatalf("failed to build the signer: %v", err)
@@ -290,7 +301,7 @@ func TestSigner_DoesNotTakeItsKeyFromTheCallersSlice(t *testing.T) {
 
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {
-			secret := []byte("a-secret-the-caller-still-holds")
+			secret := bytes.Repeat([]byte("k"), MinimumSecretBytes)
 			signer, err := NewSigner(&secret)
 			if err != nil {
 				t.Fatalf("failed to build the signer: %v", err)
@@ -316,7 +327,7 @@ func TestSigner_DoesNotTakeItsKeyFromTheCallersSlice(t *testing.T) {
 }
 
 func TestValidator_DoesNotTakeItsKeyFromTheCallersSlice(t *testing.T) {
-	secret := []byte("a-secret-the-caller-still-holds")
+	secret := bytes.Repeat([]byte("k"), MinimumSecretBytes)
 	signer, err := NewSigner(&secret)
 	if err != nil {
 		t.Fatalf("failed to build the signer: %v", err)
@@ -340,5 +351,94 @@ func TestValidator_DoesNotTakeItsKeyFromTheCallersSlice(t *testing.T) {
 	}
 	if !valid {
 		t.Errorf("[RFC 2104] a validator's key is fixed when it is built, so writing to the caller's slice afterwards must not change what it accepts")
+	}
+}
+
+func TestNewSigner_RefusesASecretShorterThanTheHashOutput(t *testing.T) {
+	tests := map[string]struct {
+		reference string
+		secret    []byte
+		accept    bool
+	}{
+		"a secret of exactly the hash output":  {reference: "RFC 7518 3.2", secret: bytes.Repeat([]byte("k"), 48), accept: true},
+		"a secret longer than the hash output": {reference: "RFC 7518 3.2", secret: bytes.Repeat([]byte("k"), 48+1), accept: true},
+		"a secret one byte short":              {reference: "RFC 7518 3.2", secret: bytes.Repeat([]byte("k"), 48-1)},
+		"a one byte secret":                    {reference: "RFC 7518 3.2", secret: []byte("k")},
+		"an empty secret":                      {reference: "RFC 7518 3.2", secret: []byte{}},
+		"a nil secret slice":                   {reference: "RFC 7518 3.2", secret: nil},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			secret := tc.secret
+			signer, err := NewSigner(&secret)
+			if tc.accept {
+				if err != nil {
+					t.Fatalf("[%s] a key of at least the SHA-384 output size must be accepted, got %v", tc.reference, err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("[%s] a key of the same size as the SHA-384 output or larger MUST be used, so a %d byte key must be refused, got a signer", tc.reference, len(tc.secret))
+			}
+			if signer != nil {
+				t.Errorf("[%s] no signer may be returned alongside the refusal", tc.reference)
+			}
+			if !errors.Is(err, joseerror.ErrInvalidPrivateKey) {
+				t.Errorf("[%s] the refusal must carry the key error class, got %v", tc.reference, err)
+			}
+		})
+	}
+}
+
+func TestNewValidator_RefusesASecretShorterThanTheHashOutput(t *testing.T) {
+	tests := map[string]struct {
+		reference string
+		key       crypto.PublicKey
+		accept    bool
+	}{
+		"a secret of exactly the hash output":  {reference: "RFC 7518 3.2", key: common.SecretKey(bytes.Repeat([]byte("k"), 48)), accept: true},
+		"a secret longer than the hash output": {reference: "RFC 7518 3.2", key: common.SecretKey(bytes.Repeat([]byte("k"), 48*2)), accept: true},
+		"a secret one byte short":              {reference: "RFC 7518 3.2", key: common.SecretKey(bytes.Repeat([]byte("k"), 48-1))},
+		"an empty secret":                      {reference: "RFC 7518 3.2", key: common.SecretKey([]byte{})},
+		"a typed nil secret":                   {reference: "RFC 7518 3.2", key: common.SecretKey(nil)},
+		"a nil public key":                     {reference: "RFC 7517 4", key: nil},
+		"a key of the wrong type":              {reference: "RFC 7517 4", key: "not a secret key"},
+		"a raw byte slice, not a SecretKey":    {reference: "RFC 7517 4", key: bytes.Repeat([]byte("k"), 48)},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			validator, err := NewValidator(tc.key)
+			if tc.accept {
+				if err != nil {
+					t.Fatalf("[%s] a key of at least the SHA-384 output size must be accepted, got %v", tc.reference, err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("[%s] a validator keyed with %s accepts a mac anyone can forge, so it must be refused", tc.reference, name)
+			}
+			if validator != nil {
+				t.Errorf("[%s] no validator may be returned alongside the refusal", tc.reference)
+			}
+			if !errors.Is(err, joseerror.ErrInvalidPublicKey) {
+				t.Errorf("[%s] the refusal must carry the key error class, got %v", tc.reference, err)
+			}
+		})
+	}
+}
+
+func TestNewSigner_AGeneratedSecretIsLongEnough(t *testing.T) {
+	signer, err := NewSigner(nil)
+	if err != nil {
+		t.Fatalf("a generated secret must satisfy the library's own rule, got %v", err)
+	}
+	secret, ok := signer.Public().(common.SecretKey)
+	if !ok {
+		t.Fatalf("expected a common.SecretKey, got %T", signer.Public())
+	}
+	if len(secret) < 48 {
+		t.Errorf("[RFC 7518 3.2] a generated secret must be at least the SHA-384 output size of 48 bytes, got %d", len(secret))
 	}
 }
