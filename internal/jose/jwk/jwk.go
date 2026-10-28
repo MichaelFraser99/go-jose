@@ -3,7 +3,6 @@ package jwk
 import (
 	"crypto"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
 	"github.com/MichaelFraser99/go-jose/internal/httputils"
@@ -84,20 +83,15 @@ func RetrieveJKU(jku string, client *http.Client, kid *string, alg string) model
 
 			publicKey, err := PublicFromJwk(jwk)
 			if err != nil {
-				if errors.Is(err, joseerror.ErrUnsupportedAlgorithm) {
-					continue //simply omit jwk if a type the application doesn't support
-				} else {
-					return nil, fmt.Errorf("%wfailed to convert jwk to public key: %w", joseerror.ErrApplicationError, err)
-				}
-			} else {
-				keystore = append(keystore, publicKey)
+				continue
 			}
+			keystore = append(keystore, publicKey)
 		}
 		if len(keystore) == 0 {
-			return nil, fmt.Errorf("%wnone of the returned jwk entries match the identifiers specified in the jose header", joseerror.ErrNoKeyIdentifierMatch)
+			return nil, fmt.Errorf("%wno usable jwk entry in the returned set matches the identifiers specified in the jose header", joseerror.ErrNoKeyIdentifierMatch)
 		}
 
-		return keystore, err
+		return keystore, nil
 	}
 }
 
