@@ -60,7 +60,7 @@ func TestInlineCertificate_AnEmptyChainIsRefusedNotPanicked(t *testing.T) {
 				}
 			}()
 
-			keys, err := InlineCertificate(tc.chain, nil, nil, "RS256", x509.NewCertPool())()
+			keys, err := InlineCertificate(tc.chain, nil, nil, x509.NewCertPool())()
 			if err == nil {
 				t.Fatalf("[%s] a chain carrying no certificate cannot name a signing key, got %d keys", tc.reference, len(keys))
 			}
@@ -96,7 +96,7 @@ func TestRetrieveX5U_AnEmptyBodyIsRefusedNotPanicked(t *testing.T) {
 			}))
 			defer server.Close()
 
-			keys, err := RetrieveX5U(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0), nil, nil, "RS256", x509.NewCertPool())()
+			keys, err := RetrieveX5U(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0), nil, nil, x509.NewCertPool())()
 			if err == nil && len(keys) != 0 {
 				t.Fatalf("[%s] a response carrying no certificate must not yield a key, got %d", tc.reference, len(keys))
 			}
