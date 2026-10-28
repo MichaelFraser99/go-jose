@@ -169,7 +169,7 @@ head, body, err := jwt.Validate(token, nil, &model.JoseOptions{
 
 Both URLs come from the header of the token being verified, so this library makes an outbound request to an address a peer chose, before the signature is checked. Give the client a transport that rejects the destinations your deployment will not allow — private, loopback, link-local and other reserved ranges — and a timeout. The body is capped at 4 MiB whatever client you supply.
 
-With no client, `jku` and `x5u` contribute no key. A member of a `jku` set that this library cannot read is ignored, as RFC 7517 section 5 recommends. The other members of the set are still used. `jku` must be `https`, as RFC 7515 section 4.1.2 requires integrity protection, and an `x5u` resource is read as the PEM encoding section 4.1.5 requires, falling back to raw DER for a server that sends that instead.
+With no client, `jku` and `x5u` contribute no key. The members of a `jku` set are first narrowed by the token's `kid` and `alg`. Then any remaining member this library cannot read is skipped, as RFC 7517 section 5 recommends, and the rest are used. Because narrowing comes first, an unreadable member can still match the `kid` or `alg` and so keep a readable member out. A set whose `keys` array holds a number, string, boolean or array is not a JWK Set, so the whole set is refused. `jku` must be `https`, as RFC 7515 section 4.1.2 requires integrity protection, and an `x5u` resource is read as the PEM encoding section 4.1.5 requires, falling back to raw DER for a server that sends that instead.
 
 ### Stating what you expect of a header
 
