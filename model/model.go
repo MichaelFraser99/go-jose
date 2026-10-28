@@ -11,10 +11,13 @@ import (
 )
 
 type JoseOptions struct {
-	// UseTokenProvidedKeys lets the keys a token names in its own header — jwk, jku,
-	// x5c and x5u — verify it. Off by default, including when no options are passed:
-	// anyone can sign a token and name their own key, and RFC 7515 section 10.3 requires
-	// the origin of a key to be authenticated. x5c and x5u also need X509Roots.
+	// UseTokenProvidedKeys lets a key the token names through its jwk or jku header
+	// verify it. Off by default, including when no options are passed: RFC 7515 section
+	// 10.3 requires the origin of a key to be authenticated, and neither header carries
+	// anything that authenticates it. x5c and x5u are governed by X509Roots instead.
+	//
+	// When on, a header key and the caller's own retriever are both tried, and either
+	// may verify the token.
 	UseTokenProvidedKeys bool
 
 	// HttpClient fetches the resources a token's jku and x5u headers name. Both URLs
@@ -57,8 +60,9 @@ type JoseOptions struct {
 	// validate the chain per RFC 5280, and RFC 5280 path validation takes a trust
 	// anchor as an input, so neither header can be used without one.
 	//
-	// With no roots configured, a token's x5c and x5u headers are ignored: they
-	// contribute no key, and the token verifies only if another source does.
+	// Setting roots is what opts in to x5c and x5u: a chain that validates against
+	// them authenticates the key's origin, as RFC 7515 section 10.3 requires. x5u also
+	// needs HttpClient. With no roots configured, both headers are ignored.
 	X509Roots *x509.CertPool
 }
 
