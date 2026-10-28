@@ -378,7 +378,7 @@ The first signs a jwt from a signer, a head map and a body map:
 func jwt.New(signer crypto.Signer, head, body map[string]any, opts jwt.Opts) (*string, error)
 ```
 
-If the head carries no `typ` claim, `New` inserts `"JWT"`. If the signer is one of this module's own implementations, `New` adds the `alg` claim when the head does not already carry one.
+`New` does not change the maps you pass. A nil head is an empty header, and a nil body is the empty claims set `{}`. If the head carries no `typ`, the token's header gets `"JWT"`.
 
 `jwt.Opts` names the algorithm to sign with:
 
@@ -388,7 +388,18 @@ type jwt.Opts struct {
 }
 ```
 
-Give it the algorithm the signer was built for. `New` hashes the signing input only for an ES, RS or PS algorithm. A signer from this library refuses a hash that is not its own, and an HMAC signer refuses any hash. With an HS or EdDSA algorithm, or none, `New` passes the input whole and the signer signs with its own algorithm. A `crypto.Signer` from elsewhere makes no such check. If the hash `Opts` names is not the one that signer uses, the signature verifies against nothing.
+The token's `alg` header always names the algorithm that made the signature, as RFC 7515 section 4.1.1 requires:
+
+- A signer from this library signs with its own algorithm, and `New` writes that algorithm into `alg`. `Opts` may leave `Algorithm` unset. `New` calls it in JOSE mode, with the whole signing input. So does any other `model.Signer`.
+- Any other `crypto.Signer` takes its algorithm from `Opts.Algorithm`, or from an `alg` the head names. With neither, `New` returns an error.
+- If the head's `alg` or `Opts.Algorithm` names a different algorithm, `New` returns `ErrUnsupportedAlgorithm`. So does an `alg` that is not a string.
+
+A `crypto.Signer` from elsewhere, such as an `*ecdsa.PrivateKey`, an `*rsa.PrivateKey`, an `ed25519.PrivateKey` or a KMS signer, is called as Go's `crypto.Signer` contract defines:
+
+- For ES256, ES384 and ES512, `New` converts the ASN.1 DER signature the signer returns to the fixed-length R||S form of RFC 7518 section 3.4. The key must be on P-256, P-384 or P-521 respectively. Output that is not DER, or an R or S outside 1 to n-1 (FIPS 186-5 section 6.4.1), is refused with `ErrSigningError`.
+- For PS256, PS384 and PS512, `New` asks for RSASSA-PSS with a salt the size of the hash, as RFC 7518 section 3.5 requires. For RS256, RS384 and RS512 it asks for RSASSA-PKCS1-v1_5.
+- For EdDSA, the key must be Ed25519.
+- A key that does not suit the algorithm, and any HS algorithm, is refused with `ErrInvalidPrivateKey`.
 
 The second validates a jwt and returns the decoded head and body:
 
@@ -398,7 +409,34 @@ func jwt.Validate(ctx context.Context, token string, outOfBoundsPublicKey model.
 
 The retriever supplies key material of your own. Pass nil only when you have turned on `UseTokenProvidedKeys`, so the token's header names the key. `model.JoseOptions` carries everything described under [Keys a token carries](#keys-a-token-carries), and may be nil for the defaults.
 
-If the `iat`, `nbf` and `exp` claims are present, `Validate` checks them. `JoseOptions.ClockSkewLeeway` widens the window they are judged against.
+`Validate` checks each registered claim that is present:
+
+| Claim | Rule | Error when broken |
+| --- | --- | --- |
+| `iss`, `sub`, `jti` | Must be a string (RFC 7519 sections 4.1.1, 4.1.2 and 4.1.7) | `ErrMalformedClaim` |
+| `aud` | Must be a string or an array of strings (RFC 7519 section 4.1.3) | `ErrMalformedClaim` |
+| `iat`, `nbf`, `exp` | Must be a JSON number, a NumericDate (RFC 7519 section 2). A fractional value keeps its fraction | `ErrMalformedClaim` |
+| `exp` | The current time must be before `exp` (RFC 7519 section 4.1.4). A token is expired at the instant `exp` names | `ErrExpired` |
+| `nbf` | The current time must be at or after `nbf` (RFC 7519 section 4.1.5) | `ErrNotYetValid` |
+| `iat` | Must not be after the current time | `ErrNotYetValid` |
+
+The `iat` rule is this library's own. RFC 7519 section 4.1.6 sets no acceptance rule for `iat`, but a token issued in the future signals a clock fault or a forged timestamp, so `Validate` refuses it.
+
+`JoseOptions.ClockSkewLeeway` widens the window the three time claims are judged against: `nbf` and `iat` may be up to the leeway in the future, and a token stays valid until the leeway has passed after `exp`.
+
+A value too large for any clock, such as an `nbf` of `1e19`, is judged as a time far in the future. It is not converted to an integer, so the result is the same on every CPU.
+
+To check the audience, name this recipient in `JoseOptions.ExpectedAudience`:
+
+```go
+opts := &model.JoseOptions{ExpectedAudience: []string{"https://rp.example"}}
+```
+
+`aud` must then hold a value equal to one of these, compared exactly and case-sensitively, as RFC 7519 section 4.1.3 requires. A token with no `aud` is refused with `ErrMissingClaim`, as RFC 8725 section 3.9 requires. A token naming only other recipients is refused with `ErrAudienceMismatch`.
+
+An empty string names no recipient. If `ExpectedAudience` holds one, `Validate` refuses every token with `ErrInvalidOptions`. This catches a value read from an unset environment variable, which would otherwise match a token whose `aud` is `""`.
+
+**With `ExpectedAudience` unset, this library does not meet RFC 7519 section 4.1.3.** That section says: "If the principal processing the claim does not identify itself with a value in the "aud" claim when this claim is present, then the JWT MUST be rejected." By default, `Validate` checks only the type of `aud` and accepts a token whatever it names. Set `ExpectedAudience` to meet that MUST. RFC 8725 section 3.9 also requires the check whenever one issuer issues tokens for more than one audience.
 
 ## Errors
 Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
@@ -418,6 +456,10 @@ Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 | `ErrKeystoreError` | A `model.Jwks` lookup or addition failed, a document decoded into `model.Jwks` is not a JWK Set, or the configuration needed to use a key source is absent, such as `X509Roots` for a certificate chain |
 | `ErrApplicationError` | Key material a header named could not be obtained, decoded or used. Covers a failed `jku` or `x5u` fetch, a local decode of what one returned, and an inline `jwk` of a key type or curve this library does not support. A fetch that ran out of time also matches `context.DeadlineExceeded`, and one cancelled through `ctx` matches `context.Canceled` |
 | `ErrMalformedToken` | The token is not a well formed JOSE object |
+| `ErrExpired` | The current time is not before the token's `exp`, allowing for `ClockSkewLeeway` |
+| `ErrNotYetValid` | The token's `nbf` or `iat` is after the current time, allowing for `ClockSkewLeeway` |
+| `ErrAudienceMismatch` | `JoseOptions.ExpectedAudience` is set and the token's `aud` names none of its values |
+| `ErrInvalidOptions` | The options passed are themselves wrong, whatever the token. `JoseOptions.ExpectedAudience` holding an empty string is one case |
 
 Each sentinel carries a prefix terminated by `": "`, so wrap one with `%w` immediately followed by the rest of the message and no space:
 
@@ -472,6 +514,15 @@ Every change below is a compile error or a silent behaviour change for a consume
 - A token whose `cty` is `JWT` is refused by `jws.VerifyCompactSerialization` and `jwt.Validate` with a message naming nested JWTs. Media-type parameters on the `cty` are ignored.
 - Header errors that echo a token value now use double quotes, not single quotes, and cut the value at 64 characters. Match errors with `errors.Is`, not their text.
 - `jws.Verify` is new. It returns the payload as octets, for a JWS whose payload is not a JSON object.
+- `jwt.New` refuses a head whose `alg` names a different algorithm from the one that signs, and an `alg` that is not a string, with `ErrUnsupportedAlgorithm`. It also refuses `Opts.Algorithm` naming a different algorithm from a signer of this library. Earlier versions wrote the caller's `alg` into the header unchecked.
+- `jwt.New` with a `crypto.Signer` from outside this library needs an algorithm, from `Opts.Algorithm` or the head's `alg`, and a key that suits it. Earlier versions emitted a token with no `alg`. With a standard library ECDSA or RSA key, they also emitted an ES or PS signature no verifier would accept.
+- `jwt.New` expects a `crypto.Signer` from outside this library to follow Go's `crypto.Signer` contract. For ES256, ES384 and ES512 that means ASN.1 DER output, which `New` converts to R||S. A signer that already returns raw R||S is now refused with `ErrSigningError`. Earlier versions passed its output through unchanged, so such a signer worked. Make it return DER, or make it a `model.Signer`.
+- `jwt.New` refuses a `crypto.Signer` from outside this library for HS256, HS384 and HS512 with `ErrInvalidPrivateKey`. Earlier versions passed it the whole signing input. Build an HMAC signer with `jws.GetSigner` instead.
+- `jwt.New` now always calls a `model.Signer` in JOSE mode, with the whole signing input. Earlier versions called it in pre-hashed mode, with a digest, when `Opts.Algorithm` named an ES, RS or PS algorithm. A `model.Signer` of your own must accept the whole signing input.
+- `jwt.New` no longer writes `alg` and `typ` into the head map you pass.
+- `jwt.Validate` refuses a token at the instant its `exp` names, and judges a fractional `iat`, `nbf` or `exp` without dropping the fraction. Earlier versions accepted a token for up to a second past `exp`, and up to a second before `nbf`.
+- `jwt.Validate` refuses an `iss`, `sub`, `jti` or `aud` of the wrong JSON type with `ErrMalformedClaim`.
+- A time-claim refusal now matches `ErrMalformedClaim`, `ErrExpired` or `ErrNotYetValid`, and its message has changed. If you match on the old text, such as `exp claim is before current time`, match with `errors.Is` instead.
 
 ## Upgrading from the pre-0.10 line
 

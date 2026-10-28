@@ -98,6 +98,20 @@ type JoseOptions struct {
 	// usage. Naming x509.ExtKeyUsageAny turns this purpose check off. A signing
 	// certificate whose extension names no purpose is refused in every case.
 	X509ExtKeyUsages []x509.ExtKeyUsage
+
+	// ExpectedAudience names this recipient. When set, jwt.Validate requires the "aud"
+	// claim to hold a value equal to one of these, compared exactly and case-sensitively
+	// as RFC 7519 section 4.1.3 requires. A token with no "aud" is refused with
+	// ErrMissingClaim, as RFC 8725 section 3.9 requires, and one naming only other
+	// recipients with ErrAudienceMismatch. An empty string names no recipient, so
+	// jwt.Validate refuses options holding one with ErrInvalidOptions.
+	//
+	// With none named, "aud" is not compared, though its type is still checked. This
+	// default departs from RFC 7519 section 4.1.3, which says: "If the principal
+	// processing the claim does not identify itself with a value in the "aud" claim
+	// when this claim is present, then the JWT MUST be rejected." Set ExpectedAudience
+	// to meet that MUST.
+	ExpectedAudience []string
 }
 
 // Retriever supplies the keys a token may be verified with. A bare
