@@ -102,7 +102,7 @@ func checkPoint(key ed25519.PublicKey) error {
 	}
 	slices.Reverse(encodedY)
 	if new(big.Int).SetBytes(encodedY).Cmp(fieldPrime) >= 0 {
-		return fmt.Errorf("%wan Ed25519 public key encodes a y below 2^255 - 19, got a larger one", joseerror.ErrInvalidPublicKey)
+		return fmt.Errorf("%wan Ed25519 public key must encode a y below 2^255 - 19", joseerror.ErrInvalidPublicKey)
 	}
 	return nil
 }
