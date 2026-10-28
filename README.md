@@ -36,6 +36,11 @@ Currently, the module supports the following asymmetric algorithms:
 - PS384
 - PS512
 - Ed25519
+- ML-DSA-44
+- ML-DSA-65
+- ML-DSA-87
+
+ML-DSA-44, ML-DSA-65 and ML-DSA-87 are the FIPS 204 post-quantum signature parameter sets, as RFC 9964 section 5 registers them for JOSE. They use the standard library's `crypto/mldsa`. That package is unavailable under the FIPS 140-3 Go Cryptographic Module v1.0.0, and there building an ML-DSA signer or validator returns an error. HashML-DSA is not supported: RFC 9964 section 7.2 registers no JOSE algorithm for it.
 
 Ed25519 is EdDSA with the Ed25519 parameters of RFC 8032 section 5.1, as RFC 9864 section 4.1.1 registers it. Ed448 is not supported.
 
@@ -112,6 +117,7 @@ signer, err := jws.GetSignerFromPrivateKey(jwa.ES256, privateKey)
 - **RS and PS:** the modulus must be 2048 to 8192 bits. RFC 7518 sections 3.3 and 3.5 make 2048 bits a MUST. The 8192-bit ceiling is this library's: the cost of an RSA verification grows with the square of the modulus, and a token can name its own key, so an unbounded modulus lets a peer hold a core for seconds. 8192 bits is also the default cap `crypto/tls` puts on a peer's RSA key. `Opts.BitSize` takes the same range.
 - **RS and PS exponent:** the public exponent must be odd and between 3 and 2^31 - 1. RFC 8017 section 3.1 puts e between 3 and n - 1 with GCD(e, λ(n)) = 1, and λ(n) is even, so e is odd. With e = 1 a signature is its own encoded message, so anyone could forge one. `crypto/rsa` refuses such a key when it verifies, and this library refuses it earlier, when the signer or validator is built.
 - **ES:** the key must lie on the algorithm's own curve: P-256 for ES256, P-384 for ES384 and P-521 for ES512. RFC 7518 section 3.1 defines each algorithm by its curve.
+- **ML-DSA:** the key must be an `*mldsa.PrivateKey` or `*mldsa.PublicKey` of the algorithm's own parameter set, so an ML-DSA-65 key is refused for ML-DSA-44. A zero-value key, such as `&mldsa.PrivateKey{}`, is refused. A zero-value private key reports the all-zero seed, so it is not rebuilt from it: that is the published example key of RFC 9964 Appendix A.
 - **Ed25519:** the key must be an `ed25519.PrivateKey` or `ed25519.PublicKey`, or a pointer to one. A private key must be 64 bytes, and its public half must be the public key of its seed. A public key must be 32 bytes. RFC 8032 section 5.1.5 sets these sizes. The signer and validator keep a copy of the key, so a later change to your key does not affect them.
 - **Every family:** a nil key, or one missing the modulus, exponent, curve, coordinates or private scalar, is refused when the signer or validator is built rather than panicking later. An RSA private key needs only `D`: RFC 7518 section 6.3.2 makes the primes optional.
 
@@ -124,6 +130,8 @@ The `Sign` method follows JOSE conventions per RFC 7518 rather than Go's `crypto
 > **The HMAC algorithms have no pre-hashed mode, and refuse one.** HMAC is itself a keyed hash, so there is no internal hashing step for a caller to skip. HS256, HS384 and HS512 refuse a non-zero `opts.HashFunc()` with `ErrSigningError`. Pass the signing input whole and leave `opts` nil.
 >
 > **Ed25519 has no pre-hashed mode either, and refuses one.** Ed25519 hashes the whole signing input as part of the signature. For a non-zero hash, `crypto/ed25519` signs with Ed25519ph, which is a different algorithm. So the Ed25519 signer refuses a non-zero `opts.HashFunc()` with `ErrSigningError`.
+>
+> **ML-DSA has no pre-hashed mode either, and refuses one.** RFC 9964 section 5 signs the whole input. ML-DSA signers refuse a non-zero `opts.HashFunc()` with `ErrSigningError`, including `crypto.MLDSAMu`, which asks `crypto/mldsa` to sign an externally computed mu. RFC 9964 section 5 also requires an empty context, so an `*mldsa.Options` with a non-empty `Context` is refused the same way. An ML-DSA signature is hedged, the default variant of FIPS 204 section 3.4, so two signatures of one input differ.
 >
 > **This is a breaking change,** and it breaks two kinds of caller differently. One passed a pre-hashed digest with a non-zero `Hash`, as the old documentation described: they were already producing a MAC over the digest rather than over the signing input, which no validator accepts, with no error to say so. They now get an error at the call that causes it. The other is generic over `crypto.Signer` and passes a non-zero `Hash` alongside the **raw** signing input — that worked, because `opts` was ignored, and it no longer does. Such a caller should pass `nil` for an HS algorithm, or a zero `Hash`.
 
@@ -321,7 +329,7 @@ This library includes two methods for converting keys into JWK format
 
 Every jwk these methods return carries a `kid`: the key's RFC 7638 JWK SHA-256 Thumbprint, base64url encoded. RFC 7638 hashes only the key type's required members, `kty` included, so two keys of different types cannot share a `kid`. Any other implementation computes the same value for the same key. A private key's `kid` is that of its public key, as RFC 7638 section 3.2.1 defines. The `kid` is a suggestion: set your own on the returned map if you name keys another way.
 
-`jwk.Thumbprint` computes the thumbprint of any jwk of `kty` EC, RSA, oct or OKP:
+`jwk.Thumbprint` computes the thumbprint of any jwk of `kty` EC, RSA, oct, OKP or AKP. For AKP the members are `alg`, `kty` and `pub`, as RFC 9964 section 6 defines:
 
 ```go
 func jwk.Thumbprint(jwk map[string]any) (string, error)
@@ -335,7 +343,7 @@ func jwk.PublicJwk(publicKey crypto.PublicKey) (*map[string]any, error)
 func jwk.PrivateJwk(privateKey crypto.PrivateKey) (*map[string]any, error)
 ```
 
-Pass the key in the form the standard library gives it. An `*ecdsa.PublicKey`, an `*rsa.PublicKey`, or an `ed25519.PublicKey` (or a pointer to one) is accepted. `PrivateJwk` takes the private equivalents. Anything else is refused with `ErrInvalidPublicKey` or `ErrInvalidPrivateKey`.
+Pass the key in the form the standard library gives it. An `*ecdsa.PublicKey`, an `*rsa.PublicKey`, an `ed25519.PublicKey` (or a pointer to one), or an `*mldsa.PublicKey` is accepted. `PrivateJwk` takes the private equivalents. Anything else is refused with `ErrInvalidPublicKey` or `ErrInvalidPrivateKey`.
 
 A key that cannot be encoded is refused with the same errors:
 
@@ -374,6 +382,8 @@ The value returned is a pointer to the respective key, such as `*ecdsa.PublicKey
 An `OKP` jwk is read only when its `crv` is `Ed25519`, the one OKP subtype this library supports. RFC 8037 section 2 requires `crv`, so a jwk without a string `crv` is refused as an invalid key. Any other subtype is refused with `ErrUnsupportedAlgorithm`. Each of `x` and `d` must be 32 octets, the key sizes RFC 8032 section 5.1.5 sets for Ed25519. For a private key, `x` must be the public key of `d`.
 
 **This is a breaking change for OKP keys.** Earlier versions ignored the value of `crv`, so an `X25519` or `Ed448` key was returned as an Ed25519 key. They also accepted any length of `x` and `d`, and did not compare `x` with `d`. A key that those versions read can now be refused.
+
+An `AKP` jwk is read as RFC 9964 defines it. Section 3 requires `alg`, and it must be `ML-DSA-44`, `ML-DSA-65` or `ML-DSA-87`. A jwk with no string `alg` is refused as an invalid key, and any other `alg` with `ErrUnsupportedAlgorithm`. `pub` must be the public key size section 5 gives for that `alg`: 1312, 1952 or 2592 octets. A private key's `priv` must be the 32 octet seed of section 4, and `pub` must be the public key that seed derives, which section 7.4 calls for. `PublicFromJwk` reads the public key of a private AKP jwk and does not read `priv`, as it does for EC and RSA. `PublicJwk` never writes `priv`, which section 3 says MUST NOT be present in a public key.
 
 An `EC` jwk is read only when its `crv` is P-256, P-384 or P-521. Any other curve is refused with `ErrUnsupportedAlgorithm`. Each of `x` and `y` must be the full size of a coordinate of the curve: 32, 48 or 66 octets. RFC 7518 sections 6.2.1.2 and 6.2.1.3 require this, so a coordinate with a leading zero octet dropped or added is refused. The point must be on the curve. A private key must carry `d`, which RFC 7518 section 6.2.2 makes REQUIRED. `d` must be the length of the curve order, in `[1, n-1]`, and `x` and `y` must be its public point.
 
@@ -417,6 +427,7 @@ A `crypto.Signer` from elsewhere, such as an `*ecdsa.PrivateKey`, an `*rsa.Priva
 - For ES256, ES384 and ES512, `New` converts the ASN.1 DER signature the signer returns to the fixed-length R||S form of RFC 7518 section 3.4. The key must be on P-256, P-384 or P-521 respectively. Output that is not DER, or an R or S outside 1 to n-1 (FIPS 186-5 section 6.4.1), is refused with `ErrSigningError`.
 - For PS256, PS384 and PS512, `New` asks for RSASSA-PSS with a salt the size of the hash, as RFC 7518 section 3.5 requires. For RS256, RS384 and RS512 it asks for RSASSA-PKCS1-v1_5.
 - For Ed25519, the key must be an Ed25519 key.
+- For ML-DSA-44, ML-DSA-65 and ML-DSA-87, the key must be an ML-DSA key of that parameter set. `New` passes the whole signing input with a zero hash, so `crypto/mldsa` signs it with an empty context.
 - A key that does not suit the algorithm, and any HS algorithm, is refused with `ErrInvalidPrivateKey`.
 
 The second validates a jwt and returns the decoded head and body:
@@ -530,6 +541,7 @@ Every change below is a compile error or a silent behaviour change for a consume
 - A JWT claims set of `null` is refused. `jwt.Validate` and `jws.VerifyCompactSerialization` previously returned a nil body and no error.
 - A `b64` header of `false` is refused, even when `UnderstoodCriticalHeaders` names `b64`.
 - `jwa.Ed25519` is new, with a signer and a validator. A token whose `alg` is `EdDSA` now verifies under an Ed25519 key. v0.10.0 refused it with `ErrInvalidSignature`.
+- `jwa.MLDSA44`, `jwa.MLDSA65` and `jwa.MLDSA87` are new, with signers and validators, and `PublicFromJwk`, `PrivateFromJwk`, `PublicJwk`, `PrivateJwk` and `Thumbprint` handle `AKP` keys. v0.10.0 refused every `AKP` jwk, so a `jku` set skipped its `AKP` members. Such a member can now verify a token whose `alg` it names.
 - `jwt.New` refuses `EdDSA` with `ErrUnsupportedAlgorithm`, whether `Opts.Algorithm` or the head's `alg` names it. v0.10.0 signed an `EdDSA` token with an `ed25519.PrivateKey`. Name `jwa.Ed25519` instead. A verifier that does not yet know `Ed25519` will refuse the token, so make sure that your verifiers support it first.
 - A token whose `cty` is `JWT` is refused by `jws.VerifyCompactSerialization` and `jwt.Validate` with a message naming nested JWTs. Media-type parameters on the `cty` are ignored.
 - Header errors that echo a token value now use double quotes, not single quotes, and cut the value at 64 characters. Match errors with `errors.Is`, not their text.

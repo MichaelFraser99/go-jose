@@ -7,6 +7,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
+	"crypto/mldsa"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/asn1"
@@ -192,6 +193,17 @@ func TestNew_StandardLibrarySignersProduceJwsSignatures(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generating an ed25519 key: %s", err)
 	}
+	mldsaKeys := map[jwa.Algorithm]*mldsa.PrivateKey{}
+	for alg, params := range map[jwa.Algorithm]mldsa.Parameters{jwa.MLDSA44: mldsa.MLDSA44(), jwa.MLDSA65: mldsa.MLDSA65(), jwa.MLDSA87: mldsa.MLDSA87()} {
+		if mldsaKeys[alg], err = mldsa.GenerateKey(params); err != nil {
+			t.Fatalf("generating an %s key: %s", alg, err)
+		}
+	}
+	verifyMLDSA := func(t *testing.T, public crypto.PublicKey, input, signature []byte) {
+		if err := mldsa.Verify(public.(*mldsa.PublicKey), input, signature, nil); err != nil {
+			t.Errorf("[RFC 9964 5] not an ML-DSA signature over the JWS Signing Input with an empty context: %s", err)
+		}
+	}
 
 	sum := func(h crypto.Hash, input []byte) []byte {
 		hasher := h.New()
@@ -243,6 +255,9 @@ func TestNew_StandardLibrarySignersProduceJwsSignatures(t *testing.T) {
 		{name: "PS256 with an opaque crypto.Signer over an rsa key", signer: opaqueSigner{rsaKey}, alg: jwa.PS256, verify: verifyPSS(crypto.SHA256), viaThisLibrary: true},
 		{name: "RS256 with *rsa.PrivateKey", signer: rsaKey, alg: jwa.RS256, verify: verifyPKCS1(crypto.SHA256), viaThisLibrary: true},
 		{name: "RS512 with an opaque crypto.Signer over an rsa key", signer: opaqueSigner{rsaKey}, alg: jwa.RS512, verify: verifyPKCS1(crypto.SHA512), viaThisLibrary: true},
+		{name: "ML-DSA-44 with *mldsa.PrivateKey", signer: mldsaKeys[jwa.MLDSA44], alg: jwa.MLDSA44, verify: verifyMLDSA, viaThisLibrary: true},
+		{name: "ML-DSA-65 with *mldsa.PrivateKey", signer: mldsaKeys[jwa.MLDSA65], alg: jwa.MLDSA65, verify: verifyMLDSA, viaThisLibrary: true},
+		{name: "ML-DSA-87 with an opaque crypto.Signer over an mldsa key", signer: opaqueSigner{mldsaKeys[jwa.MLDSA87]}, alg: jwa.MLDSA87, verify: verifyMLDSA, viaThisLibrary: true},
 		{name: "Ed25519 with ed25519.PrivateKey", signer: edKey, alg: jwa.Ed25519, verify: func(t *testing.T, public crypto.PublicKey, input, signature []byte) {
 			if !ed25519.Verify(public.(ed25519.PublicKey), input, signature) {
 				t.Error("[RFC 9864 4.1.1] not an Ed25519 signature over the JWS Signing Input")
@@ -312,6 +327,10 @@ func TestNew_RefusesAStandardLibrarySignerThatCannotSignTheAlgorithm(t *testing.
 		t.Fatalf("generating an rsa key: %s", err)
 	}
 	p521 := newTestECDSAKey(t, elliptic.P521())
+	mldsa65, err := mldsa.GenerateKey(mldsa.MLDSA65())
+	if err != nil {
+		t.Fatalf("generating an ML-DSA-65 key: %s", err)
+	}
 	oversized := new(big.Int).Lsh(big.NewInt(1), 256)
 	p256Order := elliptic.P256().Params().N
 	p521Order := elliptic.P521().Params().N
@@ -341,6 +360,10 @@ func TestNew_RefusesAStandardLibrarySignerThatCannotSignTheAlgorithm(t *testing.
 		{name: "RS256 with an ecdsa key", signer: p256, alg: jwa.RS256, want: joseerror.ErrInvalidPrivateKey, clause: "RFC 7518 3.3"},
 		{name: "Ed25519 with an ecdsa key", signer: p256, alg: jwa.Ed25519, want: joseerror.ErrInvalidPrivateKey, clause: "RFC 9864 4.1.1"},
 		{name: "Ed25519 with an rsa key", signer: rsaKey, alg: jwa.Ed25519, want: joseerror.ErrInvalidPrivateKey, clause: "RFC 9864 4.1.1"},
+		{name: "ML-DSA-44 with an ML-DSA-65 key", signer: mldsa65, alg: jwa.MLDSA44, want: joseerror.ErrInvalidPrivateKey, clause: "RFC 9964 5"},
+		{name: "ML-DSA-44 with an ecdsa key", signer: p256, alg: jwa.MLDSA44, want: joseerror.ErrInvalidPrivateKey, clause: "RFC 9964 5"},
+		{name: "ML-DSA-44 with a signer whose public key is a nil *mldsa.PublicKey", signer: fixedOutputSigner{public: (*mldsa.PublicKey)(nil)}, alg: jwa.MLDSA44, want: joseerror.ErrInvalidPrivateKey, clause: "RFC 9964 5"},
+		{name: "ML-DSA-44 with a signer whose public key is a zero-value *mldsa.PublicKey", signer: fixedOutputSigner{public: &mldsa.PublicKey{}}, alg: jwa.MLDSA44, want: joseerror.ErrInvalidPrivateKey, clause: "RFC 9964 5"},
 		{name: "HS256 with an ecdsa key", signer: p256, alg: jwa.HS256, want: joseerror.ErrInvalidPrivateKey, clause: "RFC 7518 3.2"},
 		{name: "HS256 with an rsa key", signer: rsaKey, alg: jwa.HS256, want: joseerror.ErrInvalidPrivateKey, clause: "RFC 7518 3.2"},
 		{name: "ES256 output that is empty", signer: fixedOutputSigner{public: &p256.PublicKey, output: []byte{}}, alg: jwa.ES256, want: joseerror.ErrSigningError, clause: "RFC 7518 3.4"},

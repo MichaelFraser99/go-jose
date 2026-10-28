@@ -84,8 +84,14 @@ func PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error) {
 				return nil, err
 			}
 			return key, nil
+		case "AKP":
+			key, err := common.MLDSAPrivateKeyFromJwk(jwk)
+			if err != nil {
+				return nil, err
+			}
+			return key, nil
 		default:
-			return nil, fmt.Errorf("%wthe 'kty' claim is not one of EC, RSA and OKP", joseerror.ErrUnsupportedAlgorithm)
+			return nil, fmt.Errorf("%wthe 'kty' claim is not one of EC, RSA, OKP and AKP", joseerror.ErrUnsupportedAlgorithm)
 		}
 	} else {
 		return nil, fmt.Errorf("no kty claim present in jwk, cannot infer type of private key to return")
@@ -117,8 +123,14 @@ func PublicFromJwk(jwk map[string]any) (crypto.PublicKey, error) {
 				return nil, err
 			}
 			return key, nil
+		case "AKP":
+			key, err := common.MLDSAPublicKeyFromJwk(jwk)
+			if err != nil {
+				return nil, err
+			}
+			return key, nil
 		default:
-			return nil, fmt.Errorf("%wthe 'kty' claim is not one of EC, RSA and OKP", joseerror.ErrUnsupportedAlgorithm)
+			return nil, fmt.Errorf("%wthe 'kty' claim is not one of EC, RSA, OKP and AKP", joseerror.ErrUnsupportedAlgorithm)
 		}
 	} else {
 		return nil, fmt.Errorf("no kty claim present in jwk, cannot infer type of public key to return")

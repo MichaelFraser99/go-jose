@@ -554,6 +554,7 @@ var thumbprintMembers = map[string][]string{
 	"RSA": {"e", "kty", "n"},
 	"oct": {"k", "kty"},
 	"OKP": {"crv", "kty", "x"},
+	"AKP": {"alg", "kty", "pub"},
 }
 
 // Thumbprint computes the RFC 7638 JWK SHA-256 Thumbprint of a jwk, base64url
@@ -568,7 +569,7 @@ func Thumbprint(jwk map[string]any) (string, error) {
 	}
 	members, ok := thumbprintMembers[kty]
 	if !ok {
-		return "", fmt.Errorf("%wa thumbprint is defined here for kty EC, RSA, oct and OKP", jose_errors.ErrUnsupportedAlgorithm)
+		return "", fmt.Errorf("%wa thumbprint is defined here for kty EC, RSA, oct, OKP and AKP", jose_errors.ErrUnsupportedAlgorithm)
 	}
 
 	var canonical strings.Builder

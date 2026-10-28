@@ -28,7 +28,7 @@ func TestAKeySetHoldingUnknownKeyTypesIsUsedForTheKeysItCanRead(t *testing.T) {
 	kid := (*usable)["kid"].(string)
 
 	unknown := []map[string]any{
-		{"kty": "AKP", "alg": "ML-DSA-65", "pub": "AQAB", "kid": "akp"},
+		{"kty": "AKP", "alg": "SLH-DSA-SHA2-128s", "pub": "AQAB", "kid": "akp"},
 		{"kty": "OKP", "crv": "X25519", "x": "hSDwCYkwp1R0i33ctD73Wg2_Og0mOBr066SpjqqbTmo", "kid": "x25519"},
 		{"kty": "a-type-no-one-has-defined", "kid": "future"},
 	}
