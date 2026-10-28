@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
 	"github.com/MichaelFraser99/go-jose/internal/httputils"
+	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/model"
 )
@@ -83,7 +84,7 @@ func PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error) {
 			}
 			return key, nil
 		default:
-			return nil, fmt.Errorf("%wunsupported kty: %s", joseerror.ErrUnsupportedAlgorithm, ktyString)
+			return nil, fmt.Errorf("%wthe 'kty' claim is not one of EC, RSA and OKP", joseerror.ErrUnsupportedAlgorithm)
 		}
 	} else {
 		return nil, fmt.Errorf("no kty claim present in jwk, cannot infer type of private key to return")
@@ -116,7 +117,7 @@ func PublicFromJwk(jwk map[string]any) (crypto.PublicKey, error) {
 			}
 			return key, nil
 		default:
-			return nil, fmt.Errorf("%wunsupported kty: %s", joseerror.ErrUnsupportedAlgorithm, ktyString)
+			return nil, fmt.Errorf("%wthe 'kty' claim is not one of EC, RSA and OKP", joseerror.ErrUnsupportedAlgorithm)
 		}
 	} else {
 		return nil, fmt.Errorf("no kty claim present in jwk, cannot infer type of public key to return")
@@ -178,7 +179,7 @@ func checkMember(jwk map[string]any, kid *string, alg string, ignoreKeyUse bool)
 			return fmt.Errorf("%wjwk has malformed use value", joseerror.ErrMalformedClaim)
 		}
 		if su != "sig" {
-			return fmt.Errorf("%wjwk use %q is not sig", joseerror.ErrNoKeyIdentifierMatch, su)
+			return fmt.Errorf("%wjwk use %s is not sig", joseerror.ErrNoKeyIdentifierMatch, jsonutils.QuoteBounded(su))
 		}
 	}
 

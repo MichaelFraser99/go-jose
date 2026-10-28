@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es256"
@@ -21,6 +22,7 @@ import (
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs256"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs384"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs512"
+	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
 	"github.com/MichaelFraser99/go-jose/model"
 	"maps"
@@ -556,7 +558,7 @@ func TestNew(t *testing.T) {
 			},
 			head: map[string]any{
 				"typ": "some other type",
-				"alg": "another alg",
+				"alg": "RS256",
 			},
 			body: map[string]any{
 				"firstname": "Michael",
@@ -572,7 +574,7 @@ func TestNew(t *testing.T) {
 				}
 
 				jwtComponents := validateJwtSignature(t, *jwt, validator)
-				validateHeadContents(t, jwtComponents[0], "another alg", "some other type")
+				validateHeadContents(t, jwtComponents[0], "RS256", "some other type")
 				validateBodyContents(t, jwtComponents[1])
 			},
 		},
@@ -1222,27 +1224,18 @@ func TestValidate(t *testing.T) {
 			},
 			jwt: func(t *testing.T, signer crypto.Signer) string {
 				t.Helper()
-				jwt, err := New(signer,
-					map[string]any{
-						"alg": "foobar",
-					},
-					map[string]any{
-						"firstname": "Michael",
-						"surname":   "Fraser",
-						"status":    "alive (hopefully)",
-					},
-					Opts{jwa.RS256},
-				)
+				input := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"foobar","typ":"JWT"}`)) + "." + base64.RawURLEncoding.EncodeToString([]byte(`{"firstname":"Michael"}`))
+				signature, err := signer.Sign(rand.Reader, []byte(input), nil)
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
-				return *jwt
+				return input + "." + base64.RawURLEncoding.EncodeToString(signature)
 			},
 			validate: func(t *testing.T, head, body map[string]any, err error) {
 				if err == nil {
 					t.Fatal("an error should be thrown")
 				}
-				if err.Error() != "failed to verify jws compact serialization: malformed token: error validating header: unsupported algorithm: 'foobar' is not a supported algorithm" {
+				if err.Error() != "failed to verify jws compact serialization: malformed token: error validating header: unsupported algorithm: \"foobar\" is not a supported algorithm" {
 					t.Errorf("wrong error returned: %s", err.Error())
 				}
 			},
@@ -1281,8 +1274,8 @@ func TestValidate(t *testing.T) {
 				if err == nil {
 					t.Fatal("an error should be thrown")
 				}
-				if err.Error() != "iat claim malformed" {
-					t.Errorf("wrong error returned: %s", err.Error())
+				if !errors.Is(err, joseerror.ErrMalformedClaim) {
+					t.Errorf("[RFC 7519 4.1.6] want %q, got %q", joseerror.ErrMalformedClaim, err)
 				}
 			},
 		},
@@ -1320,8 +1313,8 @@ func TestValidate(t *testing.T) {
 				if err == nil {
 					t.Fatal("an error should be thrown")
 				}
-				if err.Error() != "iat claim is after current time" {
-					t.Errorf("wrong error returned: %s", err.Error())
+				if !errors.Is(err, joseerror.ErrNotYetValid) {
+					t.Errorf("[jwt.Validate future iat rule] want %q, got %q", joseerror.ErrNotYetValid, err)
 				}
 			},
 		},
@@ -1359,8 +1352,8 @@ func TestValidate(t *testing.T) {
 				if err == nil {
 					t.Fatal("an error should be thrown")
 				}
-				if err.Error() != "nbf claim malformed" {
-					t.Errorf("wrong error returned: %s", err.Error())
+				if !errors.Is(err, joseerror.ErrMalformedClaim) {
+					t.Errorf("[RFC 7519 4.1.5] want %q, got %q", joseerror.ErrMalformedClaim, err)
 				}
 			},
 		},
@@ -1398,8 +1391,8 @@ func TestValidate(t *testing.T) {
 				if err == nil {
 					t.Fatal("an error should be thrown")
 				}
-				if err.Error() != "nbf claim is after current time" {
-					t.Errorf("wrong error returned: %s", err.Error())
+				if !errors.Is(err, joseerror.ErrNotYetValid) {
+					t.Errorf("[RFC 7519 4.1.5] want %q, got %q", joseerror.ErrNotYetValid, err)
 				}
 			},
 		},
@@ -1437,8 +1430,8 @@ func TestValidate(t *testing.T) {
 				if err == nil {
 					t.Fatal("an error should be thrown")
 				}
-				if err.Error() != "exp claim malformed" {
-					t.Errorf("wrong error returned: %s", err.Error())
+				if !errors.Is(err, joseerror.ErrMalformedClaim) {
+					t.Errorf("[RFC 7519 4.1.4] want %q, got %q", joseerror.ErrMalformedClaim, err)
 				}
 			},
 		},
@@ -1476,8 +1469,8 @@ func TestValidate(t *testing.T) {
 				if err == nil {
 					t.Fatal("an error should be thrown")
 				}
-				if err.Error() != "exp claim is before current time" {
-					t.Errorf("wrong error returned: %s", err.Error())
+				if !errors.Is(err, joseerror.ErrExpired) {
+					t.Errorf("[RFC 7519 4.1.4] want %q, got %q", joseerror.ErrExpired, err)
 				}
 			},
 		},
@@ -1587,7 +1580,7 @@ func TestValidateClockSkewLeeway(t *testing.T) {
 		name      string
 		claims    map[string]any
 		opts      *model.JoseOptions
-		expectErr string
+		expectErr error
 	}{
 		{
 			name:   "an iat inside the leeway is accepted",
@@ -1598,13 +1591,13 @@ func TestValidateClockSkewLeeway(t *testing.T) {
 			name:      "an iat beyond the leeway is refused",
 			claims:    map[string]any{"iat": time.Now().Add(2 * time.Minute).Unix()},
 			opts:      &model.JoseOptions{ClockSkewLeeway: time.Minute},
-			expectErr: "iat claim is after current time",
+			expectErr: joseerror.ErrNotYetValid,
 		},
 		{
 			name:      "an iat inside the leeway is refused when none is granted",
 			claims:    map[string]any{"iat": time.Now().Add(30 * time.Second).Unix()},
 			opts:      &model.JoseOptions{},
-			expectErr: "iat claim is after current time",
+			expectErr: joseerror.ErrNotYetValid,
 		},
 		{
 			name:   "an nbf inside the leeway is accepted",
@@ -1615,7 +1608,7 @@ func TestValidateClockSkewLeeway(t *testing.T) {
 			name:      "an nbf beyond the leeway is refused",
 			claims:    map[string]any{"nbf": time.Now().Add(2 * time.Minute).Unix()},
 			opts:      &model.JoseOptions{ClockSkewLeeway: time.Minute},
-			expectErr: "nbf claim is after current time",
+			expectErr: joseerror.ErrNotYetValid,
 		},
 		{
 			name:   "an exp inside the leeway is accepted",
@@ -1626,19 +1619,19 @@ func TestValidateClockSkewLeeway(t *testing.T) {
 			name:      "an exp beyond the leeway is refused",
 			claims:    map[string]any{"exp": time.Now().Add(-2 * time.Minute).Unix()},
 			opts:      &model.JoseOptions{ClockSkewLeeway: time.Minute},
-			expectErr: "exp claim is before current time",
+			expectErr: joseerror.ErrExpired,
 		},
 		{
 			name:      "an exp inside the leeway is refused when none is granted",
 			claims:    map[string]any{"exp": time.Now().Add(-30 * time.Second).Unix()},
 			opts:      &model.JoseOptions{},
-			expectErr: "exp claim is before current time",
+			expectErr: joseerror.ErrExpired,
 		},
 		{
 			name:      "no options grants no leeway",
 			claims:    map[string]any{"exp": time.Now().Add(-30 * time.Second).Unix()},
 			opts:      nil,
-			expectErr: "exp claim is before current time",
+			expectErr: joseerror.ErrExpired,
 		},
 		{
 			name:   "a negative leeway is treated as none and a valid token still passes",
@@ -1649,7 +1642,7 @@ func TestValidateClockSkewLeeway(t *testing.T) {
 			name:      "a negative leeway does not widen the window",
 			claims:    map[string]any{"exp": time.Now().Add(-30 * time.Second).Unix()},
 			opts:      &model.JoseOptions{ClockSkewLeeway: -time.Minute},
-			expectErr: "exp claim is before current time",
+			expectErr: joseerror.ErrExpired,
 		},
 		{
 			name:   "a negative leeway does not narrow the window for exp",
@@ -1681,17 +1674,17 @@ func TestValidateClockSkewLeeway(t *testing.T) {
 			}
 
 			_, _, err = Validate(context.Background(), *token, retriever, tt.opts)
-			if tt.expectErr == "" {
+			if tt.expectErr == nil {
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())
 				}
 				return
 			}
 			if err == nil {
-				t.Fatalf("expected error %q, got none", tt.expectErr)
+				t.Fatalf("[RFC 7519 4.1.5] expected error %q, got none", tt.expectErr)
 			}
-			if err.Error() != tt.expectErr {
-				t.Errorf("expected error %q, got %q", tt.expectErr, err.Error())
+			if !errors.Is(err, tt.expectErr) {
+				t.Errorf("[RFC 7519 4.1.5] expected error %q, got %q", tt.expectErr, err)
 			}
 		})
 	}

@@ -52,8 +52,8 @@ func TestGetSigner(t *testing.T) {
 				if err == nil {
 					t.Fatalf("an error should have been thrown")
 				}
-				if err.Error() != "specified key bit size should be at least 2048" {
-					t.Errorf("wrong error returned: %s", err.Error())
+				if !errors.Is(err, joseerror.ErrInvalidPrivateKey) || err.Error() != "invalid private key: specified key bit size should be at least 2048" {
+					t.Errorf("[RFC 7518 3.3] a 1024-bit key is refused as an invalid private key, got %v", err)
 				}
 			},
 		},
@@ -92,8 +92,8 @@ func TestGetSigner(t *testing.T) {
 				if err == nil {
 					t.Fatalf("an error should have been thrown")
 				}
-				if err.Error() != "specified key bit size should be at least 2048" {
-					t.Errorf("wrong error returned: %s", err.Error())
+				if !errors.Is(err, joseerror.ErrInvalidPrivateKey) || err.Error() != "invalid private key: specified key bit size should be at least 2048" {
+					t.Errorf("[RFC 7518 3.3] a 1024-bit key is refused as an invalid private key, got %v", err)
 				}
 			},
 		},
@@ -132,8 +132,8 @@ func TestGetSigner(t *testing.T) {
 				if err == nil {
 					t.Fatalf("an error should have been thrown")
 				}
-				if err.Error() != "specified key bit size should be at least 2048" {
-					t.Errorf("wrong error returned: %s", err.Error())
+				if !errors.Is(err, joseerror.ErrInvalidPrivateKey) || err.Error() != "invalid private key: specified key bit size should be at least 2048" {
+					t.Errorf("[RFC 7518 3.3] a 1024-bit key is refused as an invalid private key, got %v", err)
 				}
 			},
 		},
@@ -172,8 +172,8 @@ func TestGetSigner(t *testing.T) {
 				if err == nil {
 					t.Fatalf("an error should have been thrown")
 				}
-				if err.Error() != "specified key bit size should be at least 2048" {
-					t.Errorf("wrong error returned: %s", err.Error())
+				if !errors.Is(err, joseerror.ErrInvalidPrivateKey) || err.Error() != "invalid private key: specified key bit size should be at least 2048" {
+					t.Errorf("[RFC 7518 3.5] a 1024-bit key is refused as an invalid private key, got %v", err)
 				}
 			},
 		},
@@ -212,8 +212,8 @@ func TestGetSigner(t *testing.T) {
 				if err == nil {
 					t.Fatalf("an error should have been thrown")
 				}
-				if err.Error() != "specified key bit size should be at least 2048" {
-					t.Errorf("wrong error returned: %s", err.Error())
+				if !errors.Is(err, joseerror.ErrInvalidPrivateKey) || err.Error() != "invalid private key: specified key bit size should be at least 2048" {
+					t.Errorf("[RFC 7518 3.5] a 1024-bit key is refused as an invalid private key, got %v", err)
 				}
 			},
 		},
@@ -252,8 +252,8 @@ func TestGetSigner(t *testing.T) {
 				if err == nil {
 					t.Fatalf("an error should have been thrown")
 				}
-				if err.Error() != "specified key bit size should be at least 2048" {
-					t.Errorf("wrong error returned: %s", err.Error())
+				if !errors.Is(err, joseerror.ErrInvalidPrivateKey) || err.Error() != "invalid private key: specified key bit size should be at least 2048" {
+					t.Errorf("[RFC 7518 3.5] a 1024-bit key is refused as an invalid private key, got %v", err)
 				}
 			},
 		},

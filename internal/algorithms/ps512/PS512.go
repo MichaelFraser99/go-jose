@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha512"
+	"errors"
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
 	"github.com/MichaelFraser99/go-jose/joseerror"
@@ -23,8 +24,11 @@ type Validator struct {
 }
 
 func NewSigner(size int) (*Signer, error) {
-	if size < 2048 {
-		return nil, fmt.Errorf("specified key bit size should be at least 2048")
+	if size < common.MinimumRSAModulusBits {
+		return nil, fmt.Errorf("%wspecified key bit size should be at least %d", joseerror.ErrInvalidPrivateKey, common.MinimumRSAModulusBits)
+	}
+	if size > common.MaximumRSAModulusBits {
+		return nil, fmt.Errorf("%wspecified key bit size should be at most %d", joseerror.ErrInvalidPrivateKey, common.MaximumRSAModulusBits)
 	}
 	pk, err := rsa.GenerateKey(rand.Reader, size)
 	if err != nil {
@@ -41,6 +45,9 @@ func NewSignerFromPrivateKey(privateKey crypto.PrivateKey) (*Signer, error) {
 	if !ok {
 		return nil, fmt.Errorf("%wshould be instance of *rsa.PrivateKey", joseerror.ErrInvalidPrivateKey)
 	}
+	if err := common.CheckRSAPrivateKey(rsaPrivateKey); err != nil {
+		return nil, err
+	}
 	return &Signer{
 		alg:        jwa.PS512,
 		privateKey: rsaPrivateKey,
@@ -52,18 +59,13 @@ func NewValidator(publicKey crypto.PublicKey) (*Validator, error) {
 	if !ok {
 		return nil, fmt.Errorf("%wshould be instance of *rsa.PublicKey", joseerror.ErrInvalidPublicKey)
 	}
+	if err := common.CheckRSAPublicKey(rsaPublicKey, joseerror.ErrInvalidPublicKey); err != nil {
+		return nil, err
+	}
 	return &Validator{
 		alg:       jwa.PS512,
 		publicKey: rsaPublicKey,
 	}, nil
-}
-
-func NewValidatorFromJwk(jwk map[string]any) (*Validator, error) {
-	publicKey, err := common.RSAPublicKeyFromJwk(jwk)
-	if err != nil {
-		return nil, err
-	}
-	return NewValidator(publicKey)
 }
 
 func (signer *Signer) Alg() jwa.Algorithm {
@@ -105,6 +107,9 @@ func (validator *Validator) ValidateSignature(digest, signature []byte) (bool, e
 	}
 	err := rsa.VerifyPSS(validator.publicKey, crypto.SHA512, hashedDigest[:], signature, opts)
 
+	if errors.Is(err, rsa.ErrVerification) {
+		return false, nil
+	}
 	if err != nil {
 		return false, fmt.Errorf("%w%s", joseerror.ErrInvalidSignature, err.Error())
 	}

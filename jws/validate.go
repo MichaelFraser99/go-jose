@@ -15,8 +15,10 @@ import (
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs256"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs384"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs512"
+	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
+	"github.com/MichaelFraser99/go-jose/jwk"
 	"github.com/MichaelFraser99/go-jose/model"
 )
 
@@ -27,43 +29,43 @@ import (
 // alg - Determines which validator type gets returned
 //
 // publicKey - `crypto.PublicKey` implementation to be used by the validator
+//
+// A bare crypto.PublicKey carries no algorithm, so the validator uses the key
+// with whatever alg the caller passes: one RSA key builds a validator for each
+// of RS256 to PS512. RFC 8725 section 3.1 requires each key to be used with
+// exactly one algorithm. Binding the key to it is the caller's job: pass an alg
+// the caller chose, not one read from the token, or restrict verification with
+// JoseOptions.AllowedSigningAlgorithms.
 func GetValidator(alg jwa.Algorithm, publicKey crypto.PublicKey) (model.Validator, error) {
-	var v model.Validator
-	var err error
-	switch alg {
-	case jwa.ES256:
-		v, err = es256.NewValidator(publicKey)
-	case jwa.ES384:
-		v, err = es384.NewValidator(publicKey)
-	case jwa.ES512:
-		v, err = es512.NewValidator(publicKey)
-	case jwa.RS256:
-		v, err = rs256.NewValidator(publicKey)
-	case jwa.RS384:
-		v, err = rs384.NewValidator(publicKey)
-	case jwa.RS512:
-		v, err = rs512.NewValidator(publicKey)
-	case jwa.PS256:
-		v, err = ps256.NewValidator(publicKey)
-	case jwa.PS384:
-		v, err = ps384.NewValidator(publicKey)
-	case jwa.PS512:
-		v, err = ps512.NewValidator(publicKey)
-	case jwa.HS256:
-		v, err = hs256.NewValidator(publicKey)
-	case jwa.HS384:
-		v, err = hs384.NewValidator(publicKey)
-	case jwa.HS512:
-		v, err = hs512.NewValidator(publicKey)
-	case jwa.EdDSA, jwa.Unknown:
-		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg.String())
-	default:
+	construct, ok := validatorConstructors[alg]
+	if !ok {
 		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg.String())
 	}
+	v, err := construct(publicKey)
 	if err != nil {
 		return nil, err
 	}
 	return v, nil
+}
+
+var validatorConstructors = map[jwa.Algorithm]func(crypto.PublicKey) (model.Validator, error){
+	jwa.ES256: func(k crypto.PublicKey) (model.Validator, error) { return es256.NewValidator(k) },
+	jwa.ES384: func(k crypto.PublicKey) (model.Validator, error) { return es384.NewValidator(k) },
+	jwa.ES512: func(k crypto.PublicKey) (model.Validator, error) { return es512.NewValidator(k) },
+	jwa.RS256: func(k crypto.PublicKey) (model.Validator, error) { return rs256.NewValidator(k) },
+	jwa.RS384: func(k crypto.PublicKey) (model.Validator, error) { return rs384.NewValidator(k) },
+	jwa.RS512: func(k crypto.PublicKey) (model.Validator, error) { return rs512.NewValidator(k) },
+	jwa.PS256: func(k crypto.PublicKey) (model.Validator, error) { return ps256.NewValidator(k) },
+	jwa.PS384: func(k crypto.PublicKey) (model.Validator, error) { return ps384.NewValidator(k) },
+	jwa.PS512: func(k crypto.PublicKey) (model.Validator, error) { return ps512.NewValidator(k) },
+	jwa.HS256: func(k crypto.PublicKey) (model.Validator, error) { return hs256.NewValidator(k) },
+	jwa.HS384: func(k crypto.PublicKey) (model.Validator, error) { return hs384.NewValidator(k) },
+	jwa.HS512: func(k crypto.PublicKey) (model.Validator, error) { return hs512.NewValidator(k) },
+}
+
+func hasValidator(alg jwa.Algorithm) bool {
+	_, ok := validatorConstructors[alg]
+	return ok
 }
 
 // GetValidatorFromJwk
@@ -72,29 +74,13 @@ func GetValidator(alg jwa.Algorithm, publicKey crypto.PublicKey) (model.Validato
 //
 // alg - Determines which validator type gets returned
 //
-// jwk - jwk format public key
-func GetValidatorFromJwk(alg jwa.Algorithm, jwk map[string]any) (model.Validator, error) {
-	var v model.Validator
-	var err error
+// publicJwk - jwk format public key. Its "kty" selects the key type, and the key
+// must suit alg as GetValidator requires. RFC 8725 section 3.1 requires each key
+// to be used with exactly one algorithm, so a jwk carrying an "alg" member is
+// refused unless that member is the string alg names.
+func GetValidatorFromJwk(alg jwa.Algorithm, publicJwk map[string]any) (model.Validator, error) {
 	switch alg {
-	case jwa.ES256:
-		v, err = es256.NewValidatorFromJwk(jwk)
-	case jwa.ES384:
-		v, err = es384.NewValidatorFromJwk(jwk)
-	case jwa.ES512:
-		v, err = es512.NewValidatorFromJwk(jwk)
-	case jwa.RS256:
-		v, err = rs256.NewValidatorFromJwk(jwk)
-	case jwa.RS384:
-		v, err = rs384.NewValidatorFromJwk(jwk)
-	case jwa.RS512:
-		v, err = rs512.NewValidatorFromJwk(jwk)
-	case jwa.PS256:
-		v, err = ps256.NewValidatorFromJwk(jwk)
-	case jwa.PS384:
-		v, err = ps384.NewValidatorFromJwk(jwk)
-	case jwa.PS512:
-		v, err = ps512.NewValidatorFromJwk(jwk)
+	case jwa.ES256, jwa.ES384, jwa.ES512, jwa.RS256, jwa.RS384, jwa.RS512, jwa.PS256, jwa.PS384, jwa.PS512:
 	case jwa.HS256, jwa.HS384, jwa.HS512:
 		return nil, fmt.Errorf("%wvalidators cannot be created for symmetric algorithms", joseerror.ErrUnsupportedAlgorithm)
 	case jwa.EdDSA, jwa.Unknown:
@@ -102,8 +88,18 @@ func GetValidatorFromJwk(alg jwa.Algorithm, jwk map[string]any) (model.Validator
 	default:
 		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg.String())
 	}
+	if member, present := publicJwk["alg"]; present {
+		if name, isString := member.(string); name != alg.String() {
+			named := "a value that is not a string"
+			if isString {
+				named = jsonutils.QuoteBounded(name)
+			}
+			return nil, fmt.Errorf("%wthe jwk's alg %s does not name %s", joseerror.ErrInvalidPublicKey, named, alg.String())
+		}
+	}
+	publicKey, err := jwk.PublicFromJwk(publicJwk)
 	if err != nil {
 		return nil, err
 	}
-	return v, nil
+	return GetValidator(alg, publicKey)
 }

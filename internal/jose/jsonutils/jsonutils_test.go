@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"reflect"
+	"strconv"
 	"testing"
 )
 
@@ -81,12 +82,12 @@ func Test_validateAlg(t *testing.T) {
 		},
 		"invalid alg": {
 			retrievedClaimValue: "foo-bar",
-			errMsg:              "'foo-bar' is not a supported algorithm",
+			errMsg:              `"foo-bar" is not a supported algorithm`,
 			errTypes:            []error{joseerror.ErrUnsupportedAlgorithm},
 		},
 		"missing alg": {
 			retrievedClaimValue: "",
-			errMsg:              "'' is not a supported algorithm",
+			errMsg:              `"" is not a supported algorithm`,
 			errTypes:            []error{joseerror.ErrUnsupportedAlgorithm},
 		},
 	}
@@ -110,17 +111,17 @@ func Test_validateHttpsUrlClaim(t *testing.T) {
 		},
 		"http url": {
 			retrievedClaimValue: "http://example.com",
-			errMsg:              "'http://example.com' is not a valid HTTPS URL",
+			errMsg:              `"http://example.com" is not a valid HTTPS URL`,
 			errTypes:            []error{joseerror.ErrMalformedClaim},
 		},
 		"illegal character in url": {
 			retrievedClaimValue: "foobar" + string(rune(0x7f)),
-			errMsg:              fmt.Sprintf("'%s' is not a valid URL", "foobar"+string(rune(0x7f))),
+			errMsg:              strconv.Quote("foobar"+string(rune(0x7f))) + " is not a valid URL",
 			errTypes:            []error{joseerror.ErrMalformedClaim},
 		},
 		"empty string": {
 			retrievedClaimValue: "",
-			errMsg:              "'' is not a valid HTTPS URL",
+			errMsg:              `"" is not a valid HTTPS URL`,
 			errTypes:            []error{joseerror.ErrMalformedClaim},
 		},
 	}
@@ -144,12 +145,12 @@ func Test_validateBase64Url(t *testing.T) {
 		},
 		"invalid base64url": {
 			retrievedClaimValue: "abcde",
-			errMsg:              "'abcde' is not valid base64url",
+			errMsg:              `"abcde" is not valid base64url`,
 			errTypes:            []error{joseerror.ErrMalformedClaim},
 		},
 		"padded base64url": {
 			retrievedClaimValue: "eyJhbGciOiJSUzI1NiIsInR5cCI6Impzb24rc2Qtand0In0==",
-			errMsg:              "'eyJhbGciOiJSUzI1NiIsInR5cCI6Impzb24rc2Qtand0In0==' is not valid base64url",
+			errMsg:              `"eyJhbGciOiJSUzI1NiIsInR5cCI6Impzb24rc2Qtand0In0==" is not valid base64url`,
 			errTypes:            []error{joseerror.ErrMalformedClaim},
 		},
 		"empty string": {
