@@ -2,9 +2,123 @@ package model
 
 import (
 	"crypto"
-	"io"
-	"strings"
+	"crypto/x509"
+	"fmt"
+	"github.com/MichaelFraser99/go-jose/joseerror"
+	"github.com/MichaelFraser99/go-jose/jwa"
+	"net/http"
+	"time"
 )
+
+type JoseOptions struct {
+	// IgnoreTokenProvidedKeys stops the keys a token carries in its own header — jwk,
+	// jku, x5c and x5u — from being used for verification. They are used by default,
+	// so a caller wanting only its own key material opts out here.
+	//
+	// The sense is negative so that the zero value is the default. The field this
+	// replaced read UseTokenProvidedKeys and documented itself as defaulting to true,
+	// which held only while a caller passed no options at all: constructing the struct
+	// to set anything else zeroed it and silently turned every header key source off.
+	IgnoreTokenProvidedKeys bool
+
+	// HttpClient fetches the resources a token's jku and x5u headers name. Both URLs
+	// come from the header of the token being verified, so this library makes an
+	// outbound request to an address a peer chose: supply a client whose transport
+	// rejects the destinations your deployment will not allow.
+	//
+	// With no client, jku and x5u contribute no key.
+	HttpClient *http.Client
+
+	// AllowedSigningAlgorithms defines the list of acceptable algorithms for token signature verification. If not specified, all algorithms are permitted
+	AllowedSigningAlgorithms []jwa.Algorithm
+
+	// ClockSkewLeeway widens the window the iat, nbf and exp claims are judged against, to allow for clock skew between the issuer and this verifier. A value of zero or less grants none. Defaults to 0
+	ClockSkewLeeway time.Duration
+
+	// AcceptedTypes lists the media types the 'typ' header may name. They are
+	// compared as RFC 7515 section 4.1.9 requires: case-insensitively, with
+	// "application/" treated as prepended to any value containing no "/".
+	//
+	// With none listed, 'typ' is not checked.
+	AcceptedTypes []string
+
+	// RequireKeyIdentifier refuses a token whose 'kid' header is absent or is not a
+	// non-empty string. RFC 7517 section 4.5 leaves 'kid' optional, so this is off by
+	// default; a profile that pins a key by identifier will want it on.
+	RequireKeyIdentifier bool
+
+	// UnderstoodCriticalHeaders names the extension header parameters this caller
+	// understands. RFC 7515 section 4.1.11 says a JWS whose 'crit' lists anything the
+	// recipient does not understand MUST be rejected, so an entry not named here is
+	// refused. Names are compared exactly, since a header parameter name is.
+	//
+	// With none named, any 'crit' is refused, because this library understands no
+	// extensions of its own.
+	UnderstoodCriticalHeaders []string
+
+	// X509Roots holds the trust anchors a certificate chain named by the x5c or x5u
+	// header must validate against. RFC 7515 section 4.1.6 requires a recipient to
+	// validate the chain per RFC 5280, and RFC 5280 path validation takes a trust
+	// anchor as an input, so neither header can be used without one.
+	//
+	// With no roots configured, a token's x5c and x5u headers are ignored: they
+	// contribute no key, and the token verifies only if another source does.
+	X509Roots *x509.CertPool
+}
+
+type Retriever func() ([]crypto.PublicKey, error)
+
+type Mode int //todo: do we actually need this?
+
+const (
+	JWS Mode = iota
+	JWE
+)
+
+type Jwks struct {
+	Keys []map[string]any `json:"keys"`
+	Opts struct {
+		EnforceUniqueKIDs bool //todo: we should enforce this on marshal too
+	} `json:"-"`
+}
+
+// RetrieveByKeyID returns every jwk in the key set whose kid matches the one given,
+// in the order the set holds them.
+//
+// RFC 7517 section 4.5 does not require a kid to be unique within a key set, so a
+// set may legitimately carry more than one key under one kid, as an issuer mid key
+// rotation does. An error is returned only when no key carries the kid. Keys with
+// an absent or non-string kid are ignored.
+func (j *Jwks) RetrieveByKeyID(kid string) ([]map[string]any, error) {
+	var keys []map[string]any
+	for _, key := range j.Keys {
+		if keyKid, ok := key["kid"]; ok {
+			if strKeyKid, ok := keyKid.(string); ok {
+				if kid == strKeyKid {
+					keys = append(keys, key)
+				}
+			}
+		}
+	}
+	if len(keys) == 0 {
+		return nil, fmt.Errorf("%wno matching key found for provided key ID", joseerror.ErrKeystoreError)
+	}
+	return keys, nil
+}
+
+func (j *Jwks) Add(jwk map[string]any) error {
+	if kid, ok := jwk["kid"]; ok && j.Opts.EnforceUniqueKIDs {
+		if sKid, ok := kid.(string); !ok {
+			return fmt.Errorf("%w malformed key ID found for JWK", joseerror.ErrKeystoreError)
+		} else {
+			if existing, _ := j.RetrieveByKeyID(sKid); len(existing) > 0 {
+				return fmt.Errorf("%w provided jwk has kid value matching a value already present in the keyset", joseerror.ErrKeystoreError)
+			}
+		}
+	}
+	j.Keys = append(j.Keys, jwk)
+	return nil
+}
 
 // Signer signs JWS payloads per RFC 7515 / RFC 7518.
 //
@@ -17,9 +131,8 @@ import (
 //     and the implementation skips internal hashing. This supports interoperability with
 //     callers following Go's crypto.Signer convention.
 type Signer interface {
-	Alg() Algorithm
-	Public() crypto.PublicKey
-	Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error)
+	Alg() jwa.Algorithm
+	crypto.Signer
 }
 
 // Validator verifies JWS signatures per RFC 7515 / RFC 7518.
@@ -27,94 +140,11 @@ type Signer interface {
 // ValidateSignature expects the raw JWS Signing Input as digest (not pre-hashed).
 // The implementation hashes it internally using the algorithm's designated hash
 // before performing verification.
+//
+// todo: these could have jwk methods - especially the Validator
 type Validator interface {
 	ValidateSignature(digest, signature []byte) (bool, error)
 	Public() crypto.PublicKey
-}
-
-type Algorithm int
-
-const (
-	ES256 Algorithm = iota
-	ES384
-	ES512
-	RS256
-	RS384
-	RS512
-	PS256
-	PS384
-	PS512
-	HS256
-	HS384
-	HS512
-)
-
-func (a Algorithm) String() string {
-	switch a {
-	case ES256:
-		return "ES256"
-	case ES384:
-		return "ES384"
-	case ES512:
-		return "ES512"
-	case RS256:
-		return "RS256"
-	case RS384:
-		return "RS384"
-	case RS512:
-		return "RS512"
-	case PS256:
-		return "PS256"
-	case PS384:
-		return "PS384"
-	case PS512:
-		return "PS512"
-	case HS256:
-		return "HS256"
-	case HS384:
-		return "HS384"
-	case HS512:
-		return "HS512"
-	default:
-		return ""
-	}
-}
-
-// GetAlgorithm takes in a string representation of an Algorithm ("ES256" or "HS384")
-// If the provided string does not match a defined algorithm, nil is returned
-func GetAlgorithm(alg string) *Algorithm {
-	switch strings.ToUpper(alg) {
-	case "ES256":
-		return algorithm(ES256)
-	case "ES384":
-		return algorithm(ES384)
-	case "ES512":
-		return algorithm(ES512)
-	case "RS256":
-		return algorithm(RS256)
-	case "RS384":
-		return algorithm(RS384)
-	case "RS512":
-		return algorithm(RS512)
-	case "PS256":
-		return algorithm(PS256)
-	case "PS384":
-		return algorithm(PS384)
-	case "PS512":
-		return algorithm(PS512)
-	case "HS256":
-		return algorithm(HS256)
-	case "HS384":
-		return algorithm(HS384)
-	case "HS512":
-		return algorithm(HS512)
-	default:
-		return nil
-	}
-}
-
-func algorithm(a Algorithm) *Algorithm {
-	return &a
 }
 
 // Opts configures key generation for new signers.
@@ -124,13 +154,14 @@ type Opts struct {
 	SecretKey *[]byte
 }
 
-// SignerOpts implements crypto.SignerOpts and is used to signal that the digest
-// passed to Sign has already been hashed. When provided with a non-zero Hash,
-// the signer will skip internal hashing.
 type SignerOpts struct {
 	Hash crypto.Hash
 }
 
 func (s SignerOpts) HashFunc() crypto.Hash {
 	return s.Hash
+}
+
+func Pointer[T any](v T) *T {
+	return &v
 }
