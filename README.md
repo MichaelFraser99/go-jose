@@ -281,7 +281,7 @@ The second validates a jwt and returns the decoded head and body:
 func jwt.Validate(token string, outOfBoundsPublicKey model.Retriever, opts *model.JoseOptions) (head, body map[string]any, err error)
 ```
 
-The retriever supplies key material of your own. Pass nil to rely only on what the token's header names. `model.JoseOptions` carries everything described under [Keys a token carries](#keys-a-token-carries), and may be nil for the defaults.
+The retriever supplies key material of your own. Pass nil only when you have turned on `UseTokenProvidedKeys`, so the token's header names the key. `model.JoseOptions` carries everything described under [Keys a token carries](#keys-a-token-carries), and may be nil for the defaults.
 
 If the `iat`, `nbf` and `exp` claims are present, `Validate` checks them. `JoseOptions.ClockSkewLeeway` widens the window they are judged against.
 
@@ -340,7 +340,7 @@ if errors.Is(err, joseerror.ErrInvalidSignature) {
 | --- | --- |
 | `jwa.GetAlgorithm` | Returns `Algorithm`, not `*Algorithm`. Returns `jwa.Unknown` rather than nil for an unknown name, and the comparison is now case sensitive |
 | `jwt.New` | Takes a fourth parameter, `jwt.Opts`, naming the algorithm to sign with |
-| `jwt.Validate` | Takes `(token string, retriever model.Retriever, opts *model.JoseOptions)`. The `publicKey` parameter is gone: supply key material through the retriever, or rely on what the token's header names |
+| `jwt.Validate` | Takes `(token string, retriever model.Retriever, opts *model.JoseOptions)`. The `publicKey` parameter is gone: supply key material through the retriever, or turn on `UseTokenProvidedKeys` to use what the token's header names |
 | `jws.GetValidatorFromJwk` | Takes `map[string]any`, not `[]byte` |
 | `jwk.PublicJwk`, `jwk.PrivateJwk` | Return `*map[string]any`, not `map[string]string` |
 
