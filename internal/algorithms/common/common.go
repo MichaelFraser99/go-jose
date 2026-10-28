@@ -12,12 +12,15 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
-	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
-	jose_errors "github.com/MichaelFraser99/go-jose/joseerror"
-	"github.com/MichaelFraser99/go-jose/model"
 	"hash"
 	"io"
 	"math/big"
+	"strings"
+	"unicode/utf8"
+
+	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
+	jose_errors "github.com/MichaelFraser99/go-jose/joseerror"
+	"github.com/MichaelFraser99/go-jose/model"
 )
 
 type SecretKey []byte
@@ -147,14 +150,11 @@ func JwkFromECDSAPublicKey(publicKey *ecdsa.PublicKey) (map[string]any, error) {
 	b64X := []byte(base64.RawURLEncoding.EncodeToString(uncompressed[1 : 1+coordinateBytes]))
 	b64Y := []byte(base64.RawURLEncoding.EncodeToString(uncompressed[1+coordinateBytes:]))
 
-	h := sha256.New()
-	h.Write(append(b64X, b64Y...))
 	jwk["x"] = string(b64X)
 	jwk["y"] = string(b64Y)
 	jwk["kty"] = "EC"
 	jwk["crv"] = publicKey.Curve.Params().Name
-	jwk["kid"] = base64.RawURLEncoding.EncodeToString(h.Sum(nil))
-	return jwk, nil
+	return withThumbprint(jwk)
 }
 
 const jwkCurves = "the curve of an EC jwk is one of P-256, P-384 and P-521"
@@ -201,10 +201,6 @@ func JwkFromECDSAPrivateKey(privateKey *ecdsa.PrivateKey) (map[string]any, error
 	return jwk, nil
 }
 
-//todo: pull out kid calculation from these methods and break out into a different function
-// this can be completely algorithm agnostic and doesn't impose a particular method of calculating
-// the kid on the consumer
-
 // JwkFromEdDSAPublicKey builds the jwk of an Ed25519 public key.
 //
 // RFC 8032 section 5.1.5 makes an Ed25519 public key 32 octets, and RFC 8037
@@ -222,13 +218,10 @@ func JwkFromEdDSAPublicKey(publicKey *ed25519.PublicKey) (map[string]any, error)
 	b64X := make([]byte, base64.RawURLEncoding.EncodedLen(ed25519.PublicKeySize))
 	base64.RawURLEncoding.Encode(b64X, *publicKey)
 
-	h := sha256.New()
-	h.Write(b64X)
 	jwk["x"] = string(b64X)
 	jwk["kty"] = "OKP"
 	jwk["crv"] = "Ed25519" //Ed448 not supported - prevailing opinion amongst the crypto peeps is there is no point
-	jwk["kid"] = base64.RawURLEncoding.EncodeToString(h.Sum(nil))
-	return jwk, nil
+	return withThumbprint(jwk)
 }
 
 // JwkFromEdDSAPrivateKey builds the jwk of an Ed25519 private key.
@@ -251,15 +244,11 @@ func JwkFromEdDSAPrivateKey(privateKey *ed25519.PrivateKey) (map[string]any, err
 	b64D := make([]byte, base64.RawURLEncoding.EncodedLen(ed25519.PrivateKeySize-ed25519.PublicKeySize))
 	base64.RawURLEncoding.Encode(b64D, (*privateKey)[:ed25519.PublicKeySize])
 
-	h := sha256.New()
-	h.Write(b64X)
-
 	jwk["x"] = string(b64X)
 	jwk["d"] = string(b64D)
 	jwk["kty"] = "OKP"
 	jwk["crv"] = "Ed25519" //Ed448 not supported - prevailing opinion amongst the crypto peeps is there is no point
-	jwk["kid"] = base64.RawURLEncoding.EncodeToString(h.Sum(nil))
-	return jwk, nil
+	return withThumbprint(jwk)
 }
 
 func requireEd25519Subtype(jwk map[string]any, class error) error {
@@ -445,13 +434,10 @@ func JwkFromRSAPublicKey(publicKey *rsa.PublicKey) (map[string]any, error) {
 	b64N := []byte(base64.RawURLEncoding.EncodeToString(publicKey.N.Bytes()))
 	b64E := []byte(base64.RawURLEncoding.EncodeToString(big.NewInt(int64(publicKey.E)).Bytes()))
 
-	h := sha256.New()
-	h.Write(append(b64N, b64E...))
 	jwk["n"] = string(b64N)
 	jwk["e"] = string(b64E)
 	jwk["kty"] = "RSA"
-	jwk["kid"] = base64.RawURLEncoding.EncodeToString(h.Sum(nil))
-	return jwk, nil
+	return withThumbprint(jwk)
 }
 
 func checkRSAPublicKey(publicKey *rsa.PublicKey, class error) error {
@@ -561,4 +547,56 @@ func RsaPSSSign(rand io.Reader, pk rsa.PrivateKey, digest []byte, hash crypto.Ha
 func ProduceMac(h hash.Hash, digest []byte) []byte {
 	h.Write(digest)
 	return h.Sum(nil)
+}
+
+var thumbprintMembers = map[string][]string{
+	"EC":  {"crv", "kty", "x", "y"},
+	"RSA": {"e", "kty", "n"},
+	"oct": {"k", "kty"},
+	"OKP": {"crv", "kty", "x"},
+}
+
+// Thumbprint computes the RFC 7638 JWK SHA-256 Thumbprint of a jwk, base64url
+// encoded. Section 3 hashes a JSON object of only the key type's required
+// members, ordered by name and with no whitespace; section 3.2.1 makes a
+// private key's thumbprint that of its public key. A member value that would
+// need escaping has no thumbprint under section 3.3, so it is refused.
+func Thumbprint(jwk map[string]any) (string, error) {
+	kty, ok := jwk["kty"].(string)
+	if !ok {
+		return "", fmt.Errorf("%wa jwk's 'kty' must be a string", jose_errors.ErrMalformedClaim)
+	}
+	members, ok := thumbprintMembers[kty]
+	if !ok {
+		return "", fmt.Errorf("%wa thumbprint is defined here for kty EC, RSA, oct and OKP", jose_errors.ErrUnsupportedAlgorithm)
+	}
+
+	var canonical strings.Builder
+	canonical.WriteByte('{')
+	for i, name := range members {
+		value, ok := jwk[name].(string)
+		if !ok {
+			return "", fmt.Errorf("%wa %s jwk's '%s' must be present and a string", jose_errors.ErrMalformedClaim, kty, name)
+		}
+		if !utf8.ValidString(value) || strings.ContainsFunc(value, func(r rune) bool { return r == '"' || r == '\\' || r < 0x20 }) {
+			return "", fmt.Errorf("%wa %s jwk's '%s' holds a character JSON must escape, so it has no thumbprint", jose_errors.ErrMalformedClaim, kty, name)
+		}
+		if i > 0 {
+			canonical.WriteByte(',')
+		}
+		canonical.WriteString(`"` + name + `":"` + value + `"`)
+	}
+	canonical.WriteByte('}')
+
+	digest := sha256.Sum256([]byte(canonical.String()))
+	return base64.RawURLEncoding.EncodeToString(digest[:]), nil
+}
+
+func withThumbprint(jwk map[string]any) (map[string]any, error) {
+	kid, err := Thumbprint(jwk)
+	if err != nil {
+		return nil, err
+	}
+	jwk["kid"] = kid
+	return jwk, nil
 }

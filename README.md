@@ -307,9 +307,15 @@ Configuring roots does not make `jwk` or `jku` usable. Nothing anchors those key
 ## Jwks
 This library includes two methods for converting keys into JWK format
 
-All JWK methods include in the returned map a KID suggestion based on the public key component
+Every jwk these methods return carries a `kid`: the key's RFC 7638 JWK SHA-256 Thumbprint, base64url encoded. RFC 7638 hashes only the key type's required members, `kty` included, so two keys of different types cannot share a `kid`. Any other implementation computes the same value for the same key. A private key's `kid` is that of its public key, as RFC 7638 section 3.2.1 defines. The `kid` is a suggestion: set your own on the returned map if you name keys another way.
 
-**This is a breaking change for Ed25519 keys.** Earlier versions computed the suggestion for an Ed25519 key and then discarded it, so the jwk went out with no `kid` at all. It now carries one, like every other algorithm. Two consequences for a caller: the serialised jwk of an Ed25519 key gains a member, so a pinned fixture of that JSON no longer matches; and `Jwks.Add` with `EnforceUniqueKIDs` now refuses a second copy of one Ed25519 key, where before it had no `kid` to compare and accepted it.
+`jwk.Thumbprint` computes the thumbprint of any jwk of `kty` EC, RSA, oct or OKP:
+
+```go
+func jwk.Thumbprint(jwk map[string]any) (string, error)
+```
+
+It refuses a jwk missing a required member, or one whose member would need escaping in JSON, because RFC 7638 section 3.3 defines no thumbprint for it.
 
 `jwk.PublicJwk` takes a public key and returns the jwk representation of it:
 ```go
@@ -480,7 +486,7 @@ Every change below is a compile error or a silent behaviour change for a consume
 - `model.Jwks.RetrieveByKeyID` returns `[]map[string]any`, every key carrying the `kid` in set order, not one `map[string]any`. It returns an error only when no key carries the `kid`. To keep the old exactly-one meaning, check `len(keys) == 1` and use `keys[0]`.
 - Every error sentinel's message now ends in `": "`, so it composes with the text that wraps it. A match on an error string breaks; match with `errors.Is` instead.
 - An HMAC secret must be at least the hash output size.
-- An Ed25519 jwk now carries a `kid`.
+- Every `kid` that `PublicJwk` and `PrivateJwk` produce has changed. It is now the key's RFC 7638 thumbprint, which other implementations compute the same way. The old value was a SHA-256 over the encoded public members with no `kty`, so keys of different types could share one. An Ed25519 jwk now carries a `kid` too. Re-derive any `kid` you stored or pinned.
 - An `OKP` jwk is read only when it is a well-formed Ed25519 key.
 - `PublicJwk` and `PrivateJwk` refuse a key they cannot encode, rather than panic or produce a malformed jwk.
 - `JoseOptions.UseTokenProvidedKeys` is off unless set, including when `opts` is `nil`, and now covers only `jwk` and `jku`. `x5c` and `x5u` are used when `X509Roots` is set.
