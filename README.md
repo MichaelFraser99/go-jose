@@ -289,6 +289,12 @@ An `OKP` jwk is read only when its `crv` is `Ed25519`, the one OKP subtype this 
 
 **This is a breaking change for OKP keys.** Earlier versions ignored the value of `crv`, so an `X25519` or `Ed448` key was returned as an Ed25519 key. They also accepted any length of `x` and `d`, and did not compare `x` with `d`. A key that those versions read can now be refused.
 
+An `EC` jwk is read only when its `crv` is P-256, P-384 or P-521. Any other curve is refused with `ErrUnsupportedAlgorithm`. Each of `x` and `y` must be the full size of a coordinate of the curve: 32, 48 or 66 octets. RFC 7518 sections 6.2.1.2 and 6.2.1.3 require this, so a coordinate with a leading zero octet dropped or added is refused. The point must be on the curve. A private key must carry `d`, which RFC 7518 section 6.2.2 makes REQUIRED. `d` must be the length of the curve order, in `[1, n-1]`, and `x` and `y` must be its public point.
+
+An `RSA` jwk's `e` must be an odd integer from 3 to 2^31-1. RFC 3447 section 3.1 sets the lower bound and requires an odd value, and `crypto/rsa` refuses a larger one. A private key's `d` must be a positive integer less than `n`, as RFC 3447 section 3.2 defines it. When `p` and `q` are present, `n` must be odd, the key must pass `rsa.PrivateKey.Validate`, and `dp`, `dq` and `qi` must be the CRT values of `p`, `q` and `d`. When they are absent, `d` must undo `e`: the reader checks that 2 raised to `d` and then to `e`, modulo `n`, is 2.
+
+The error for an unsupported `kty` or `crv` names the values this library supports. It does not repeat the value the jwk carried, so a peer's text does not reach your logs.
+
 ## JWTs
 This library includes two methods for jwt handling
 
@@ -346,6 +352,14 @@ fmt.Errorf("%wshould be an instance of *ecdsa.PrivateKey", joseerror.ErrInvalidP
 ```
 
 That reads `invalid private key: should be an instance of *ecdsa.PrivateKey`, and `errors.Is` still matches.
+
+## Upgrading from 0.10.x
+
+- `PublicFromJwk` and `PrivateFromJwk` refuse an EC jwk whose `x` or `y` is not the full coordinate size of its curve, or whose point is not on the curve. A producer that strips leading zero octets breaks RFC 7518 section 6.2.1.2, and its keys are now refused.
+- `PrivateFromJwk` refuses an EC jwk with no `d`. It used to return a key that panicked when used.
+- `PrivateFromJwk` refuses an EC or RSA jwk whose private members do not belong to its public members.
+- `PublicFromJwk` and `PrivateFromJwk` refuse an RSA `e` that is even, below 3 or above 2^31-1. An `e` of more than 8 octets used to be read as its low 64 bits.
+- An EC jwk with an unsupported `crv` is now refused with `ErrUnsupportedAlgorithm`. Before, the error matched no sentinel. The error text for an unsupported `kty` or `crv` no longer repeats the value.
 
 ## Upgrading from the pre-0.10 line
 
