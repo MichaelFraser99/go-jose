@@ -104,7 +104,7 @@ The `Sign` method follows JOSE conventions per RFC 7518 rather than Go's `crypto
 
 > **The HMAC algorithms have no pre-hashed mode, and refuse one.** HMAC is itself a keyed hash, so there is no internal hashing step for a caller to skip. HS256, HS384 and HS512 refuse a non-zero `opts.HashFunc()` with `ErrSigningError`. Pass the signing input whole and leave `opts` nil.
 >
-> **This is a breaking change.** Earlier versions ignored `opts` and signed anyway, producing a MAC over the digest rather than over the signing input — a signature no validator accepts, with no error to say so. Any caller that was passing a non-nil `opts` to an HS signer was already producing signatures that did not verify; they now get an error at the call that causes it.
+> **This is a breaking change,** and it breaks two kinds of caller differently. One passed a pre-hashed digest with a non-zero `Hash`, as the old documentation described: they were already producing a MAC over the digest rather than over the signing input, which no validator accepts, with no error to say so. They now get an error at the call that causes it. The other is generic over `crypto.Signer` and passes a non-zero `Hash` alongside the **raw** signing input — that worked, because `opts` was ignored, and it no longer does. Such a caller should pass `nil` for an HS algorithm, or a zero `Hash`.
 
 A `SignerOpts` implementation is provided:
 ```go

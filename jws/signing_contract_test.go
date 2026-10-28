@@ -36,8 +36,13 @@ func TestSign_EveryAlgorithmHonoursTheDocumentedSigningContract(t *testing.T) {
 	}{
 		jwa.ES256: {hash: crypto.SHA256, preHashedMode: true},
 		jwa.ES384: {hash: crypto.SHA384, preHashedMode: true},
+		jwa.ES512: {hash: crypto.SHA512, preHashedMode: true},
 		jwa.RS256: {hash: crypto.SHA256, preHashedMode: true},
+		jwa.RS384: {hash: crypto.SHA384, preHashedMode: true},
+		jwa.RS512: {hash: crypto.SHA512, preHashedMode: true},
 		jwa.PS256: {hash: crypto.SHA256, preHashedMode: true},
+		jwa.PS384: {hash: crypto.SHA384, preHashedMode: true},
+		jwa.PS512: {hash: crypto.SHA512, preHashedMode: true},
 		jwa.HS256: {hash: crypto.SHA256},
 		jwa.HS384: {hash: crypto.SHA384},
 		jwa.HS512: {hash: crypto.SHA512},
@@ -89,6 +94,10 @@ func TestSign_EveryAlgorithmHonoursTheDocumentedSigningContract(t *testing.T) {
 				t.Errorf("[RFC 7518] a signature made in pre-hashed mode must verify, got valid=%t err=%v", valid, err)
 			}
 		})
+
+		if !test.preHashedMode {
+			continue
+		}
 
 		t.Run(alg.String()+", a hash that is not the algorithm's own", func(t *testing.T) {
 			signer := contractSigner(t, alg)
