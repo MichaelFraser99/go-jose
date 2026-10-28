@@ -576,10 +576,10 @@ func Thumbprint(jwk map[string]any) (string, error) {
 	for i, name := range members {
 		value, ok := jwk[name].(string)
 		if !ok {
-			return "", fmt.Errorf("%wa %s jwk's '%s' must be present and a string", jose_errors.ErrMalformedClaim, kty, name)
+			return "", fmt.Errorf("%wthe '%s' of a jwk of kty %s must be present and a string", jose_errors.ErrMalformedClaim, name, kty)
 		}
 		if !utf8.ValidString(value) || strings.ContainsFunc(value, func(r rune) bool { return r == '"' || r == '\\' || r < 0x20 }) {
-			return "", fmt.Errorf("%wa %s jwk's '%s' holds a character JSON must escape, so it has no thumbprint", jose_errors.ErrMalformedClaim, kty, name)
+			return "", fmt.Errorf("%wthe '%s' of a jwk of kty %s holds a character JSON must escape, so it has no thumbprint", jose_errors.ErrMalformedClaim, name, kty)
 		}
 		if i > 0 {
 			canonical.WriteByte(',')

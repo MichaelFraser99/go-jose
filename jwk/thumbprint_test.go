@@ -152,7 +152,11 @@ func TestThumbprint_RefusesAJwkWhoseThumbprintIsUndefined(t *testing.T) {
 		jwk  map[string]any
 		want error
 	}{
+		"a nil jwk":                    {jwk: nil, want: joseerror.ErrMalformedClaim},
 		"no kty":                       {jwk: map[string]any{"n": "AQAB", "e": "AQAB"}, want: joseerror.ErrMalformedClaim},
+		"a null kty":                   {jwk: map[string]any{"kty": nil}, want: joseerror.ErrMalformedClaim},
+		"an RSA key with a null n":     {jwk: map[string]any{"kty": "RSA", "n": nil, "e": "AQAB"}, want: joseerror.ErrMalformedClaim},
+		"the ML-DSA key type AKP":      {jwk: map[string]any{"kty": "AKP", "alg": "ML-DSA-65", "pub": "AQAB"}, want: joseerror.ErrUnsupportedAlgorithm},
 		"a kty that is not a string":   {jwk: map[string]any{"kty": 7}, want: joseerror.ErrMalformedClaim},
 		"an unsupported kty":           {jwk: map[string]any{"kty": "nonsense"}, want: joseerror.ErrUnsupportedAlgorithm},
 		"an RSA key with no e":         {jwk: map[string]any{"kty": "RSA", "n": "AQAB"}, want: joseerror.ErrMalformedClaim},
