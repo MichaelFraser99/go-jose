@@ -169,7 +169,7 @@ head, body, err := jwt.Validate(token, nil, &model.JoseOptions{
 
 Both URLs come from the header of the token being verified, so this library makes an outbound request to an address a peer chose, before the signature is checked. Give the client a transport that rejects the destinations your deployment will not allow — private, loopback, link-local and other reserved ranges — and a timeout. The body is capped at 4 MiB whatever client you supply.
 
-With no client, `jku` and `x5u` contribute no key. `jku` must be `https`, as RFC 7515 section 4.1.2 requires integrity protection, and an `x5u` resource is read as the PEM encoding section 4.1.5 requires. A server that sends raw DER instead is still read: a body that parses as DER certificates is taken as exactly those certificates, and is never searched for PEM text.
+With no client, `jku` and `x5u` contribute no key. `jku` must be `https`, as RFC 7515 section 4.1.2 requires integrity protection, and an `x5u` resource is read as the PEM encoding section 4.1.5 requires. A server that sends raw DER instead is still read: a body that parses as DER certificates is taken as exactly those certificates, and is never searched for PEM text. Any other body is read as PEM text, so a body whose explanatory text is not valid UTF-8 is refused.
 
 ### Stating what you expect of a header
 

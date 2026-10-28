@@ -214,7 +214,7 @@ func TestVerifyCompactSerialization_AnX5uDerBodyIsNotReplacedByAPemCertificateIt
 				return
 			}
 			if err == nil {
-				t.Errorf("[RFC 7515 4.1.5] the served certificate holds the signing key, so %s must not verify with the key of a certificate embedded in it as PEM text", name)
+				t.Errorf("[RFC 7515 4.1.5] the token is signed with a key only the certificate embedded as PEM text holds, so %s must not verify with that embedded certificate's key", name)
 			}
 		})
 	}
