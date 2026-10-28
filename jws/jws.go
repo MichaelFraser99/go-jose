@@ -2,7 +2,6 @@ package jws
 
 import (
 	"context"
-	"crypto"
 	"errors"
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/internal/jose/header"
@@ -36,6 +35,9 @@ func VerifyCompactSerialization(ctx context.Context, compactSerialization string
 const defaultMaxKeysTried = 100
 
 func verify(ctx context.Context, compactSerialization string, outOfBoundsPublicKey model.Retriever, opts *model.JoseOptions, payloadIsJSONObject bool) (protectedHeader map[string]any, payload []byte, body map[string]any, err error) {
+	if ctx == nil {
+		return nil, nil, nil, fmt.Errorf("%wthe context passed is nil", joseerror.ErrInvalidOptions)
+	}
 	components := strings.Split(compactSerialization, ".")
 	if len(components) != 3 {
 		return nil, nil, nil, fmt.Errorf("%winvalid compact serialization format", joseerror.ErrMalformedToken)
@@ -94,51 +96,68 @@ func verify(ctx context.Context, compactSerialization string, outOfBoundsPublicK
 		return nil, nil, nil, fmt.Errorf("%werror decoding signature: %v", joseerror.ErrMalformedToken, err)
 	}
 
-	algorithm := jwa.GetAlgorithm(protectedHeader["alg"].(string)) //validated to exist and be of correct type earlier
+	algorithm := jwa.GetAlgorithm(protectedHeader["alg"].(string))
 
 	maxKeysTried := defaultMaxKeysTried
 	if opts != nil && opts.MaxKeysTried > 0 {
 		maxKeysTried = opts.MaxKeysTried
 	}
 	keysTried := 0
+	signingInput := []byte(components[0] + "." + components[1])
 
-	var noKeyIdentifierErrors []error
+	var noKeyIdentifierErrors, sourceFailures []error
 	for _, retriever := range jwkRetrievers {
-		var publicKeys []crypto.PublicKey
-		publicKeys, err = retriever()
+		if keysTried == maxKeysTried {
+			return nil, nil, nil, tooManyKeys(maxKeysTried, sourceFailures)
+		}
+		publicKeys, err := retriever()
+		if errors.Is(err, joseerror.ErrNoKeyIdentifierMatch) {
+			noKeyIdentifierErrors = append(noKeyIdentifierErrors, err)
+			continue
+		}
 		if err != nil {
-			if !errors.Is(err, joseerror.ErrNoKeyIdentifierMatch) {
-				return nil, nil, nil, err
-			} else {
-				//if error is 'no key identifier', we ignore failure and store for later reporting
-				noKeyIdentifierErrors = append(noKeyIdentifierErrors, err)
-				continue
-			}
+			sourceFailures = append(sourceFailures, err)
+			continue
 		}
 
 		for _, pubKey := range publicKeys {
 			validator, err := GetValidator(algorithm, pubKey)
 			if err != nil {
-				continue //ignore public key invalid for given algorithm
+				continue
 			}
 			if keysTried == maxKeysTried {
-				return nil, nil, nil, fmt.Errorf("%wthe signature did not verify under the %d keys JoseOptions.MaxKeysTried allows", joseerror.ErrTooManyKeys, maxKeysTried)
+				return nil, nil, nil, tooManyKeys(maxKeysTried, sourceFailures)
 			}
 			keysTried++
 
-			valid, err := validator.ValidateSignature([]byte(fmt.Sprintf("%s.%s", components[0], components[1])), signature)
-			if err != nil {
-				continue //ignore errors on validating signatures
-			}
-
-			if valid {
+			if valid, err := validator.ValidateSignature(signingInput, signature); err == nil && valid {
 				return protectedHeader, payload, body, nil
 			}
 		}
 	}
 
+	if len(sourceFailures) > 0 {
+		return nil, nil, nil, wrapAll(sourceFailures)
+	}
 	if len(noKeyIdentifierErrors) > 0 {
 		return nil, nil, nil, fmt.Errorf("%wunable to validate jws signature - possibly due to the following errors encountered retrieving cryptographic material: %v", joseerror.ErrInvalidSignature, noKeyIdentifierErrors)
 	}
 	return nil, nil, nil, fmt.Errorf("%wunable to validate jws signature", joseerror.ErrInvalidSignature)
+}
+
+func tooManyKeys(maxKeysTried int, sourceFailures []error) error {
+	refusal := fmt.Errorf("%wthe signature did not verify under the %d keys JoseOptions.MaxKeysTried allows", joseerror.ErrTooManyKeys, maxKeysTried)
+	if len(sourceFailures) == 0 {
+		return refusal
+	}
+	return wrapAll(append([]error{refusal}, sourceFailures...))
+}
+
+func wrapAll(errs []error) error {
+	format := strings.TrimSuffix(strings.Repeat("%w; ", len(errs)), "; ")
+	args := make([]any, len(errs))
+	for i, err := range errs {
+		args[i] = err
+	}
+	return fmt.Errorf(format, args...)
 }
