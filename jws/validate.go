@@ -15,6 +15,7 @@ import (
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs256"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs384"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs512"
+	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
 	"github.com/MichaelFraser99/go-jose/jwk"
@@ -88,8 +89,12 @@ func GetValidatorFromJwk(alg jwa.Algorithm, publicJwk map[string]any) (model.Val
 		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg.String())
 	}
 	if member, present := publicJwk["alg"]; present {
-		if name, _ := member.(string); name != alg.String() {
-			return nil, fmt.Errorf("%wthe jwk's alg %v does not name %s", joseerror.ErrInvalidPublicKey, member, alg.String())
+		if name, isString := member.(string); name != alg.String() {
+			named := "a value that is not a string"
+			if isString {
+				named = jsonutils.QuoteBounded(name)
+			}
+			return nil, fmt.Errorf("%wthe jwk's alg %s does not name %s", joseerror.ErrInvalidPublicKey, named, alg.String())
 		}
 	}
 	publicKey, err := jwk.PublicFromJwk(publicJwk)
