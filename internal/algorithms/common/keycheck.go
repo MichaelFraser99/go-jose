@@ -127,7 +127,11 @@ func recoverRSAPrimes(random io.Reader, n *big.Int, e int, d *big.Int) ([]*big.I
 		if err != nil {
 			return nil, fmt.Errorf("%wfailed to read a random value to recover the primes of an RSA private key: %w", jose_errors.ErrInvalidPrivateKey, err)
 		}
-		y := new(big.Int).Exp(g, r, n)
+		blinding, err := rand.Int(rand.Reader, rsaRecoveryBlindingBound)
+		if err != nil {
+			return nil, fmt.Errorf("%wfailed to read a random value to blind the recovery of the primes of an RSA private key: %w", jose_errors.ErrInvalidPrivateKey, err)
+		}
+		y := new(big.Int).Exp(g, blinding.Mul(blinding, m).Add(blinding, r), n)
 		if y.Cmp(one) == 0 || y.Cmp(nMinusOne) == 0 {
 			continue
 		}
@@ -145,6 +149,8 @@ func recoverRSAPrimes(random io.Reader, n *big.Int, e int, d *big.Int) ([]*big.I
 	}
 	return nil, errRSAPrimesNotFound
 }
+
+var rsaRecoveryBlindingBound = new(big.Int).Lsh(big.NewInt(1), 64)
 
 var errRSAPrimesNotFound = fmt.Errorf("%wthe primes of an RSA private key with none listed cannot be recovered from its n, e and d, so its d does not invert e or its modulus is not two primes", jose_errors.ErrInvalidPrivateKey)
 
