@@ -3,6 +3,7 @@ package jsonutils
 import (
 	"bytes"
 	"errors"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -73,6 +74,52 @@ func TestDecodeBase64urlMap_RequiresAUTF8JSONObject(t *testing.T) {
 			}
 			if test.valid && m == nil {
 				t.Fatalf("[%s] %q gave a nil object", test.clause, test.encoded)
+			}
+		})
+	}
+}
+
+func TestDecodeJSONObject_RefusesAnUnpairedSurrogateEscape(t *testing.T) {
+	tests := map[string]struct {
+		text string
+		want map[string]any
+	}{
+		"lone high surrogate":                        {`{"sub":"\ud800"}`, nil},
+		"lone low surrogate":                         {`{"sub":"\udfff"}`, nil},
+		"upper-case hex":                             {`{"sub":"\uD800"}`, nil},
+		"low surrogate before high":                  {`{"sub":"\udc00\ud800"}`, nil},
+		"high surrogate then a non-surrogate escape": {`{"sub":"\ud800\u0041"}`, nil},
+		"high surrogate then another high surrogate": {`{"sub":"\ud800\ud800"}`, nil},
+		"high surrogate then a plain character":      {`{"sub":"\ud800a"}`, nil},
+		"high surrogate then a character then a low": {`{"sub":"\ud800zudc00"}`, nil},
+		"high surrogate then an escaped quote":       {`{"sub":"\ud800\""}`, nil},
+		"lone surrogate in a member name":            {`{"\ud800":"a"}`, nil},
+		"lone surrogate after an escaped quote":      {`{"sub":"a\"\ud800"}`, nil},
+		"lone surrogate after an escaped backslash":  {`{"sub":"\\\ud800"}`, nil},
+		"lone surrogate inside an array":             {`{"aud":["a","\udfff"]}`, nil},
+		"lone surrogate in a later member":           {`{"a":"\\","sub":"\ud800"}`, nil},
+		"escaped replacement character":              {`{"sub":"\ufffd"}`, map[string]any{"sub": "\uFFFD"}},
+		"raw replacement character":                  {"{\"sub\":\"\uFFFD\"}", map[string]any{"sub": "\uFFFD"}},
+		"escaped backslash before u":                 {`{"sub":"\\ud800"}`, map[string]any{"sub": `\ud800`}},
+		"escaped backslash before surrogate hex":     {`{"sub":"\\dc00"}`, map[string]any{"sub": `\dc00`}},
+		"escaped quote before surrogate hex":         {`{"sub":"\"d800"}`, map[string]any{"sub": `"d800`}},
+		"escaped pair":                               {`{"sub":"\ud83d\ude00"}`, map[string]any{"sub": "\U0001F600"}},
+		"upper-case escaped pair":                    {`{"sub":"\uD83D\uDE00"}`, map[string]any{"sub": "\U0001F600"}},
+		"raw supplementary character":                {"{\"sub\":\"\U0001F600\"}", map[string]any{"sub": "\U0001F600"}},
+		"escapes either side of the surrogate range": {`{"sub":"\u0041\ud7ff\ue000"}`, map[string]any{"sub": "A\ud7ff\ue000"}},
+		"escaped quote then an escaped backslash":    {`{"sub":"\"\\","b":"\\ud800"}`, map[string]any{"sub": `"\`, "b": `\ud800`}},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, err := DecodeJSONObject([]byte(test.text))
+			if test.want == nil {
+				if err == nil {
+					t.Fatalf("[RFC 8259 8.2] %s decoded to %q", test.text, got)
+				}
+				return
+			}
+			if err != nil || !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("[RFC 8259 7] %s decoded to %q, %v; want %q", test.text, got, err, test.want)
 			}
 		})
 	}

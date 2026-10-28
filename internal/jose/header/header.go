@@ -158,8 +158,12 @@ func validateExpectedType(header map[string]any, accepted []string) error {
 // NamesNestedJWT reports whether the header's cty is "JWT", which RFC 7519
 // section 5.2 requires of a Nested JWT. The comparison follows RFC 7515 section
 // 4.1.10: case-insensitive, with "application/" prepended to a value without a '/'.
+// Media-type parameters (RFC 9110 section 8.3.1) are ignored.
 func NamesNestedJWT(header map[string]any) bool {
 	cty, _ := header["cty"].(string)
+	if i := strings.IndexByte(cty, ';'); i >= 0 {
+		cty = strings.TrimRight(cty[:i], " \t")
+	}
 	return mediaTypesMatch(cty, "JWT")
 }
 

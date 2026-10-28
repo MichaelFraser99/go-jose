@@ -11,6 +11,8 @@ import (
 	"reflect"
 	"slices"
 	"strconv"
+	"unicode"
+	"unicode/utf16"
 	"unicode/utf8"
 )
 
@@ -82,10 +84,15 @@ func DecodeBase64urlMap(b64u string) (map[string]any, error) {
 
 // DecodeJSONObject parses octets that RFC 7515 section 5.2 step 3 and RFC 7519
 // section 7.2 step 10 require to be a UTF-8 representation of a JSON object, so
-// invalid UTF-8 (RFC 8725 section 3.7) and null are refused.
+// invalid UTF-8 (RFC 8725 section 3.7) and null are refused. So is a string
+// holding an unpaired UTF-16 surrogate escape, whose meaning RFC 8259 section
+// 8.2 calls unpredictable.
 func DecodeJSONObject(decodedBytes []byte) (map[string]any, error) {
 	if !utf8.Valid(decodedBytes) {
 		return nil, errors.New("the decoded octets are not valid UTF-8")
+	}
+	if hasUnpairedSurrogateEscape(decodedBytes) {
+		return nil, errors.New("the decoded JSON holds an unpaired UTF-16 surrogate escape")
 	}
 
 	var m map[string]any
@@ -97,6 +104,54 @@ func DecodeJSONObject(decodedBytes []byte) (map[string]any, error) {
 	}
 
 	return m, nil
+}
+
+func hasUnpairedSurrogateEscape(text []byte) bool {
+	inString := false
+	for i := 0; i < len(text); i++ {
+		switch {
+		case !inString:
+			inString = text[i] == '"'
+		case text[i] == '"':
+			inString = false
+		case text[i] == '\\':
+			high, ok := unicodeEscapeAt(text, i)
+			if !ok {
+				i++
+				continue
+			}
+			i += 5
+			if !utf16.IsSurrogate(high) {
+				continue
+			}
+			low, ok := unicodeEscapeAt(text, i+1)
+			if !ok || utf16.DecodeRune(high, low) == unicode.ReplacementChar {
+				return true
+			}
+			i += 6
+		}
+	}
+	return false
+}
+
+func unicodeEscapeAt(text []byte, i int) (rune, bool) {
+	if i+6 > len(text) || text[i] != '\\' || text[i+1] != 'u' {
+		return 0, false
+	}
+	var r rune
+	for _, c := range text[i+2 : i+6] {
+		switch {
+		case '0' <= c && c <= '9':
+			r = r<<4 | rune(c-'0')
+		case 'a' <= c && c <= 'f':
+			r = r<<4 | rune(c-'a'+10)
+		case 'A' <= c && c <= 'F':
+			r = r<<4 | rune(c-'A'+10)
+		default:
+			return 0, false
+		}
+	}
+	return r, true
 }
 
 func RetrieveClaim[T any](jsonInput map[string]any, claimName string, validator ...Validator[T]) (*T, error) {

@@ -14,20 +14,26 @@ func TestNamesNestedJWT_ComparesCtyAsAMediaType(t *testing.T) {
 		header map[string]any
 		nested bool
 	}{
-		"JWT":                      {map[string]any{"cty": "JWT"}, true},
-		"jwt":                      {map[string]any{"cty": "jwt"}, true},
-		"application/JWT":          {map[string]any{"cty": "application/JWT"}, true},
-		"APPLICATION/jwt":          {map[string]any{"cty": "APPLICATION/jwt"}, true},
-		"no cty":                   {map[string]any{}, false},
-		"cty of a number":          {map[string]any{"cty": 1}, false},
-		"text/JWT":                 {map[string]any{"cty": "text/JWT"}, false},
-		"example+jwt":              {map[string]any{"cty": "example+jwt"}, false},
-		"JWT with a leading space": {map[string]any{"cty": " JWT"}, false},
+		"JWT":                            {map[string]any{"cty": "JWT"}, true},
+		"jwt":                            {map[string]any{"cty": "jwt"}, true},
+		"application/JWT":                {map[string]any{"cty": "application/JWT"}, true},
+		"APPLICATION/jwt":                {map[string]any{"cty": "APPLICATION/jwt"}, true},
+		"no cty":                         {map[string]any{}, false},
+		"cty of a number":                {map[string]any{"cty": 1}, false},
+		"text/JWT":                       {map[string]any{"cty": "text/JWT"}, false},
+		"example+jwt":                    {map[string]any{"cty": "example+jwt"}, false},
+		"JWT with a leading space":       {map[string]any{"cty": " JWT"}, false},
+		"application/jwt; charset=utf-8": {map[string]any{"cty": "application/jwt; charset=utf-8"}, true},
+		"JWT;charset=utf-8":              {map[string]any{"cty": "JWT;charset=utf-8"}, true},
+		"JWT with a tab before the ';'":  {map[string]any{"cty": "JWT\t;a=b"}, true},
+		"application/example; part=JWT":  {map[string]any{"cty": "application/example; part=JWT"}, false},
+		"JWT with a leading space and a parameter": {map[string]any{"cty": " JWT;a=b"}, false},
+		"a parameter alone":                        {map[string]any{"cty": ";JWT"}, false},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			if got := NamesNestedJWT(test.header); got != test.nested {
-				t.Fatalf("[RFC 7515 4.1.10, RFC 7519 5.2] cty %v: nested = %t, want %t", test.header["cty"], got, test.nested)
+				t.Fatalf("[RFC 7515 4.1.10, RFC 7519 5.2, RFC 9110 8.3.1] cty %v: nested = %t, want %t", test.header["cty"], got, test.nested)
 			}
 		})
 	}

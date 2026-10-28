@@ -5,10 +5,12 @@ import (
 	"context"
 	"crypto"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -156,6 +158,8 @@ func TestVerifyCompactSerialization_RefusesAHeaderOrClaimsSetThatIsNotAUTF8JSONO
 		"header holding the byte 0xff":                    {"{\"alg\":\"ES256\",\"kid\":\"k\xff\"}", `{"sub":"a"}`, "RFC 7515 5.2 step 3, RFC 8725 3.7"},
 		"header holding a lone surrogate encoded as CESU": {"{\"alg\":\"ES256\",\"kid\":\"\xed\xa0\x80\"}", `{"sub":"a"}`, "RFC 7515 5.2 step 3, RFC 8725 3.7"},
 		"payload holding the byte 0xff":                   {`{"alg":"ES256"}`, "{\"sub\":\"a\xffb\"}", "RFC 7519 7.2 step 10, RFC 8725 3.7"},
+		"header holding an escaped lone surrogate":        {`{"alg":"ES256","kid":"\ud800"}`, `{"sub":"a"}`, "RFC 7515 5.2 step 3, RFC 8259 8.2"},
+		"payload holding an escaped lone surrogate":       {`{"alg":"ES256"}`, `{"sub":"\udfff"}`, "RFC 7519 7.2 step 10, RFC 8259 8.2"},
 		"header of null":                                  {`null`, `{"sub":"a"}`, "RFC 7515 5.2 step 3"},
 		"payload of null":                                 {`{"alg":"ES256"}`, `null`, "RFC 7519 7.2 step 10"},
 		"payload of null within spaces":                   {`{"alg":"ES256"}`, ` null `, "RFC 7519 7.2 step 10"},
@@ -247,7 +251,7 @@ func TestVerify_RefusesAnUnencodedPayloadWhateverTheCallerUnderstands(t *testing
 func TestVerifyCompactSerialization_RefusesANestedJWTBeforeTouchingAKey(t *testing.T) {
 	s := newSegmentSigner(t)
 	inner := s.sign(t, []byte(`{"alg":"ES256","typ":"JWT"}`), []byte(`{"sub":"inner"}`))
-	for _, cty := range []string{"JWT", "jwt", "application/jwt", "Application/JWT"} {
+	for _, cty := range []string{"JWT", "jwt", "application/jwt", "Application/JWT", "application/jwt; charset=utf-8"} {
 		t.Run(cty, func(t *testing.T) {
 			s.calls.Store(0)
 			header, _ := json.Marshal(map[string]any{"alg": "ES256", "cty": cty})
@@ -362,5 +366,28 @@ func TestVerify_HeaderErrorsQuoteAndBoundThePeersValue(t *testing.T) {
 				t.Errorf("[RFC 7515 5.2] the error echoes more than %d characters of the peer's value: %d bytes", echoCap, len(message))
 			}
 		})
+	}
+}
+
+func TestVerify_AnES256TokenHasASecondValidTokenStringMintedWithoutTheKey(t *testing.T) {
+	s := newSegmentSigner(t)
+	token := s.sign(t, []byte(`{"alg":"ES256"}`), []byte(`{"sub":"a"}`))
+	parts := strings.Split(token, ".")
+	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil || len(signature) != 64 {
+		t.Fatalf("[RFC 7518 3.4] the signature is not 64 octets: %d, %v", len(signature), err)
+	}
+	negatedS := new(big.Int).Sub(elliptic.P256().Params().N, new(big.Int).SetBytes(signature[32:]))
+	twin := append(append([]byte{}, signature[:32]...), negatedS.FillBytes(make([]byte, 32))...)
+	twinToken := parts[0] + "." + parts[1] + "." + base64.RawURLEncoding.EncodeToString(twin)
+
+	if twinToken == token {
+		t.Fatalf("[RFC 7518 3.4] negating S gave the same token")
+	}
+	for name, candidate := range map[string]string{"(R, S)": token, "(R, N-S)": twinToken} {
+		_, payload, err := Verify(context.Background(), candidate, s.retriever, nil)
+		if err != nil || string(payload) != `{"sub":"a"}` {
+			t.Errorf("[RFC 7518 3.4] the %s token did not verify as the signed message, so the README's malleability warning is stale: %q, %v", name, payload, err)
+		}
 	}
 }
