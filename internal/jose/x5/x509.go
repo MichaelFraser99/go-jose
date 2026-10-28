@@ -3,6 +3,7 @@ package x5
 import (
 	"crypto"
 	"crypto/x509"
+	"encoding/asn1"
 	"encoding/base64"
 	"encoding/pem"
 	"fmt"
@@ -106,13 +107,21 @@ func certificatesFromX5uBody(body []byte) ([]*x509.Certificate, error) {
 	return x509.ParseCertificates(der)
 }
 
-// permitsAnyExtendedKeyUsage reports whether a certificate carries no extended key
-// usage, or names anyExtendedKeyUsage, so RFC 5280 section 4.2.1.12 restricts it to
-// no purpose.
-func permitsAnyExtendedKeyUsage(certificate *x509.Certificate) bool {
-	if len(certificate.ExtKeyUsage) == 0 && len(certificate.UnknownExtKeyUsage) == 0 {
-		return true
+var (
+	oidExtensionKeyUsage         = asn1.ObjectIdentifier{2, 5, 29, 15}
+	oidExtensionExtendedKeyUsage = asn1.ObjectIdentifier{2, 5, 29, 37}
+)
+
+func hasExtension(certificate *x509.Certificate, oid asn1.ObjectIdentifier) bool {
+	for _, extension := range certificate.Extensions {
+		if extension.Id.Equal(oid) {
+			return true
+		}
 	}
+	return false
+}
+
+func namesAnyExtendedKeyUsage(certificate *x509.Certificate) bool {
 	for _, usage := range certificate.ExtKeyUsage {
 		if usage == x509.ExtKeyUsageAny {
 			return true
@@ -147,10 +156,14 @@ func validateCertificateChain(certificates []*x509.Certificate, roots *x509.Cert
 	if err != nil {
 		return fmt.Errorf("%wthe certificate chain does not validate against the configured trust anchors: %s", joseerror.ErrNoKeyIdentifierMatch, err.Error())
 	}
-	if len(extKeyUsages) == 0 && !permitsAnyExtendedKeyUsage(signingCertificate) {
+	extendedKeyUsagePresent := hasExtension(signingCertificate, oidExtensionExtendedKeyUsage)
+	if extendedKeyUsagePresent && len(signingCertificate.ExtKeyUsage) == 0 && len(signingCertificate.UnknownExtKeyUsage) == 0 {
+		return fmt.Errorf("%wthe signing certificate's extended key usage extension names no purpose", joseerror.ErrNoKeyIdentifierMatch)
+	}
+	if len(extKeyUsages) == 0 && extendedKeyUsagePresent && !namesAnyExtendedKeyUsage(signingCertificate) {
 		return fmt.Errorf("%wthe signing certificate's extended key usage names no purpose the caller accepts", joseerror.ErrNoKeyIdentifierMatch)
 	}
-	if signingCertificate.KeyUsage != 0 && signingCertificate.KeyUsage&(x509.KeyUsageDigitalSignature|x509.KeyUsageContentCommitment) == 0 {
+	if hasExtension(signingCertificate, oidExtensionKeyUsage) && signingCertificate.KeyUsage&(x509.KeyUsageDigitalSignature|x509.KeyUsageContentCommitment) == 0 {
 		return fmt.Errorf("%wthe signing certificate's key usage asserts neither digitalSignature nor nonRepudiation", joseerror.ErrNoKeyIdentifierMatch)
 	}
 	return nil

@@ -79,12 +79,12 @@ type JoseOptions struct {
 	// X509ExtKeyUsages names the extended key usages that permit an x5c or x5u
 	// certificate to verify a JWS. RFC 5280 section 4.2.1.12 says a certificate whose
 	// extension is present MUST only be used for a purpose it names, and no purpose is
-	// registered for JWS. When set, the signing certificate and every certificate
-	// above it must permit one of these, or carry no extended key usage. Naming
-	// x509.ExtKeyUsageAny turns the check off.
-	//
-	// When unset, a signing certificate whose extension is present must name
-	// anyExtendedKeyUsage.
+	// registered for JWS. When unset, only the signing certificate is checked, and
+	// if its extension is present it must name anyExtendedKeyUsage. When set, Go's
+	// chain verification nests extended key usage, so the signing certificate and
+	// every certificate above it must permit one of these, or carry no extended key
+	// usage. Naming x509.ExtKeyUsageAny turns this purpose check off. A signing
+	// certificate whose extension names no purpose is refused in every case.
 	X509ExtKeyUsages []x509.ExtKeyUsage
 }
 

@@ -236,8 +236,8 @@ The signing key is taken from the first certificate, and that certificate is the
 
 That first certificate must also be one whose key may verify a signature. `x5c` and `x5u` get the same checks:
 
-- **Key usage.** When the certificate has a key usage extension, it must assert `digitalSignature` or `nonRepudiation` (`x509.KeyUsageContentCommitment`). RFC 5280 section 4.2.1.3 defines both as the bits for a key that verifies signatures. A CA certificate that asserts only `keyCertSign` is refused, as is a key agreement certificate.
-- **Extended key usage.** RFC 5280 section 4.2.1.12 says that when the extension is present, the certificate "MUST only be used for one of the purposes indicated". No purpose is registered for JWS, so you name the ones you accept in `JoseOptions.X509ExtKeyUsages`. When it is set, it is passed to Go's chain verification, which holds the signing certificate and every CA above it to one of those purposes. When it is unset, a signing certificate whose extension is present must name `anyExtendedKeyUsage`. A certificate with no extended key usage extension is accepted either way.
+- **Key usage.** When the certificate has a key usage extension, it must assert `digitalSignature` or `nonRepudiation` (`x509.KeyUsageContentCommitment`). RFC 5280 section 4.2.1.3 defines both as the bits for a key that verifies signatures, and requires at least one bit to be set when the extension appears, so an extension with no bit set is refused. A CA certificate that asserts only `keyCertSign` is refused, as is a key agreement certificate.
+- **Extended key usage.** RFC 5280 section 4.2.1.12 says that when the extension is present, the certificate "MUST only be used for one of the purposes indicated". No purpose is registered for JWS, so you name the ones you accept in `JoseOptions.X509ExtKeyUsages`. When it is unset, only the signing certificate is checked: if its extension is present, it must name `anyExtendedKeyUsage`. When it is set, it is passed to Go's chain verification, which nests extended key usage, so the signing certificate and every CA above it must permit one of those purposes. A certificate with no extended key usage extension is accepted either way. A signing certificate whose extension names no purpose is refused in every case, because the section defines it as a sequence of at least one.
 
 ```go
 head, body, err := jwt.Validate(ctx, token, nil, &model.JoseOptions{
@@ -246,7 +246,7 @@ head, body, err := jwt.Validate(ctx, token, nil, &model.JoseOptions{
 })
 ```
 
-Naming `x509.ExtKeyUsageAny` turns the extended key usage check off, as it does in Go's `x509.VerifyOptions`. A purpose Go has no constant for, such as a private OID, cannot be named, so a certificate restricted to one is accepted only with the check off. A refusal for either usage matches `ErrNoKeyIdentifierMatch`, as a chain that does not validate does.
+Naming `x509.ExtKeyUsageAny` turns the purpose check off, as it does in Go's `x509.VerifyOptions`. A purpose Go has no constant for, such as a private OID, cannot be named, so a certificate restricted to one is accepted only with the check off. A refusal for either usage matches `ErrNoKeyIdentifierMatch`, as a chain that does not validate does.
 
 Configuring roots does not make `jwk` or `jku` usable. Nothing anchors those keys, so they need `UseTokenProvidedKeys`, as described under [Keys a token carries](#keys-a-token-carries).
 

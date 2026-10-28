@@ -65,6 +65,11 @@ func leafTemplate(usage x509.KeyUsage, extUsage ...x509.ExtKeyUsage) *x509.Certi
 	return &x509.Certificate{Subject: pkix.Name{CommonName: "leaf"}, KeyUsage: usage, ExtKeyUsage: extUsage}
 }
 
+func withExtension(template *x509.Certificate, extension pkix.Extension) *x509.Certificate {
+	template.ExtraExtensions = append(template.ExtraExtensions, extension)
+	return template
+}
+
 func encodedChain(chain ...*issued) []string {
 	encoded := make([]string, len(chain))
 	for i, c := range chain {
@@ -157,6 +162,7 @@ func assertUsageCases(t *testing.T, tests map[string]usageCase) {
 func TestKeyFromValidatedChain_AnExtendedKeyUsageMustCoverTheUse(t *testing.T) {
 	signing := x509.KeyUsageDigitalSignature
 	unknownPurpose := asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 99999, 1}
+	noPurpose := pkix.Extension{Id: asn1.ObjectIdentifier{2, 5, 29, 37}, Value: []byte{0x30, 0x00}}
 
 	assertUsageCases(t, map[string]usageCase{
 		"a leaf with no extended key usage": {
@@ -184,6 +190,27 @@ func TestKeyFromValidatedChain_AnExtendedKeyUsageMustCoverTheUse(t *testing.T) {
 				template.UnknownExtKeyUsage = []asn1.ObjectIdentifier{unknownPurpose}
 				return []*issued{issueCertificate(t, template, root)}
 			},
+		},
+		"a leaf restricted to a purpose Go does not name when the caller named anyExtendedKeyUsage": {
+			reference:    "JoseOptions.X509ExtKeyUsages",
+			extKeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+			chain: func(t *testing.T, root *issued) []*issued {
+				template := leafTemplate(signing)
+				template.UnknownExtKeyUsage = []asn1.ObjectIdentifier{unknownPurpose}
+				return []*issued{issueCertificate(t, template, root)}
+			},
+			accept: true,
+		},
+		"a leaf whose extended key usage names no purpose": {
+			reference: "RFC 5280 4.2.1.12", chain: leafOf(withExtension(leafTemplate(signing), noPurpose)),
+		},
+		"a leaf whose extended key usage names no purpose when the caller named a purpose": {
+			reference: "RFC 5280 4.2.1.12", chain: leafOf(withExtension(leafTemplate(signing), noPurpose)),
+			extKeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageCodeSigning},
+		},
+		"a leaf whose extended key usage names no purpose when the caller named anyExtendedKeyUsage": {
+			reference: "RFC 5280 4.2.1.12", chain: leafOf(withExtension(leafTemplate(signing), noPurpose)),
+			extKeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
 		},
 		"a leaf restricted to a purpose the caller named": {
 			reference: "JoseOptions.X509ExtKeyUsages", chain: leafOf(leafTemplate(signing, x509.ExtKeyUsageCodeSigning)),
@@ -238,6 +265,10 @@ func TestKeyFromValidatedChain_AKeyUsageMustAllowVerifyingASignature(t *testing.
 		},
 		"a leaf asserting only nonRepudiation": {
 			reference: "RFC 5280 4.2.1.3", chain: leafOf(leafTemplate(x509.KeyUsageContentCommitment)), accept: true,
+		},
+		"a leaf whose key usage asserts no bit": {
+			reference: "RFC 5280 4.2.1.3",
+			chain:     leafOf(withExtension(leafTemplate(0), pkix.Extension{Id: asn1.ObjectIdentifier{2, 5, 29, 15}, Critical: true, Value: []byte{0x03, 0x01, 0x00}})),
 		},
 		"a leaf asserting only keyAgreement": {
 			reference: "RFC 5280 4.2.1.3", chain: leafOf(leafTemplate(x509.KeyUsageKeyAgreement)),
