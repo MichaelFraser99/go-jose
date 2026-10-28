@@ -148,15 +148,13 @@ func SelectKeys(keySet model.Jwks, kid *string, alg string, ignoreKeyUse bool) [
 }
 
 func checkMember(jwk map[string]any, kid *string, alg string, ignoreKeyUse bool) error {
-	if kid != nil {
-		if k, present := jwk["kid"]; present {
-			sk, ok := k.(string)
-			if !ok {
-				return fmt.Errorf("%wjwk has malformed kid value", joseerror.ErrMalformedClaim)
-			}
-			if sk != *kid {
-				return fmt.Errorf("%wjwk kid does not match value from jose header", joseerror.ErrNoKeyIdentifierMatch)
-			}
+	if k, present := jwk["kid"]; present {
+		sk, ok := k.(string)
+		if !ok {
+			return fmt.Errorf("%wjwk has malformed kid value", joseerror.ErrMalformedClaim)
+		}
+		if kid != nil && sk != *kid {
+			return fmt.Errorf("%wjwk kid does not match value from jose header", joseerror.ErrNoKeyIdentifierMatch)
 		}
 	}
 

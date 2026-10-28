@@ -82,6 +82,12 @@ func selectionCases() map[string]selectionCase {
 		"a member whose kid is not a string is not used": {
 			members: []member{{"kid": 7}}, kid: model.Pointer("7"), want: nil, clause: "RFC 7517 4.5",
 		},
+		"a member whose kid is a number is not used when the header names no kid": {
+			members: []member{{"kid": 7}, {"kid": "a"}}, want: []int{1}, clause: "RFC 7517 4.5",
+		},
+		"a member whose kid is null is not used when the header names no kid": {
+			members: []member{{"kid": nil}, {}}, want: []int{1}, clause: "RFC 7517 4.5",
+		},
 		"an unreadable member naming the alg does not drop a readable member with no alg": {
 			members: []member{unreadable(member{"kid": "a", "alg": "ES256"}), {"kid": "a"}}, kid: a, want: []int{1}, clause: "RFC 7517 5",
 		},
@@ -252,6 +258,36 @@ func TestInlineJWK_KeyUse(t *testing.T) {
 			}
 			if len(keys) != 1 || !public.Equal(keys[0]) {
 				t.Errorf("[%s] expected exactly the jwk's key, got %d keys", tc.clause, len(keys))
+			}
+		})
+	}
+}
+
+func TestInlineJWK_AMemberOfTheWrongTypeIsMalformed(t *testing.T) {
+	a := model.Pointer("a")
+	tests := map[string]struct {
+		member member
+		kid    *string
+		clause string
+	}{
+		"a kid that is a number beside no header kid":   {member: member{"kid": 7}, clause: "RFC 7517 4.5"},
+		"a kid that is null beside no header kid":       {member: member{"kid": nil}, clause: "RFC 7517 4.5"},
+		"a kid that is an array beside a header kid":    {member: member{"kid": []any{"a"}}, kid: a, clause: "RFC 7517 4.5"},
+		"a kid that is a number beside a header kid":    {member: member{"kid": 7}, kid: model.Pointer("7"), clause: "RFC 7517 4.5"},
+		"an alg that is an array naming the header alg": {member: member{"alg": []any{"ES256"}}, clause: "RFC 7517 4.4"},
+		"an alg that is null":                           {member: member{"alg": nil}, clause: "RFC 7517 4.4"},
+		"an alg that is a number beside a matching kid": {member: member{"kid": "a", "alg": 256}, kid: a, clause: "RFC 7517 4.4"},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			jwk, _ := p256Jwk(t, tc.member)
+
+			keys, err := InlineJWK(jwk, tc.kid, "ES256", false)()
+			if !errors.Is(err, joseerror.ErrMalformedClaim) {
+				t.Errorf("[%s] a jwk member of the wrong JSON type must be refused as malformed, got %d keys and %v", tc.clause, len(keys), err)
+			}
+			if errors.Is(err, joseerror.ErrNoKeyIdentifierMatch) {
+				t.Errorf("[%s] a malformed jwk must not be reported as one that merely matched nothing, got %v", tc.clause, err)
 			}
 		})
 	}

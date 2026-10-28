@@ -20,7 +20,7 @@ func TestJwks_UnmarshalJSON(t *testing.T) {
 		"a keys member holding keys":               {doc: `{"keys":[` + a + `,` + b + `]}`, wantKids: []string{"a", "b"}, clause: "RFC 7517 5"},
 		"a keys member holding no keys":            {doc: `{"keys":[]}`, wantKids: []string{}, clause: "RFC 7517 5"},
 		"a keys member beside an unknown member":   {doc: `{"other":1,"keys":[` + a + `]}`, wantKids: []string{"a"}, clause: "RFC 7517 5"},
-		"a keys member whose name is escaped":      {doc: `{"keys":[` + a + `]}`, wantKids: []string{"a"}, clause: "RFC 8259 8.3"},
+		"a keys member whose name is escaped":      {doc: `{"\u006beys":[` + a + `]}`, wantKids: []string{"a"}, clause: "RFC 8259 8.3"},
 		"a duplicated keys member keeps the last":  {doc: `{"keys":[` + a + `],"keys":[` + b + `]}`, wantKids: []string{"b"}, clause: "RFC 7517 5"},
 		"keys followed by Keys":                    {doc: `{"keys":[` + a + `],"Keys":[` + b + `]}`, wantKids: []string{"a"}, clause: "RFC 7515 5.3"},
 		"Keys followed by keys":                    {doc: `{"Keys":[` + b + `],"keys":[` + a + `]}`, wantKids: []string{"a"}, clause: "RFC 7515 5.3"},
@@ -75,5 +75,53 @@ func TestJwks_UnmarshalJSONKeepsOptions(t *testing.T) {
 	}
 	if !set.Opts.EnforceUniqueKIDs {
 		t.Error("[RFC 7517 5] decoding a JWK Set must not reset options that are not part of the document")
+	}
+}
+
+func TestJwks_MarshalJSONWritesWhatItReads(t *testing.T) {
+	a := map[string]any{"kty": "EC", "kid": "a"}
+	tests := map[string]struct {
+		set      Jwks
+		wantDoc  string
+		wantKids []string
+	}{
+		"a set with no keys":    {set: Jwks{}, wantDoc: `{"keys":[]}`, wantKids: []string{}},
+		"a set with empty keys": {set: Jwks{Keys: []map[string]any{}}, wantDoc: `{"keys":[]}`, wantKids: []string{}},
+		"a set with a key":      {set: Jwks{Keys: []map[string]any{a}}, wantDoc: `{"keys":[{"kid":"a","kty":"EC"}]}`, wantKids: []string{"a"}},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			for _, form := range []struct {
+				name  string
+				value any
+			}{{"value", tc.set}, {"pointer", &tc.set}, {"field", struct{ Set Jwks }{tc.set}}} {
+				doc, err := json.Marshal(form.value)
+				if err != nil {
+					t.Fatalf("[RFC 7517 5] expected the %s to encode, got %v", form.name, err)
+				}
+				if form.name == "field" {
+					var wrapper map[string]json.RawMessage
+					if err := json.Unmarshal(doc, &wrapper); err != nil {
+						t.Fatalf("[RFC 7517 5] expected a JSON object, got %s", doc)
+					}
+					doc = wrapper["Set"]
+				}
+				if string(doc) != tc.wantDoc {
+					t.Errorf("[RFC 7517 5] the %s must encode the \"keys\" member as an array, expected %s, got %s", form.name, tc.wantDoc, doc)
+				}
+				var read Jwks
+				if err := json.Unmarshal(doc, &read); err != nil {
+					t.Fatalf("[RFC 7517 5] a set this library writes must read back, got %v", err)
+				}
+				if len(read.Keys) != len(tc.wantKids) {
+					t.Fatalf("[RFC 7517 5] expected %d keys after the round trip, got %d", len(tc.wantKids), len(read.Keys))
+				}
+				for i, kid := range tc.wantKids {
+					if got := read.Keys[i]["kid"]; got != kid {
+						t.Errorf("[RFC 7517 5] key %d must carry kid %q after the round trip, got %v", i, kid, got)
+					}
+				}
+			}
+		})
 	}
 }

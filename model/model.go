@@ -102,6 +102,18 @@ type Jwks struct {
 	} `json:"-"`
 }
 
+// MarshalJSON writes a JWK Set. RFC 7517 section 5 requires the "keys" member to be an
+// array, so a set with no keys is written as an empty array rather than null.
+func (j Jwks) MarshalJSON() ([]byte, error) {
+	keys := j.Keys
+	if keys == nil {
+		keys = []map[string]any{}
+	}
+	return json.Marshal(struct {
+		Keys []map[string]any `json:"keys"`
+	}{keys})
+}
+
 // UnmarshalJSON reads a JWK Set. RFC 7517 section 5 requires a JSON object with a
 // "keys" member holding an array of JWKs, so anything else, including a JSON null, is
 // refused with ErrKeystoreError. The member name is matched exactly, by the RFC 7515
