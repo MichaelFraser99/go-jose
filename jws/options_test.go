@@ -27,7 +27,7 @@ func signedWithInlineJwk(t *testing.T) string {
 		t.Fatalf("failed to build a signer: %v", err)
 	}
 
-	head := map[string]any{"alg": "RS256", "typ": "JWT", "jwk": common.JwkFromRSAPublicKey(key.Public().(*rsa.PublicKey))}
+	head := map[string]any{"alg": "RS256", "typ": "JWT", "jwk": mustJwk(t)(common.JwkFromRSAPublicKey(key.Public().(*rsa.PublicKey)))}
 	headBytes, err := json.Marshal(head)
 	if err != nil {
 		t.Fatalf("failed to encode the header: %v", err)
@@ -83,7 +83,7 @@ func TestVerifyCompactSerialization_AJkuIsFetchedWithTheConfiguredClient(t *test
 	if err != nil {
 		t.Fatalf("failed to generate a key: %v", err)
 	}
-	publicJwk := common.JwkFromRSAPublicKey(key.Public().(*rsa.PublicKey))
+	publicJwk := mustJwk(t)(common.JwkFromRSAPublicKey(key.Public().(*rsa.PublicKey)))
 	publicJwk["kid"] = "served"
 	publicJwk["alg"] = "RS256"
 
@@ -148,4 +148,14 @@ func TestVerifyCompactSerialization_AJkuIsFetchedWithTheConfiguredClient(t *test
 			t.Fatal("[RFC 7515 4.1.2] with no client the key set cannot be fetched, so the token must not verify")
 		}
 	})
+}
+
+func mustJwk(t *testing.T) func(map[string]any, error) map[string]any {
+	t.Helper()
+	return func(jwk map[string]any, err error) map[string]any {
+		if err != nil {
+			t.Fatalf("failed to build a jwk: %v", err)
+		}
+		return jwk
+	}
 }

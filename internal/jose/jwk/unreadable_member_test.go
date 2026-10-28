@@ -37,7 +37,10 @@ func usableRSAJwk(t *testing.T, kid string) (map[string]any, crypto.PublicKey) {
 	if err != nil {
 		t.Fatalf("failed to generate a key: %v", err)
 	}
-	jwk := common.JwkFromRSAPublicKey(&key.PublicKey)
+	jwk, err := common.JwkFromRSAPublicKey(&key.PublicKey)
+	if err != nil {
+		t.Fatalf("failed to build a jwk: %v", err)
+	}
 	jwk["kid"] = kid
 	jwk["alg"] = "RS256"
 	return jwk, &key.PublicKey
