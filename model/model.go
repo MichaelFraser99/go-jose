@@ -75,6 +75,15 @@ type JoseOptions struct {
 	// When a retriever is also given, any certificate that chains to these roots can
 	// verify the token, not only the retriever's key.
 	X509Roots *x509.CertPool
+
+	// ExpectedAudience names this recipient. When set, jwt.Validate requires the "aud"
+	// claim to hold a value equal to one of these, compared exactly and case-sensitively
+	// as RFC 7519 section 4.1.3 requires. A token with no "aud" is refused with
+	// ErrMissingClaim, as RFC 8725 section 3.9 requires, and one naming only other
+	// recipients with ErrAudienceMismatch.
+	//
+	// With none named, "aud" is not compared, though its type is still checked.
+	ExpectedAudience []string
 }
 
 type Retriever func() ([]crypto.PublicKey, error)

@@ -23,4 +23,7 @@ var (
 	ErrApplicationError     = errors.New("application error: ")
 	ErrNoKeyIdentifierMatch = errors.New("no key identifier match: ")
 	ErrMalformedToken       = errors.New("malformed token: ")
+	ErrExpired              = errors.New("expired: ")
+	ErrNotYetValid          = errors.New("not yet valid: ")
+	ErrAudienceMismatch     = errors.New("audience mismatch: ")
 )
