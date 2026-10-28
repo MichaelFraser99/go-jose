@@ -27,6 +27,9 @@ type JoseOptions struct {
 	// fetch whatever Timeout the client sets, provided its transport honours the
 	// request's context.
 	//
+	// Every request of a fetch, including each redirect hop, must be https, as RFC 7515
+	// sections 4.1.2 and 4.1.5 require. Any other is refused before it is sent.
+	//
 	// With no client, jku and x5u contribute no key.
 	HttpClient *http.Client
 

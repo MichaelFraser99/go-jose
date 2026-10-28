@@ -50,7 +50,7 @@ func TestRetrieveResource_ReadsNoMoreThanTheCapPlusOneByte(t *testing.T) {
 
 	for name, size := range tests {
 		t.Run(name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				if _, err := io.CopyN(w, endlessReader{}, size); err != nil {
 					return
 				}
