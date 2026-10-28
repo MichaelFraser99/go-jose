@@ -7,6 +7,8 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"errors"
+	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
 	"github.com/MichaelFraser99/go-jose/jws"
 	"github.com/MichaelFraser99/go-jose/model"
@@ -49,11 +51,10 @@ func Test_SignPreHashed(t *testing.T) {
 
 	input := []byte("hello world")
 
-	signature, err := signer.Sign(rand.Reader, input, model.SignerOpts{
+	if _, err := signer.Sign(rand.Reader, input, model.SignerOpts{
 		Hash: crypto.SHA256,
-	})
-	if err != nil {
-		t.Fatal(err)
+	}); !errors.Is(err, joseerror.ErrSigningError) {
+		t.Fatalf("[#118] an 11-byte input is not a SHA-256 digest, so pre-hashed mode must refuse it, got %v", err)
 	}
 
 	validator, err := jws.GetValidator(signer.Alg(), signer.Public())
@@ -61,30 +62,16 @@ func Test_SignPreHashed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	valid, err := validator.ValidateSignature(input, signature)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if valid {
-		t.Fatal("signature should not be valid")
-	}
-
 	hashedInput := sha256.Sum256(input)
 
-	signature, err = signer.Sign(rand.Reader, hashedInput[:], model.SignerOpts{
+	signature, err := signer.Sign(rand.Reader, hashedInput[:], model.SignerOpts{
 		Hash: crypto.SHA256,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	validator, err = jws.GetValidator(signer.Alg(), signer.Public())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	valid, err = validator.ValidateSignature(input, signature)
+	valid, err := validator.ValidateSignature(input, signature)
 	if err != nil {
 		t.Fatal(err)
 	}

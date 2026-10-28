@@ -100,7 +100,11 @@ func TestES512_Sign(t *testing.T) {
 		t.Fatal("no error should be thrown marshalling jwk bytws to a map:", err)
 	}
 
-	val2, err := NewValidatorFromJwk(jwkMap)
+	jwkPublicKey, err := jwk.PublicFromJwk(jwkMap)
+	if err != nil {
+		t.Fatalf("failed to read the public key jwk: %s", err.Error())
+	}
+	val2, err := NewValidator(jwkPublicKey)
 	if err != nil {
 		t.Fatalf("failed to create validator from public key jwk: %s", err.Error())
 	}

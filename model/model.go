@@ -77,6 +77,12 @@ type JoseOptions struct {
 	X509Roots *x509.CertPool
 }
 
+// Retriever supplies the keys a token may be verified with. A bare
+// crypto.PublicKey carries no algorithm, so a returned key verifies a token
+// under any algorithm of its family that the token names: one RSA key serves
+// RS256 to PS512. RFC 8725 section 3.1 requires each key to be used with
+// exactly one algorithm, so bind the key to its algorithm with
+// JoseOptions.AllowedSigningAlgorithms.
 type Retriever func() ([]crypto.PublicKey, error)
 
 type Mode int //todo: do we actually need this?

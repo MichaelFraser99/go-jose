@@ -131,5 +131,22 @@ func TestSign_EveryAlgorithmHonoursTheDocumentedSigningContract(t *testing.T) {
 				t.Errorf("[RFC 7518] %s must refuse a %s digest rather than sign it", alg, other)
 			}
 		})
+
+		digests := map[string][]byte{
+			"the signing input itself": input,
+			"an empty digest":          {},
+			"one byte short":           bytes.Repeat([]byte{0xff}, test.hash.Size()-1),
+			"one byte long":            bytes.Repeat([]byte{0xff}, test.hash.Size()+1),
+			"twice the hash size":      bytes.Repeat([]byte{0xff}, 2*test.hash.Size()),
+		}
+		for name, digest := range digests {
+			t.Run(alg.String()+", pre-hashed mode with "+name, func(t *testing.T) {
+				signer := contractSigner(t, alg)
+				signature, err := signer.Sign(rand.Reader, digest, model.SignerOpts{Hash: test.hash})
+				if !errors.Is(err, joseerror.ErrSigningError) {
+					t.Errorf("[#118] a %d-byte value is not a %s digest, so %s must refuse it with the signing error class rather than sign it, got signature of %d bytes and err=%v", len(digest), test.hash, alg, len(signature), err)
+				}
+			})
+		}
 	}
 }

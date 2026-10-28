@@ -96,11 +96,19 @@ signer, err := jws.GetSigner(jwa.ES256, nil)
 signer, err := jws.GetSignerFromPrivateKey(jwa.ES256, privateKey)
 ```
 
+### Which keys a signer or validator accepts
+
+`GetSigner`, `GetSignerFromPrivateKey`, `GetValidator` and `GetValidatorFromJwk` refuse a key the algorithm cannot use, with `ErrInvalidPrivateKey` or `ErrInvalidPublicKey`:
+
+- **RS and PS:** the modulus must be 2048 to 8192 bits. RFC 7518 sections 3.3 and 3.5 make 2048 bits a MUST. The 8192-bit ceiling is this library's: the cost of an RSA verification grows with the square of the modulus, and a token can name its own key, so an unbounded modulus lets a peer hold a core for seconds. 8192 bits is also the default cap `crypto/tls` puts on a peer's RSA key. `Opts.BitSize` takes the same range.
+- **ES:** the key must lie on the algorithm's own curve: P-256 for ES256, P-384 for ES384 and P-521 for ES512. RFC 7518 section 3.1 defines each algorithm by its curve.
+- **Every family:** a nil key, or one missing the modulus, exponent, curve, coordinates or private scalar, is refused when the signer or validator is built rather than panicking later. An RSA private key needs only `D`: RFC 7518 section 6.3.2 makes the primes optional.
+
 ## Signing Contract
 The `Sign` method follows JOSE conventions per RFC 7518 rather than Go's `crypto.Signer` contract. It supports two modes:
 
 - **JOSE mode** (`opts == nil` or `opts.HashFunc() == 0`): pass the raw JWS Signing Input — the signer hashes it internally using the algorithm's designated hash. This is the expected usage for JWS operations.
-- **Pre-hashed mode** (`opts.HashFunc() != 0`): pass an already-hashed digest — the signer skips internal hashing. This supports interoperability with callers following Go's `crypto.Signer` convention. ES, RS and PS implement this mode, and refuse a `Hash` that is not the algorithm's own with `ErrSigningError`.
+- **Pre-hashed mode** (`opts.HashFunc() != 0`): pass an already-hashed digest — the signer skips internal hashing. This supports interoperability with callers following Go's `crypto.Signer` convention. ES, RS and PS implement this mode. They refuse a `Hash` that is not the algorithm's own, and a digest whose length is not that hash's output size, with `ErrSigningError`.
 
 > **The HMAC algorithms have no pre-hashed mode, and refuse one.** HMAC is itself a keyed hash, so there is no internal hashing step for a caller to skip. HS256, HS384 and HS512 refuse a non-zero `opts.HashFunc()` with `ErrSigningError`. Pass the signing input whole and leave `opts` nil.
 >
@@ -128,13 +136,13 @@ signer, err := jws.GetSigner(jwa.ES256, nil)
 validator, err := jws.GetValidator(signer.Alg(), signer.Public())
 ```
 
-`jws.GetValidatorFromJwk` builds a validator from a jwk, decoded as a `map[string]any` rather than raw bytes. It refuses the HMAC algorithms, because an `oct` key cannot be reached this way. The example below builds a validator for ES256:
+`jws.GetValidatorFromJwk` builds a validator from a jwk, decoded as a `map[string]any` rather than raw bytes. It reads the key by its `kty`, as `jwk.PublicFromJwk` does, so a jwk without a `kty`, or whose `kty` does not match its algorithm, is refused. RFC 8725 section 3.1 requires each key to be used with exactly one algorithm, so a jwk that carries an `alg` member is refused with `ErrInvalidPublicKey` unless that member is the algorithm you asked for. It refuses the HMAC algorithms, because an `oct` key cannot be reached this way. The example below builds a validator for ES256:
 ```go
 // Construct a validator from a jwk public key
 validator, err := jws.GetValidatorFromJwk(jwa.ES256, publicKeyMap)
 ```
 
-`ValidateSignature` takes the raw signing input and the signature, and reports whether the signature verifies. Do not hash the input first: the validator hashes it internally with the algorithm's own hash. A signature that does not verify returns `false` with a nil error. The error is non-nil only when the signature could not be checked at all.
+`ValidateSignature` takes the raw signing input and the signature, and reports whether the signature verifies. Do not hash the input first: the validator hashes it internally with the algorithm's own hash. A signature that does not verify returns `false` with a nil error. The error is non-nil only when the signature could not be checked at all. This holds for every family: an RS or PS signature that `crypto/rsa` rejects returns `false` with a nil error, and so does an ES signature of the wrong length, because RFC 7518 section 3.4 says that "the validation has failed".
 ```go
 // Validate a signature
 validator, err := jws.GetValidator(jwa.ES256, publicKey)
@@ -147,6 +155,15 @@ Finally, validators expose their PublicKey with the `Public()` method
 validator, err := jws.GetValidator(jwa.ES256, publicKey)
 pk := validator.Public()
 ```
+
+### Binding a key to one algorithm
+
+RFC 8725 section 3.1 requires each key to be used with exactly one algorithm. A bare `crypto.PublicKey` carries no algorithm, so this library cannot check that for you when the key comes from `GetValidator` or from a `model.Retriever`. One RSA key builds a validator for each of RS256, RS384, RS512, PS256, PS384 and PS512, and a retriever's RSA key verifies a token that names any of them. Binding the key is your job:
+
+- With `GetValidator`, pass the algorithm the key was issued for, not the `alg` a token names.
+- With a retriever, set `JoseOptions.AllowedSigningAlgorithms` to the algorithm your keys are for.
+
+A jwk can carry its own `alg`, and `GetValidatorFromJwk` and a token's `jwk` header both enforce it.
 
 ## Keys a token carries
 
@@ -346,6 +363,15 @@ fmt.Errorf("%wshould be an instance of *ecdsa.PrivateKey", joseerror.ErrInvalidP
 ```
 
 That reads `invalid private key: should be an instance of *ecdsa.PrivateKey`, and `errors.Is` still matches.
+
+## Upgrading from 0.10.x
+
+- RS and PS signers and validators refuse a modulus under 2048 bits or over 8192 bits, wherever the key comes from. `GetSigner` refuses an `Opts.BitSize` over 8192.
+- An ES validator refuses a key on another curve, so `GetValidator(jwa.ES384, p256Key)` now fails with `ErrInvalidPublicKey`.
+- A nil key, or one with missing fields, is refused when the signer or validator is built, rather than panicking later.
+- An ES signer in pre-hashed mode refuses a digest whose length is not the hash's output size with `ErrSigningError`.
+- An RS or PS signature that does not verify returns `false` with a nil error, and an ES signature of the wrong length does too. Both used to return an error wrapping `ErrInvalidSignature`. If you told a forged signature apart by its error, check the boolean.
+- `GetValidatorFromJwk` refuses a jwk with no `kty`, a `kty` that does not fit the algorithm, or an `alg` member that is not the algorithm you asked for.
 
 ## Upgrading from the pre-0.10 line
 

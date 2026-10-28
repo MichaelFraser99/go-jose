@@ -14,7 +14,6 @@ import (
 )
 
 const keySize = 64
-const curveName = "P-256"
 
 type Signer struct {
 	alg        jwa.Algorithm
@@ -42,8 +41,8 @@ func NewSignerFromPrivateKey(privateKey crypto.PrivateKey) (*Signer, error) {
 	if !ok {
 		return nil, fmt.Errorf("%wshould be instance of *ecdsa.PrivateKey", joseerror.ErrInvalidPrivateKey)
 	}
-	if ecdsaPrivateKey.Curve.Params().Name != curveName {
-		return nil, fmt.Errorf("%wcurve should be %s, was %s", joseerror.ErrInvalidPrivateKey, curveName, ecdsaPrivateKey.Curve.Params().Name)
+	if err := common.CheckECDSAPrivateKey(ecdsaPrivateKey, elliptic.P256()); err != nil {
+		return nil, err
 	}
 	return &Signer{
 		alg:        jwa.ES256,
@@ -56,20 +55,12 @@ func NewValidator(publicKey crypto.PublicKey) (*Validator, error) {
 	if !ok {
 		return nil, fmt.Errorf("%wshould be instance of *ecdsa.PublicKey", joseerror.ErrInvalidPublicKey)
 	}
+	if err := common.CheckECDSAPublicKey(ecdsaPublicKey, elliptic.P256(), joseerror.ErrInvalidPublicKey); err != nil {
+		return nil, err
+	}
 	return &Validator{
 		publicKey: ecdsaPublicKey,
 	}, nil
-}
-
-func NewValidatorFromJwk(jwk map[string]any) (*Validator, error) {
-	publicKey, err := common.ECDSAPublicKeyFromJwk(jwk)
-	if err != nil {
-		return nil, err
-	}
-	if publicKey.Curve.Params().Name != curveName {
-		return nil, fmt.Errorf("provided jwk has invalid curve for the ES256 algorithm: %s", publicKey.Curve.Params().Name)
-	}
-	return NewValidator(publicKey)
 }
 
 func (signer *Signer) Alg() jwa.Algorithm {
@@ -88,6 +79,8 @@ func (signer *Signer) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts
 	if opts == nil || opts.HashFunc() == 0 {
 		hashedDigest := sha256.Sum256(digest)
 		digest = hashedDigest[:]
+	} else if len(digest) != crypto.SHA256.Size() {
+		return nil, fmt.Errorf("%wa pre-hashed digest for ES256 is %d bytes, got %d", joseerror.ErrSigningError, crypto.SHA256.Size(), len(digest))
 	}
 
 	signature, err = common.EllipticCurveSign(rand, *signer.privateKey, digest[:], keySize)
@@ -104,7 +97,7 @@ func (validator *Validator) ValidateSignature(digest, signature []byte) (bool, e
 
 	r, s, err := common.ExtractRSFromSignature(signature, keySize)
 	if err != nil {
-		return false, fmt.Errorf("%w", joseerror.ErrInvalidSignature)
+		return false, nil
 	}
 
 	return ecdsa.Verify(validator.publicKey, bodyHash[:], r, s), nil
