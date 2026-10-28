@@ -33,7 +33,7 @@ func ValidateHeader(ctx context.Context, header map[string]any, client *http.Cli
 	}
 
 	if len(opts.AllowedSigningAlgorithms) > 0 && !slices.Contains(opts.AllowedSigningAlgorithms, jwa.GetAlgorithm(*alg)) {
-		return nil, fmt.Errorf("%w'%s' is not permitted by application-level constraints", joseerror.ErrUnsupportedAlgorithm, *alg)
+		return nil, fmt.Errorf("%w%s is not permitted by application-level constraints", joseerror.ErrUnsupportedAlgorithm, jsonutils.QuoteBounded(*alg))
 	}
 
 	if err := validateExpectedType(header, opts.AcceptedTypes); err != nil {
