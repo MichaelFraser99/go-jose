@@ -11,6 +11,7 @@ import (
 	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/model"
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -121,6 +122,21 @@ func hasExtension(certificate *x509.Certificate, oid asn1.ObjectIdentifier) bool
 	return false
 }
 
+func namesNoExtendedKeyUsage(certificate *x509.Certificate) bool {
+	return hasExtension(certificate, oidExtensionExtendedKeyUsage) && len(certificate.ExtKeyUsage) == 0 && len(certificate.UnknownExtKeyUsage) == 0
+}
+
+func cannotIssue(certificate *x509.Certificate) bool {
+	return namesNoExtendedKeyUsage(certificate) || hasExtension(certificate, oidExtensionKeyUsage) && certificate.KeyUsage&x509.KeyUsageCertSign == 0
+}
+
+func intermediatesCanIssue(chain []*x509.Certificate) bool {
+	if len(chain) < 3 {
+		return true
+	}
+	return !slices.ContainsFunc(chain[1:len(chain)-1], cannotIssue)
+}
+
 func namesAnyExtendedKeyUsage(certificate *x509.Certificate) bool {
 	for _, usage := range certificate.ExtKeyUsage {
 		if usage == x509.ExtKeyUsageAny {
@@ -148,7 +164,7 @@ func validateCertificateChain(certificates []*x509.Certificate, roots *x509.Cert
 		keyUsages = []x509.ExtKeyUsage{x509.ExtKeyUsageAny}
 	}
 	signingCertificate := certificates[0]
-	_, err := signingCertificate.Verify(x509.VerifyOptions{
+	chains, err := signingCertificate.Verify(x509.VerifyOptions{
 		Roots:         roots,
 		Intermediates: intermediateCertPool,
 		KeyUsages:     keyUsages,
@@ -156,11 +172,13 @@ func validateCertificateChain(certificates []*x509.Certificate, roots *x509.Cert
 	if err != nil {
 		return fmt.Errorf("%wthe certificate chain does not validate against the configured trust anchors: %s", joseerror.ErrNoKeyIdentifierMatch, err.Error())
 	}
-	extendedKeyUsagePresent := hasExtension(signingCertificate, oidExtensionExtendedKeyUsage)
-	if extendedKeyUsagePresent && len(signingCertificate.ExtKeyUsage) == 0 && len(signingCertificate.UnknownExtKeyUsage) == 0 {
+	if namesNoExtendedKeyUsage(signingCertificate) {
 		return fmt.Errorf("%wthe signing certificate's extended key usage extension names no purpose", joseerror.ErrNoKeyIdentifierMatch)
 	}
-	if len(extKeyUsages) == 0 && extendedKeyUsagePresent && !namesAnyExtendedKeyUsage(signingCertificate) {
+	if !slices.ContainsFunc(chains, intermediatesCanIssue) {
+		return fmt.Errorf("%wevery chain to a configured trust anchor passes through an intermediate whose extended key usage names no purpose or whose key usage does not assert keyCertSign", joseerror.ErrNoKeyIdentifierMatch)
+	}
+	if len(extKeyUsages) == 0 && hasExtension(signingCertificate, oidExtensionExtendedKeyUsage) && !namesAnyExtendedKeyUsage(signingCertificate) {
 		return fmt.Errorf("%wthe signing certificate's extended key usage names no purpose the caller accepts", joseerror.ErrNoKeyIdentifierMatch)
 	}
 	if hasExtension(signingCertificate, oidExtensionKeyUsage) && signingCertificate.KeyUsage&(x509.KeyUsageDigitalSignature|x509.KeyUsageContentCommitment) == 0 {

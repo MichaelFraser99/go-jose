@@ -40,6 +40,14 @@ type JoseOptions struct {
 	// passed to jwt.Validate or jws.VerifyCompactSerialization also applies.
 	FetchTimeout time.Duration
 
+	// MaxKeysTried bounds how many keys a token's signature is checked against,
+	// across every key source. RFC 7517 section 4.5 does not require a kid to be
+	// unique, so a key set a peer publishes may hold thousands of keys under one
+	// kid, each costing a signature verification. A token that would need more is
+	// refused with ErrTooManyKeys. A key that cannot be used with the token's alg
+	// costs no verification and does not count. Zero or less means 100.
+	MaxKeysTried int
+
 	// AllowedSigningAlgorithms defines the list of acceptable algorithms for token signature verification. If not specified, all algorithms are permitted
 	AllowedSigningAlgorithms []jwa.Algorithm
 
@@ -96,7 +104,8 @@ type JoseOptions struct {
 	// chain verification nests extended key usage, so the signing certificate and
 	// every certificate above it must permit one of these, or carry no extended key
 	// usage. Naming x509.ExtKeyUsageAny turns this purpose check off. A signing
-	// certificate whose extension names no purpose is refused in every case.
+	// certificate or intermediate whose extension names no purpose is refused in
+	// every case, as RFC 5280 section 4.2.1.12 allows no empty extension.
 	X509ExtKeyUsages []x509.ExtKeyUsage
 
 	// ExpectedAudience names this recipient. When set, jwt.Validate requires the "aud"
