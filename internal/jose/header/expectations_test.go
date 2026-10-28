@@ -171,7 +171,7 @@ func TestValidateHeader_ACriticalExtensionMustBeUnderstood(t *testing.T) {
 
 func TestValidateHeader_ARefusedAlgorithmStopsBeforeAnyOutboundRequest(t *testing.T) {
 	var fetched atomic.Int64
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		fetched.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		if _, err := w.Write([]byte(`{"keys":[]}`)); err != nil {
