@@ -1,6 +1,7 @@
 package jws
 
 import (
+	"context"
 	"crypto"
 	"encoding/base64"
 	"errors"
@@ -16,7 +17,7 @@ import (
 
 //todo: should we consider json serialization? - no-one really uses it
 
-func VerifyCompactSerialization(compactSerialization string, outOfBoundsPublicKey model.Retriever, opts *model.JoseOptions) (protectedHeader, body map[string]any, err error) {
+func VerifyCompactSerialization(ctx context.Context, compactSerialization string, outOfBoundsPublicKey model.Retriever, opts *model.JoseOptions) (protectedHeader, body map[string]any, err error) {
 	components := strings.Split(compactSerialization, ".")
 	if len(components) != 3 {
 		return nil, nil, fmt.Errorf("%winvalid compact serialization format", joseerror.ErrMalformedToken)
@@ -38,7 +39,7 @@ func VerifyCompactSerialization(compactSerialization string, outOfBoundsPublicKe
 		client = opts.HttpClient
 	}
 
-	headerJwkRetrievers, err := header.ValidateHeader(protectedHeader, client, model.JWS, opts)
+	headerJwkRetrievers, err := header.ValidateHeader(ctx, protectedHeader, client, model.JWS, opts)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%werror validating header: %w", joseerror.ErrMalformedToken, err)
 	}

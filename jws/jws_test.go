@@ -1,6 +1,7 @@
 package jws
 
 import (
+	"context"
 	"crypto"
 	"encoding/json"
 	"fmt"
@@ -35,7 +36,7 @@ func Test_VerifyCompactSerialization(t *testing.T) {
 		t.Fatal(fmt.Errorf("error unmarshaling public key: %s", err))
 	}
 
-	protectedHeader, body, err := VerifyCompactSerialization(token, func() ([]crypto.PublicKey, error) {
+	protectedHeader, body, err := VerifyCompactSerialization(context.Background(), token, func() ([]crypto.PublicKey, error) {
 		return []crypto.PublicKey{pubKey}, nil
 	}, nil)
 	t.Log(err)

@@ -1,6 +1,7 @@
 package jwk
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -40,7 +41,7 @@ func TestRetrieveJKU_RefusesAKeySetLargerThanTheCap(t *testing.T) {
 			}))
 			defer server.Close()
 
-			keys, err := RetrieveJKU(server.URL, server.Client(), nil, "RS256")()
+			keys, err := RetrieveJKU(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0), nil, "RS256")()
 			if !tc.refuse {
 				return
 			}

@@ -1,6 +1,7 @@
 package header
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -58,7 +59,7 @@ func TestValidateHeader_TheExpectedTypeIsComparedAsAMediaType(t *testing.T) {
 				head["typ"] = tc.typ
 			}
 
-			_, err := ValidateHeader(decodedHeader(t, head), nil, model.JWS, &model.JoseOptions{AcceptedTypes: tc.accepted})
+			_, err := ValidateHeader(context.Background(), decodedHeader(t, head), nil, model.JWS, &model.JoseOptions{AcceptedTypes: tc.accepted})
 			if tc.accept && err != nil {
 				t.Errorf("[%s] expected the header to be accepted, got %v", tc.reference, err)
 			}
@@ -92,7 +93,7 @@ func TestValidateHeader_AKeyIdentifierCanBeRequired(t *testing.T) {
 				head["kid"] = tc.kid
 			}
 
-			_, err := ValidateHeader(decodedHeader(t, head), nil, model.JWS, &model.JoseOptions{RequireKeyIdentifier: tc.require})
+			_, err := ValidateHeader(context.Background(), decodedHeader(t, head), nil, model.JWS, &model.JoseOptions{RequireKeyIdentifier: tc.require})
 			if tc.accept && err != nil {
 				t.Errorf("[%s] expected the header to be accepted, got %v", tc.reference, err)
 			}
@@ -152,7 +153,7 @@ func TestValidateHeader_ACriticalExtensionMustBeUnderstood(t *testing.T) {
 				head["crit"] = tc.crit
 			}
 
-			_, err := ValidateHeader(decodedHeader(t, head), nil, model.JWS, &model.JoseOptions{UnderstoodCriticalHeaders: tc.understood})
+			_, err := ValidateHeader(context.Background(), decodedHeader(t, head), nil, model.JWS, &model.JoseOptions{UnderstoodCriticalHeaders: tc.understood})
 			if tc.accept && err != nil {
 				t.Errorf("[%s] expected the header to be accepted, got %v", tc.reference, err)
 			}
@@ -182,7 +183,7 @@ func TestValidateHeader_ARefusedAlgorithmStopsBeforeAnyOutboundRequest(t *testin
 	head := decodedHeader(t, map[string]any{"alg": "RS256", "jku": server.URL})
 	opts := &model.JoseOptions{AllowedSigningAlgorithms: []jwa.Algorithm{jwa.ES256}}
 
-	retrievers, err := ValidateHeader(head, server.Client(), model.JWS, opts)
+	retrievers, err := ValidateHeader(context.Background(), head, server.Client(), model.JWS, opts)
 	if err == nil {
 		t.Fatalf("[RFC 8725 3.1] an algorithm the caller has not permitted must be refused, got %d retrievers", len(retrievers))
 	}
@@ -201,7 +202,7 @@ func TestValidateHeader_APermittedAlgorithmIsStillAccepted(t *testing.T) {
 	head := decodedHeader(t, map[string]any{"alg": "RS256"})
 	opts := &model.JoseOptions{AllowedSigningAlgorithms: []jwa.Algorithm{jwa.ES256, jwa.RS256}}
 
-	if _, err := ValidateHeader(head, nil, model.JWS, opts); err != nil {
+	if _, err := ValidateHeader(context.Background(), head, nil, model.JWS, opts); err != nil {
 		t.Errorf("an algorithm the caller permitted must be accepted, got %v", err)
 	}
 }

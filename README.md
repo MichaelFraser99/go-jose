@@ -151,7 +151,7 @@ pk := validator.Public()
 A JOSE header can name the key that signed the token, through `jwk`, `jku`, `x5c` or `x5u`. `jwt.Validate` and `jws.VerifyCompactSerialization` do not use those keys unless you turn them on:
 
 ```go
-head, body, err := jwt.Validate(token, nil, &model.JoseOptions{UseTokenProvidedKeys: true})
+head, body, err := jwt.Validate(ctx, token, nil, &model.JoseOptions{UseTokenProvidedKeys: true})
 ```
 
 They are off by default because anyone can sign a token and name their own key in its header. A token that verifies against a key it carries proves only that its signer holds that key. RFC 7515 section 10.3 says the technique used to get a public key "must authenticate the origin of the key". Turn the option on only when something else ties those keys to a party you trust, such as `X509Roots` for `x5c` and `x5u`.
@@ -165,14 +165,16 @@ With the option off, supply your own key material through the retriever. That is
 The two remote headers name a URL this library fetches. Supply the client it should use:
 
 ```go
-head, body, err := jwt.Validate(token, nil, &model.JoseOptions{
+head, body, err := jwt.Validate(ctx, token, nil, &model.JoseOptions{
     UseTokenProvidedKeys: true,
-    HttpClient:           &http.Client{Timeout: 10 * time.Second, Transport: yourGuardedTransport},
+    HttpClient:           &http.Client{Transport: yourGuardedTransport},
     X509Roots:            roots,
 })
 ```
 
-Both URLs come from the header of the token being verified, so this library makes an outbound request to an address a peer chose, before the signature is checked. Give the client a transport that rejects the destinations your deployment will not allow — private, loopback, link-local and other reserved ranges — and a timeout. The body is capped at 4 MiB whatever client you supply.
+Both URLs come from the header of the token being verified, so this library makes an outbound request to an address a peer chose, before the signature is checked. Give the client a transport that rejects the destinations your deployment will not allow, such as private, loopback, link-local and other reserved ranges. The body is capped at 4 MiB whatever client you supply.
+
+Each fetch is also bounded in time, whatever client you supply. `JoseOptions.FetchTimeout` covers the whole fetch, from sending the request to reading the last byte of the body. When it is zero, the limit is 10 seconds. A deadline or cancellation on the `ctx` you pass to `Validate` also stops the fetch.
 
 With no client, `jku` and `x5u` contribute no key. `jku` must be `https`, as RFC 7515 section 4.1.2 requires integrity protection, and an `x5u` resource is read as the PEM encoding section 4.1.5 requires, falling back to raw DER for a server that sends that instead.
 
@@ -181,7 +183,7 @@ With no client, `jku` and `x5u` contribute no key. `jku` must be `https`, as RFC
 Most JOSE profiles pin their own `typ`, many require a `kid`, and RFC 7515 section 4.1.11 says a JWS whose `crit` lists an extension the recipient does not understand **MUST** be rejected. Rather than decoding the header yourself to check those, say what you expect:
 
 ```go
-head, body, err := jwt.Validate(token, retriever, &model.JoseOptions{
+head, body, err := jwt.Validate(ctx, token, retriever, &model.JoseOptions{
     AcceptedTypes:             []string{"example+jwt"},
     RequireKeyIdentifier:      true,
     UnderstoodCriticalHeaders: []string{"x-example"},
@@ -211,7 +213,7 @@ RFC 5280 path validation takes a trust anchor as an **input**. A chain cannot vo
 roots := x509.NewCertPool()
 roots.AppendCertsFromPEM(issuerRootPEM)
 
-head, body, err := jwt.Validate(token, nil, &model.JoseOptions{UseTokenProvidedKeys: true, X509Roots: roots})
+head, body, err := jwt.Validate(ctx, token, nil, &model.JoseOptions{UseTokenProvidedKeys: true, X509Roots: roots})
 ```
 
 With no `X509Roots` configured, a token's `x5c` and `x5u` headers contribute no key. They are not an error — section 4.1.6 makes use of the header OPTIONAL — so the token still verifies if another key source does, and fails with `no cyptographic material provided for signature validation` if none does.
@@ -278,7 +280,7 @@ Give it the algorithm the signer was built for. It decides which hash `New` appl
 The second validates a jwt and returns the decoded head and body:
 
 ```go
-func jwt.Validate(token string, outOfBoundsPublicKey model.Retriever, opts *model.JoseOptions) (head, body map[string]any, err error)
+func jwt.Validate(ctx context.Context, token string, outOfBoundsPublicKey model.Retriever, opts *model.JoseOptions) (head, body map[string]any, err error)
 ```
 
 The retriever supplies key material of your own. Pass nil only when you have turned on `UseTokenProvidedKeys`, so the token's header names the key. `model.JoseOptions` carries everything described under [Keys a token carries](#keys-a-token-carries), and may be nil for the defaults.
@@ -340,7 +342,8 @@ if errors.Is(err, joseerror.ErrInvalidSignature) {
 | --- | --- |
 | `jwa.GetAlgorithm` | Returns `Algorithm`, not `*Algorithm`. Returns `jwa.Unknown` rather than nil for an unknown name, and the comparison is now case sensitive |
 | `jwt.New` | Takes a fourth parameter, `jwt.Opts`, naming the algorithm to sign with |
-| `jwt.Validate` | Takes `(token string, retriever model.Retriever, opts *model.JoseOptions)`. The `publicKey` parameter is gone: supply key material through the retriever, or turn on `UseTokenProvidedKeys` to use what the token's header names |
+| `jwt.Validate` | Takes `(ctx context.Context, token string, retriever model.Retriever, opts *model.JoseOptions)`. The `publicKey` parameter is gone: supply key material through the retriever, or turn on `UseTokenProvidedKeys` to use what the token's header names |
+| `jws.VerifyCompactSerialization` | Takes a `context.Context` first. It bounds any `jku` or `x5u` fetch |
 | `jws.GetValidatorFromJwk` | Takes `map[string]any`, not `[]byte` |
 | `jwk.PublicJwk`, `jwk.PrivateJwk` | Return `*map[string]any`, not `map[string]string` |
 

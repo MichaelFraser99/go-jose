@@ -10,7 +10,6 @@ import (
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/model"
 	"io"
-	"net/http"
 )
 
 func InlineJWK(jwk map[string]any, kid *string, alg string) model.Retriever {
@@ -46,9 +45,9 @@ func InlineJWK(jwk map[string]any, kid *string, alg string) model.Retriever {
 	}
 }
 
-func RetrieveJKU(jku string, client *http.Client, kid *string, alg string) model.Retriever {
+func RetrieveJKU(jku string, fetch httputils.Fetch, kid *string, alg string) model.Retriever {
 	return func() ([]crypto.PublicKey, error) {
-		response, err := httputils.RetrieveResource(client, jku, "jku")
+		response, err := fetch(jku, "jku")
 		if err != nil {
 			return nil, err
 		}

@@ -11,7 +11,6 @@ import (
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/model"
 	"io"
-	"net/http"
 	"strings"
 )
 
@@ -204,9 +203,9 @@ func InlineCertificate(certificateChain []string, x5t, x5ts256 *string, alg stri
 	}
 }
 
-func RetrieveX5U(x5u string, client *http.Client, x5t, x5ts256 *string, alg string, roots *x509.CertPool) model.Retriever {
+func RetrieveX5U(x5u string, fetch httputils.Fetch, x5t, x5ts256 *string, alg string, roots *x509.CertPool) model.Retriever {
 	return func() ([]crypto.PublicKey, error) {
-		response, err := httputils.RetrieveResource(client, x5u, "x5u")
+		response, err := fetch(x5u, "x5u")
 		if err != nil {
 			return nil, err
 		}
