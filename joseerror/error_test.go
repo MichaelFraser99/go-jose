@@ -26,6 +26,7 @@ func sentinels() map[string]error {
 		"ErrNotYetValid":          ErrNotYetValid,
 		"ErrAudienceMismatch":     ErrAudienceMismatch,
 		"ErrInvalidOptions":       ErrInvalidOptions,
+		"ErrTooManyKeys":          ErrTooManyKeys,
 	}
 }
 
