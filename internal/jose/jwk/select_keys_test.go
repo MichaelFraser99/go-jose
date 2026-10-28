@@ -196,7 +196,7 @@ func TestRetrieveJKU_ASelectionOfNoMemberReportsNoKeyIdentifierMatch(t *testing.
 func TestRetrieveJKU_ADocumentThatIsNotAJwkSetIsRefused(t *testing.T) {
 	for _, body := range []string{`{"foo":[]}`, `{"keys":null}`, `{"KEYS":[]}`, `null`} {
 		t.Run(body, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				if _, err := w.Write([]byte(body)); err != nil {
 					return

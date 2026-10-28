@@ -379,6 +379,7 @@ Every change below is a compile error or a silent behaviour change for a consume
 - `JoseOptions.UseTokenProvidedKeys` is off unless set, including when `opts` is `nil`, and now covers only `jwk` and `jku`. `x5c` and `x5u` are used when `X509Roots` is set.
 - A `crit` header naming an extension you have not declared in `UnderstoodCriticalHeaders` is refused.
 - `x5c` and `x5u` contribute no key unless `JoseOptions.X509Roots` is configured.
+- `jku` and `x5u` can now supply a key. They are fetched with the client you set in `JoseOptions.HttpClient`, which v0.10.0 did not have: it passed no client, so neither header could ever be fetched. With no client, both still contribute no key.
 - A `jku` set is no longer used whole when no member matches the header's `kid` or `alg`. A member whose `kid` or `alg` differs from the header's is never used, and one that names no `alg` is no longer dropped beside one that does. See [Which jwk and jku keys are used](#which-jwk-and-jku-keys-are-used).
 - A `jwk` or `jku` key whose `use` is present and not `"sig"`, or whose `key_ops` is present and lacks `"verify"`, no longer verifies a token. Set `JoseOptions.IgnoreKeyUse` to accept it.
 - Decoding JSON into `model.Jwks` refuses a document with no `keys` member, with `"keys": null`, or that is `null`, and reads `keys` only by its exact name. See [Key sets](#key-sets).
