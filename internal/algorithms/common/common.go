@@ -309,10 +309,6 @@ func EdDSAPrivateKeyFromJwk(jwk map[string]any) (*ed25519.PrivateKey, error) {
 	if len(dBytes) != ed25519.SeedSize {
 		return nil, fmt.Errorf("%wthe 'd' parameter of an Ed25519 jwk is %d bytes, got %d", jose_errors.ErrInvalidPrivateKey, ed25519.SeedSize, len(dBytes))
 	}
-	if len(xBytes) != ed25519.PublicKeySize {
-		return nil, fmt.Errorf("%wthe 'x' parameter of an Ed25519 jwk is %d bytes, got %d", jose_errors.ErrInvalidPrivateKey, ed25519.PublicKeySize, len(xBytes))
-	}
-
 	private := ed25519.NewKeyFromSeed(dBytes)
 	if !bytes.Equal(private[ed25519.SeedSize:], xBytes) {
 		return nil, fmt.Errorf("%wthe 'x' parameter of an Ed25519 jwk is not the public key of its 'd'", jose_errors.ErrInvalidPrivateKey)
