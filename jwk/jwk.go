@@ -16,27 +16,24 @@ func PublicFromJwk(jwk map[string]any) (crypto.PublicKey, error) {
 }
 
 func PublicJwk(publicKey crypto.PublicKey) (*map[string]any, error) {
-	ecdsaPK, ecdsaOk := publicKey.(*ecdsa.PublicKey)
-	rsaPK, rsaOk := publicKey.(*rsa.PublicKey)
-	eddsaPK, eddsaOk := publicKey.(*ed25519.PublicKey)
-
-	if ecdsaOk {
-		m := common.JwkFromECDSAPublicKey(ecdsaPK)
-		return &m, nil
+	var m map[string]any
+	var err error
+	switch key := publicKey.(type) {
+	case *ecdsa.PublicKey:
+		m, err = common.JwkFromECDSAPublicKey(key)
+	case *rsa.PublicKey:
+		m, err = common.JwkFromRSAPublicKey(key)
+	case *ed25519.PublicKey:
+		m, err = common.JwkFromEdDSAPublicKey(key)
+	case ed25519.PublicKey:
+		m, err = common.JwkFromEdDSAPublicKey(&key)
+	default:
+		return nil, fmt.Errorf("%wunknown public key format provided", joseerror.ErrInvalidPublicKey)
 	}
-	if rsaOk {
-		m := common.JwkFromRSAPublicKey(rsaPK)
-		return &m, nil
+	if err != nil {
+		return nil, err
 	}
-	if eddsaOk {
-		m, err := common.JwkFromEdDSAPublicKey(eddsaPK)
-		if err != nil {
-			return nil, err
-		}
-		return &m, nil
-	}
-
-	return nil, fmt.Errorf("%wunknown public key format provided", joseerror.ErrInvalidPublicKey)
+	return &m, nil
 }
 
 func PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error) {
@@ -44,25 +41,22 @@ func PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error) {
 }
 
 func PrivateJwk(privateKey crypto.PrivateKey) (*map[string]any, error) {
-	ecdsaPK, ecdsaOk := privateKey.(*ecdsa.PrivateKey)
-	rsaPK, rsaOk := privateKey.(*rsa.PrivateKey)
-	ed25519PK, ed25519Ok := privateKey.(*ed25519.PrivateKey)
-
-	if ecdsaOk {
-		m := common.JwkFromECDSAPrivateKey(ecdsaPK)
-		return &m, nil
+	var m map[string]any
+	var err error
+	switch key := privateKey.(type) {
+	case *ecdsa.PrivateKey:
+		m, err = common.JwkFromECDSAPrivateKey(key)
+	case *rsa.PrivateKey:
+		m, err = common.JwkFromRSAPrivateKey(key)
+	case *ed25519.PrivateKey:
+		m, err = common.JwkFromEdDSAPrivateKey(key)
+	case ed25519.PrivateKey:
+		m, err = common.JwkFromEdDSAPrivateKey(&key)
+	default:
+		return nil, fmt.Errorf("%wunknown private key format provided", joseerror.ErrInvalidPrivateKey)
 	}
-	if rsaOk {
-		m := common.JwkFromRSAPrivateKey(rsaPK)
-		return &m, nil
+	if err != nil {
+		return nil, err
 	}
-	if ed25519Ok { //is just a byte array - should be the last check
-		m, err := common.JwkFromEdDSAPrivateKey(ed25519PK)
-		if err != nil {
-			return nil, err
-		}
-		return &m, nil
-	}
-
-	return nil, fmt.Errorf("%wunknown private key format provided", joseerror.ErrInvalidPrivateKey)
+	return &m, nil
 }

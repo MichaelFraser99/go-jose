@@ -230,7 +230,22 @@ func jwk.PublicJwk(publicKey crypto.PublicKey) (*map[string]any, error)
 func jwk.PrivateJwk(privateKey crypto.PrivateKey) (*map[string]any, error)
 ```
 
-Pass a pointer to the key. An `*ecdsa.PublicKey`, an `*rsa.PublicKey` or an `*ed25519.PublicKey` is accepted; anything else is refused with `ErrInvalidPublicKey`.
+Pass the key in the form the standard library gives it. An `*ecdsa.PublicKey`, an `*rsa.PublicKey`, or an `ed25519.PublicKey` (or a pointer to one) is accepted. `PrivateJwk` takes the private equivalents. Anything else is refused with `ErrInvalidPublicKey` or `ErrInvalidPrivateKey`.
+
+A key that cannot be encoded is refused with the same errors:
+
+- A nil key, or a key with a missing field.
+- An EC key on a curve other than P-256, P-384 and P-521, the curves RFC 7518 section 6.2.1.1 registers. The curve must be the standard library's own `elliptic.P256()`, `P384()` or `P521()`; another curve that carries one of those names is refused.
+- An EC key whose point is not on its curve, including a negative coordinate or one too large for the curve.
+- An EC private key whose `d` is outside `[1, n-1]`, where `n` is the order of the curve.
+- An RSA private key whose `d` is not between 0 and `n`.
+- An RSA private key with one prime, or more than two. RFC 7518 section 6.3.2.7 says a consumer that does not support more than two MUST NOT use such a key, and `PrivateFromJwk` refuses a jwk that carries `oth`.
+- An RSA private key with a prime that is not positive. RFC 8017 section 3.2 makes `p` and `q` positive integers.
+- A two-prime RSA private key that `rsa.PrivateKey.Validate` rejects, such as one whose primes do not multiply to `n`.
+
+An EC private key's `d` is padded to the length of the curve order, as RFC 7518 section 6.2.2.1 requires.
+
+An RSA private key with no primes is encoded as `n`, `e` and `d`. RFC 7518 section 6.3.2 makes `d` the only required private member. A two-prime key also carries `p`, `q`, `dp`, `dq` and `qi`, which that section says producers SHOULD include. The CRT values are computed on a copy, so the caller's key is not changed.
 
 ```go
 // Direct from a public key
@@ -350,6 +365,7 @@ if errors.Is(err, joseerror.ErrInvalidSignature) {
 - An HMAC secret must be at least the hash output size, and a validator for an HMAC algorithm can only be built from a signer.
 - An Ed25519 jwk now carries a `kid`.
 - An `OKP` jwk is read only when it is a well-formed Ed25519 key.
+- `PublicJwk` and `PrivateJwk` refuse a key they cannot encode, rather than panic or produce a malformed jwk.
 - `JoseOptions.IgnoreTokenProvidedKeys` replaces `UseTokenProvidedKeys`, inverted so the zero value is the documented default.
 - A `crit` header naming an extension you have not declared in `UnderstoodCriticalHeaders` is refused.
 - `x5c` and `x5u` contribute no key unless `JoseOptions.X509Roots` is configured.
