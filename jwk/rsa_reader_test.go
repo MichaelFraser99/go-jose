@@ -91,7 +91,6 @@ func TestPublicFromJwk_ReadsAnRSAExponentExactlyOrRefusesIt(t *testing.T) {
 		"65537, the RFC 7518 example":                 {e: "AQAB", accept: true, want: 65537},
 		"3, the smallest RFC 3447 allows":             {e: rsaMember(big.NewInt(3)), accept: true, want: 3},
 		"2^31-1, the largest crypto/rsa will use":     {e: rsaMember(plus(pow(31), -1)), accept: true, want: 1<<31 - 1},
-		"65537 with a zero leading octet":             {e: "AAEAAQ", accept: true, want: 65537},
 		"2^64+65537, whose low 64 bits are 65537":     {e: rsaMember(plus(pow(64), 65537))},
 		"2^32+65537, whose low 32 bits are 65537":     {e: rsaMember(plus(pow(32), 65537))},
 		"2^31+1, one odd value past what Go will use": {e: rsaMember(plus(pow(31), 1))},

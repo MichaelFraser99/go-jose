@@ -326,7 +326,7 @@ func RSAPrivateKeyFromJwk(jwk map[string]any) (*rsa.PrivateKey, error) {
 		return nil, fmt.Errorf("%wthe public members of an RSA private jwk are not a public key: %w", jose_errors.ErrInvalidPrivateKey, err)
 	}
 
-	dBytes, err := jsonutils.ExtractAndDecodeBase64urlString(jwk, "d")
+	dBytes, err := extractBase64urlUInt(jwk, "d")
 	if err != nil {
 		return nil, fmt.Errorf("error extracting 'd' parameter from jwk: %w", err)
 	}
@@ -359,7 +359,7 @@ func RSAPrivateKeyFromJwk(jwk map[string]any) (*rsa.PrivateKey, error) {
 
 	members := map[string]*big.Int{}
 	for _, v := range []string{"p", "q", "dp", "dq", "qi"} {
-		b, err := jsonutils.ExtractAndDecodeBase64urlString(jwk, v)
+		b, err := extractBase64urlUInt(jwk, v)
 		if err != nil {
 			return nil, fmt.Errorf("error extracting '%s' parameter from jwk: %w", v, err)
 		}
@@ -376,6 +376,17 @@ func RSAPrivateKeyFromJwk(jwk map[string]any) (*rsa.PrivateKey, error) {
 	}
 
 	return &privateKey, nil
+}
+
+func extractBase64urlUInt(jwk map[string]any, name string) ([]byte, error) {
+	value, err := jsonutils.ExtractAndDecodeBase64urlString(jwk, name)
+	if err != nil {
+		return nil, err
+	}
+	if len(value) > 1 && value[0] == 0 {
+		return nil, fmt.Errorf("%wthe %q member is a Base64urlUInt, which RFC 7518 section 2 encodes in the minimum number of octets", jose_errors.ErrMalformedClaim, name)
+	}
+	return value, nil
 }
 
 const rsaPrivateExponentRounds = 32
@@ -404,12 +415,12 @@ func checkRSAPrivateExponent(privateKey *rsa.PrivateKey) error {
 // e is odd. crypto/rsa refuses an exponent
 // above 2^31-1, so an "e" outside that range is refused rather than truncated.
 func RSAPublicKeyFromJwk(jwk map[string]any) (*rsa.PublicKey, error) {
-	nBytes, err := jsonutils.ExtractAndDecodeBase64urlString(jwk, "n")
+	nBytes, err := extractBase64urlUInt(jwk, "n")
 	if err != nil {
 		return nil, fmt.Errorf("error extracting 'n' parameter from jwk: %w", err)
 	}
 
-	eBytes, err := jsonutils.ExtractAndDecodeBase64urlString(jwk, "e")
+	eBytes, err := extractBase64urlUInt(jwk, "e")
 	if err != nil {
 		return nil, fmt.Errorf("error extracting 'e' parameter from jwk: %w", err)
 	}
