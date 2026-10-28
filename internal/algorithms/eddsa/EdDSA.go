@@ -5,12 +5,25 @@ import (
 	"crypto"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
+	"math/big"
+	"slices"
 
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
 )
+
+var fieldPrime = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 255), big.NewInt(19))
+
+var smallOrderYCoordinates = map[string]bool{
+	"0000000000000000000000000000000000000000000000000000000000000000": true,
+	"0100000000000000000000000000000000000000000000000000000000000000": true,
+	"ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f": true,
+	"26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05": true,
+	"c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a": true,
+}
 
 type Signer struct {
 	privateKey ed25519.PrivateKey
@@ -54,6 +67,10 @@ func NewSignerFromPrivateKey(privateKey crypto.PrivateKey) (*Signer, error) {
 	}, nil
 }
 
+// NewValidator builds a validator for a 32-octet Ed25519 public key. It
+// refuses a key whose y is not below p, which RFC 8032 section 5.1.3 says
+// fails to decode, and a key of small order, which NIST SP 800-186 appendix
+// D.1.3.2 full public key validation refuses.
 func NewValidator(publicKey crypto.PublicKey) (*Validator, error) {
 	var key ed25519.PublicKey
 	switch k := publicKey.(type) {
@@ -69,9 +86,25 @@ func NewValidator(publicKey crypto.PublicKey) (*Validator, error) {
 	if len(key) != ed25519.PublicKeySize {
 		return nil, fmt.Errorf("%wan Ed25519 public key is %d bytes, got %d", joseerror.ErrInvalidPublicKey, ed25519.PublicKeySize, len(key))
 	}
+	if err := checkPoint(key); err != nil {
+		return nil, err
+	}
 	return &Validator{
 		publicKey: bytes.Clone(key),
 	}, nil
+}
+
+func checkPoint(key ed25519.PublicKey) error {
+	encodedY := bytes.Clone(key)
+	encodedY[ed25519.PublicKeySize-1] &= 0x7f
+	if smallOrderYCoordinates[hex.EncodeToString(encodedY)] {
+		return fmt.Errorf("%wan Ed25519 public key of small order verifies forged signatures, so full public key validation refuses it", joseerror.ErrInvalidPublicKey)
+	}
+	slices.Reverse(encodedY)
+	if new(big.Int).SetBytes(encodedY).Cmp(fieldPrime) >= 0 {
+		return fmt.Errorf("%wan Ed25519 public key encodes a y below 2^255 - 19, got a larger one", joseerror.ErrInvalidPublicKey)
+	}
+	return nil
 }
 
 func (signer *Signer) Alg() jwa.Algorithm {
@@ -82,9 +115,15 @@ func (signer *Signer) Public() crypto.PublicKey {
 	return signer.privateKey.Public()
 }
 
+// Sign signs the signing input with pure Ed25519. RFC 8032 section 5.1 gives
+// Ed25519 no pre-hash and no context, so a hash or an *ed25519.Options
+// context is refused.
 func (signer *Signer) Sign(_ io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error) {
 	if opts != nil && opts.HashFunc() != 0 {
 		return nil, fmt.Errorf("%wEd25519 is pure EdDSA and has no pre-hashed mode, so the signing input must be passed whole", joseerror.ErrSigningError)
+	}
+	if o, ok := opts.(*ed25519.Options); ok && o.Context != "" {
+		return nil, fmt.Errorf("%wEd25519 is pure EdDSA and has no context, which would make it Ed25519ctx", joseerror.ErrSigningError)
 	}
 	return ed25519.Sign(signer.privateKey, digest), nil
 }
@@ -94,7 +133,7 @@ func (validator *Validator) ValidateSignature(digest, signature []byte) (bool, e
 }
 
 func (validator *Validator) Public() crypto.PublicKey {
-	return validator.publicKey
+	return slices.Clone(validator.publicKey)
 }
 
 // SameAlgorithm reports whether a jwk's "alg" member names the algorithm alg
