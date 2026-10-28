@@ -87,6 +87,17 @@ type JoseOptions struct {
 	// signatures (RFC 7517 sections 4.2 and 4.3). Neither member is required by any RFC,
 	// so turn this on to accept keys whose publisher marks them inconsistently.
 	IgnoreKeyUse bool
+
+	// X509ExtKeyUsages names the extended key usages that permit an x5c or x5u
+	// certificate to verify a JWS. RFC 5280 section 4.2.1.12 says a certificate whose
+	// extension is present MUST only be used for a purpose it names, and no purpose is
+	// registered for JWS. When unset, only the signing certificate is checked, and
+	// if its extension is present it must name anyExtendedKeyUsage. When set, Go's
+	// chain verification nests extended key usage, so the signing certificate and
+	// every certificate above it must permit one of these, or carry no extended key
+	// usage. Naming x509.ExtKeyUsageAny turns this purpose check off. A signing
+	// certificate whose extension names no purpose is refused in every case.
+	X509ExtKeyUsages []x509.ExtKeyUsage
 }
 
 type Retriever func() ([]crypto.PublicKey, error)
