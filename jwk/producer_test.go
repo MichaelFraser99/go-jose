@@ -421,6 +421,36 @@ func TestPrivateJwk_RefusesAnInconsistentRSAKey(t *testing.T) {
 	}
 }
 
+func TestPrivateJwk_RefusesAnRSAKeyWithANonPositivePrime(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, q := key.Primes[0], key.Primes[1]
+	negP, negQ := new(big.Int).Neg(p), new(big.Int).Neg(q)
+
+	tests := map[string][]*big.Int{
+		"a negative p":       {negP, q},
+		"a negative q":       {p, negQ},
+		"a negative p and q": {negP, negQ},
+		"a zero p and q":     {big.NewInt(0), big.NewInt(0)},
+	}
+
+	for name, primes := range tests {
+		t.Run(name, func(t *testing.T) {
+			jwk, err := produce(t, func() (*map[string]any, error) {
+				return PrivateJwk(&rsa.PrivateKey{PublicKey: key.PublicKey, D: key.D, Primes: primes})
+			})
+			if !errors.Is(err, joseerror.ErrInvalidPrivateKey) {
+				t.Errorf("[RFC 8017 3.2] p and q are positive integers, so a key with %s must be refused, got %v", name, err)
+			}
+			if jwk != nil {
+				t.Errorf("no jwk may be returned alongside the refusal, got %v", *jwk)
+			}
+		})
+	}
+}
+
 func TestJwk_AnRSAKeyWithOnlyDRoundTrips(t *testing.T) {
 	full, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {

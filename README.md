@@ -238,6 +238,7 @@ A key that cannot be encoded is refused with the same errors:
 - An EC private key whose `d` is outside `[1, n-1]`, where `n` is the order of the curve.
 - An RSA private key whose `d` is not between 0 and `n`.
 - An RSA private key with one prime, or more than two. RFC 7518 section 6.3.2.7 says a consumer that does not support more than two MUST NOT use such a key, and `PrivateFromJwk` refuses a jwk that carries `oth`.
+- An RSA private key with a prime that is not positive. RFC 8017 section 3.2 makes `p` and `q` positive integers.
 - A two-prime RSA private key that `rsa.PrivateKey.Validate` rejects, such as one whose primes do not multiply to `n`.
 
 An EC private key's `d` is padded to the length of the curve order, as RFC 7518 section 6.2.2.1 requires.

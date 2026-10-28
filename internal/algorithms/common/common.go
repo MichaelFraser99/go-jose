@@ -403,6 +403,9 @@ func JwkFromRSAPrivateKey(privateKey *rsa.PrivateKey) (map[string]any, error) {
 	if len(privateKey.Primes) != 2 || privateKey.Primes[0] == nil || privateKey.Primes[1] == nil {
 		return nil, fmt.Errorf("%wan RSA private key has no primes or exactly two", jose_errors.ErrInvalidPrivateKey)
 	}
+	if privateKey.Primes[0].Sign() <= 0 || privateKey.Primes[1].Sign() <= 0 {
+		return nil, fmt.Errorf("%wthe primes of an RSA private key must be positive", jose_errors.ErrInvalidPrivateKey)
+	}
 	precomputed := rsa.PrivateKey{PublicKey: privateKey.PublicKey, D: privateKey.D, Primes: privateKey.Primes}
 	if err := precomputed.Validate(); err != nil {
 		return nil, fmt.Errorf("%wthe RSA private key is inconsistent: %w", jose_errors.ErrInvalidPrivateKey, err)
