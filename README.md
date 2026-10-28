@@ -205,13 +205,13 @@ Both apply the same rules to the token:
 - The protected header must be a UTF-8 JSON object, as section 5.2 step 3 and RFC 8725 section 3.7 require. `VerifyCompactSerialization` holds the payload to the same rule.
 - A JSON string in the protected header must not hold an unpaired UTF-16 surrogate escape, such as `"\ud800"`. RFC 8259 section 8.2 calls the behaviour of a receiver of such a string unpredictable. Go would turn it into U+FFFD, so different signed bytes would give the same value. `VerifyCompactSerialization` holds the payload to the same rule.
 - An `alg` this library has no validator for is refused with `ErrUnsupportedAlgorithm` before any key is sought, so no `jku` or `x5u` is fetched for it.
-- A `b64` header of `false` is refused with `ErrMissingCriticalClaim`, even when you name `b64` in `UnderstoodCriticalHeaders`. RFC 7797 section 3 says such a payload is not base64url-encoded, and this library always decodes it.
+- A `b64` header of `false` is refused with `ErrMissingCriticalClaim`, even when you name `b64` in `UnderstoodCriticalHeaders`. RFC 7797 section 3 says such a payload is not base64url-encoded, and this library always decodes it. A `b64` header that is not a JSON boolean is refused with `ErrMalformedClaim`, as RFC 7797 section 3 requires.
 
 One message can still have more than one valid token. ECDSA signatures are malleable: for an `ES256`, `ES384` or `ES512` token, anyone can replace the signature's `S` with `n - S` and get a second token that verifies. This needs no key. So do not key a replay or deduplication cache on the raw token string. Key it on a claim such as `jti` instead.
 
 `VerifyCompactSerialization` refuses a nested JWT with `ErrMalformedToken`, before any key is sought. RFC 7519 section 5.2 marks one with a `cty` of `JWT`, compared as RFC 7515 section 4.1.10 describes: case-insensitively, with `application/` treated as prepended. Media-type parameters are ignored, so `application/jwt; charset=utf-8` is a nested JWT too. `Verify` does not look at `cty`, because section 4.1.10 says JWS implementations ignore it. To unwrap a nested JWT yourself, call `Verify` and verify the payload it returns.
 
-Both try the keys from every source until one verifies the signature, up to `JoseOptions.MaxKeysTried`, which is 100 when unset. RFC 7517 section 4.5 does not require a `kid` to be unique, so a key set a peer publishes can hold thousands of keys under one `kid`, and each costs a signature verification. A token that would need more keys than the limit is refused with `ErrTooManyKeys`, not `ErrInvalidSignature`, so you can tell an oversized key set from a forgery. Only a key that a validator can be built from for the token's `alg` counts. The limit covers the keys your retriever returns too.
+Both try the keys from every source until one verifies the signature, up to `JoseOptions.MaxKeysTried`, which is 100 when unset. RFC 7517 section 4.5 does not require a `kid` to be unique, so a key set a peer publishes can hold thousands of keys under one `kid`, and each costs a signature verification. A token that would need more keys than the limit is refused with `ErrTooManyKeys`, not `ErrInvalidSignature`, so you can tell an oversized key set from a forgery. Only a key that a validator can be built from for the token's `alg` counts. The limit covers the keys your retriever returns too. When the limit is reached, no further `jku` or `x5u` is fetched.
 
 ## Keys a token carries
 
@@ -247,7 +247,7 @@ head, body, err := jwt.Validate(ctx, token, nil, &model.JoseOptions{
 })
 ```
 
-Both URLs come from the header of the token being verified, so this library makes an outbound request to an address a peer chose, before the signature is checked. Give the client a transport that rejects the destinations your deployment will not allow, such as private, loopback, link-local and other reserved ranges. The body is capped at 4 MiB whatever client you supply.
+Both URLs come from the header of the token being verified, so this library makes an outbound request to an address a peer chose, before the signature is checked. Give the client a transport that rejects the destinations your deployment will not allow, such as private, loopback, link-local and other reserved ranges. The body is capped at 4 MiB whatever client you supply. Each fetch uses a copy of your client without its cookie jar. The fetch sends no cookies, and a cookie the server sets does not go into your jar. RFC 8725 section 3.10 asks for this.
 
 Every request a fetch makes must use `https`, including each redirect hop. RFC 7515 sections 4.1.2 and 4.1.5 say an HTTP GET to retrieve the resource MUST use TLS, so a redirect to plain `http` is refused before the request is sent, whatever transport you supply. Your client's own redirect policy still applies. When it sets no `CheckRedirect`, Go's default stops after 10 redirects.
 
@@ -265,7 +265,9 @@ A key from a `jwk` header, or a member of a `jku` set, verifies the token only w
 - Its `alg` is absent or equals the header's `alg`. RFC 8725 section 3.1 says "each key MUST be used with exactly one algorithm". `EdDSA` and `Ed25519` count as equal, because with an Ed25519 key they name the same algorithm. A key that names no `alg` stays a candidate, since RFC 7517 section 4.4 makes `alg` optional. Such a key verifies under any algorithm its key type allows, so pin `AllowedSigningAlgorithms` to bind it to one.
 - Its `use` is absent or `"sig"`, and its `key_ops` is absent or includes `"verify"`. RFC 7517 sections 4.2 and 4.3 let a publisher mark a key as not for verifying signatures.
 
-A `jku` set is never used whole because nothing in it matched. When no member qualifies, the set contributes no key and the `jku` retriever's error matches `ErrNoKeyIdentifierMatch`. `VerifyCompactSerialization` then tries the next key source, and if no key verifies it reports `ErrInvalidSignature`, naming the retriever's error only in its message. A `kid`, `alg`, `use` or `key_ops` of the wrong JSON type disqualifies a `jku` member, and refuses an inline `jwk` with `ErrMalformedClaim`, whatever the header holds.
+A `jku` set is never used whole because nothing in it matched. When no member qualifies, the set contributes no key and the `jku` retriever's error matches `ErrNoKeyIdentifierMatch`. `VerifyCompactSerialization` then tries the next key source. If no key verifies, it reports `ErrInvalidSignature` and names the retriever's error only in its message, unless another source failed.
+
+When a key source fails, verification continues with the next source. A source fails when a fetch fails, a body is too large, a body does not decode, or your retriever returns an error. A key the token carries that is itself malformed is different: it is wrong in the signed header every time. So when verification reaches it, a `jwk` with a member of the wrong type, or an `x5c` or `x5u` chain out of order, refuses the token at once with `ErrMalformedClaim`, and no later source is tried. Verification stops at the first key that verifies, so a key from your own retriever, which is tried first, can verify the token before a malformed header source is read. If no key verifies the signature, the error wraps each failure. It matches `ErrApplicationError` for a failed fetch, and `context.DeadlineExceeded` or `context.Canceled` when applicable. It does not match `ErrInvalidSignature`. A `kid`, `alg`, `use` or `key_ops` of the wrong JSON type disqualifies a `jku` member, and refuses an inline `jwk` with `ErrMalformedClaim`, whatever the header holds.
 
 No RFC makes `use` or `key_ops` a requirement: section 4.3 leaves it to each application to say which, if either, it honours. This library honours both by default. Set `JoseOptions.IgnoreKeyUse` to skip that check. It never relaxes the `kid` and `alg` rules.
 
@@ -284,7 +286,7 @@ head, body, err := jwt.Validate(ctx, token, retriever, &model.JoseOptions{
 
 Each is off when unset, so none of this changes what an existing caller sees — except `crit`, below.
 
-`AcceptedTypes` compares as RFC 7515 section 4.1.9 requires: case-insensitively, with `application/` treated as prepended to any value containing no `/`. So naming `example+jwt` accepts `application/example+jwt` and `Example+JWT`, and refuses `x-example+jwt`.
+`AcceptedTypes` compares as RFC 7515 section 4.1.9 requires: case-insensitively, with `application/` treated as prepended to any value containing no `/`. So naming `example+jwt` accepts `application/example+jwt` and `Example+JWT`, and refuses `x-example+jwt`. Media-type parameters are ignored on both sides, so `example+jwt; v=1` matches `example+jwt`. A `typ` with no type before its parameters matches nothing.
 
 `RequireKeyIdentifier` refuses a `kid` that is absent or is not a non-empty string. RFC 7517 section 4.5 leaves `kid` optional, which is why it is off by default.
 
@@ -312,6 +314,8 @@ With no `X509Roots` configured, a token's `x5c` and `x5u` headers contribute no 
 A malformed `x5c` is refused whether or not roots are configured, because its shape is a property of the claim rather than of your trust configuration. An array that is not an array of strings, an empty array, or an entry that is not exactly one base64-encoded DER certificate is `ErrMalformedClaim`. Section 4.1.6 names the base64 of RFC 4648 section 4, and RFC 4648 section 3.3 says a decoder MUST reject characters outside the alphabet. So an entry holding a line break is refused, as is one whose pad bits are not zero. An `x5u` body is PEM, where line breaks are part of the format, so this does not apply to it.
 
 The signing key is taken from the first certificate, and that certificate is the one validated against your roots, as section 4.1.6 requires. The algorithm the issuer used to sign that certificate is not compared with the token's `alg`. An ES256 key in a certificate issued by an RSA root is usable.
+
+An `x5c` or `x5u` chain must be in order. Each certificate after the first must be the one that signed the certificate before it, as RFC 7515 sections 4.1.5 and 4.1.6 require. Its subject must be the issuer of the certificate before it. A chain can hold at most 16 certificates. A chain that breaks either rule is refused with `ErrMalformedClaim`. This library checks the `x5c` count even when no roots are configured.
 
 That first certificate must also be one whose key may verify a signature. `x5c` and `x5u` get the same checks:
 
@@ -492,18 +496,18 @@ Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 | `ErrDecryptionFailed` | Reserved for JWE. Nothing returns it: the `jwe` package is a stub and exports nothing |
 | `ErrUnsupportedAlgorithm` | The algorithm named is not supported, has no validator in this library, or is not permitted by the options given |
 | `ErrSigningError` | Signing failed |
-| `ErrMalformedClaim` | A claim is present but its type or value is wrong |
+| `ErrMalformedClaim` | A claim is present but its type or value is wrong. This includes a `b64` that is not a boolean, and an `x5c` or `x5u` chain that is out of order or longer than 16 certificates |
 | `ErrMissingClaim` | A required claim is absent |
 | `ErrMissingCriticalClaim` | A header named in `crit` is absent, or names an extension this library does not understand, or `b64` is `false` |
 | `ErrNoKeyIdentifierMatch` | No key could be selected. The `kid` matches nothing, a `jku` set holds no usable key that matches the header, a certificate chain does not reach a configured root, or an `x5t` thumbprint does not match the chain |
 | `ErrKeystoreError` | A `model.Jwks` lookup or addition failed, a document decoded into `model.Jwks` is not a JWK Set, or the configuration needed to use a key source is absent, such as `X509Roots` for a certificate chain |
-| `ErrApplicationError` | Key material a header named could not be obtained, decoded or used. Covers a failed `jku` or `x5u` fetch, a local decode of what one returned, and an inline `jwk` of a key type or curve this library does not support. A fetch that ran out of time also matches `context.DeadlineExceeded`, and one cancelled through `ctx` matches `context.Canceled` |
+| `ErrApplicationError` | Key material a header named could not be obtained, decoded or used. Covers a failed `jku` or `x5u` fetch, a local decode of what one returned (an empty `x5u` body is a failed decode), and an inline `jwk` of a key type or curve this library does not support. A fetch that ran out of time also matches `context.DeadlineExceeded`, and one cancelled through `ctx` matches `context.Canceled` |
 | `ErrMalformedToken` | The token is not a well formed JOSE object |
 | `ErrExpired` | The current time is not before the token's `exp`, allowing for `ClockSkewLeeway` |
 | `ErrNotYetValid` | The token's `nbf` or `iat` is after the current time, allowing for `ClockSkewLeeway` |
 | `ErrAudienceMismatch` | `JoseOptions.ExpectedAudience` is set and the token's `aud` names none of its values |
-| `ErrInvalidOptions` | The options passed are themselves wrong, whatever the token. `JoseOptions.ExpectedAudience` holding an empty string is one case |
-| `ErrTooManyKeys` | The signature did not verify under as many keys as `JoseOptions.MaxKeysTried` allows, and more keys remained |
+| `ErrInvalidOptions` | The options passed are themselves wrong, whatever the token. A nil `ctx`, and a `JoseOptions.ExpectedAudience` that holds an empty string, are two cases |
+| `ErrTooManyKeys` | The signature did not verify under as many keys as `JoseOptions.MaxKeysTried` allows, and more keys or key sources remained |
 
 Each sentinel carries a prefix terminated by `": "`, so wrap one with `%w` immediately followed by the rest of the message and no space:
 
@@ -513,7 +517,7 @@ fmt.Errorf("%wshould be an instance of *ecdsa.PrivateKey", joseerror.ErrInvalidP
 
 That reads `invalid private key: should be an instance of *ecdsa.PrivateKey`, and `errors.Is` still matches.
 
-When a header check echoes a value from the token in its error, the value is quoted with Go escaping and cut to its first 64 characters, with `...` marking the cut. A peer cannot put a raw line break or kilobytes of text into your logs this way.
+When a header check echoes a value from the token in its error, the value is quoted with Go escaping and cut to its first 64 characters, with `...` marking the cut. A peer cannot put a raw line break or kilobytes of text into your logs this way. This includes the error from parsing an `x5c` or `x5u` certificate.
 
 ## Upgrading from 0.10.x
 

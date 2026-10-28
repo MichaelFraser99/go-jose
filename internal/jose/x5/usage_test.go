@@ -100,6 +100,7 @@ type usageCase struct {
 	extKeyUsages []x509.ExtKeyUsage
 	rootUsage    x509.KeyUsage
 	rootExtras   []pkix.Extension
+	presented    int
 	accept       bool
 }
 
@@ -138,7 +139,11 @@ func assertUsageCases(t *testing.T, tests map[string]usageCase) {
 				rootTemplate.ExtraExtensions = tc.rootExtras
 				root := issueCertificate(t, rootTemplate, nil)
 				chain := tc.chain(t, root)
-				keys, err := retrieve(t, chain, poolOfIssued(root), tc.extKeyUsages)
+				anchors := []*issued{root}
+				if tc.presented > 0 {
+					chain, anchors = chain[:tc.presented], append(anchors, chain[tc.presented:]...)
+				}
+				keys, err := retrieve(t, chain, poolOfIssued(anchors...), tc.extKeyUsages)
 				if tc.accept {
 					if err != nil {
 						t.Fatalf("[%s] %s must yield its key, got %v", tc.reference, name, err)
@@ -277,7 +282,8 @@ func TestKeyFromValidatedChain_AnExtendedKeyUsageMustCoverTheUse(t *testing.T) {
 				clean, empty := sameKeyIntermediates(t, root, noPurpose)
 				return []*issued{issueCertificate(t, leafTemplate(signing, x509.ExtKeyUsageCodeSigning), clean), empty, clean}
 			},
-			accept: true,
+			presented: 2,
+			accept:    true,
 		},
 		"a leaf offered only through the one of two intermediates that names no purpose": {
 			reference:    "RFC 5280 4.2.1.12",
@@ -378,7 +384,8 @@ func TestKeyFromValidatedChain_AKeyUsageMustAllowVerifyingASignature(t *testing.
 				clean, empty := sameKeyIntermediates(t, root, emptyKeyUsage)
 				return []*issued{issueCertificate(t, leafTemplate(x509.KeyUsageDigitalSignature), clean), empty, clean}
 			},
-			accept: true,
+			presented: 2,
+			accept:    true,
 		},
 		"a leaf offered only through the one of two intermediates asserting no key usage bit": {
 			reference: "RFC 5280 6.1.4(n)",

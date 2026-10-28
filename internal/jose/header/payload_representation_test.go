@@ -3,6 +3,7 @@ package header
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/MichaelFraser99/go-jose/joseerror"
@@ -61,5 +62,33 @@ func TestValidateHeader_RefusesAnUnencodedPayloadWhateverTheCallerUnderstands(t 
 				t.Fatalf("[RFC 7797 3] header %v: %v", test.header, err)
 			}
 		})
+	}
+}
+
+func TestValidateHeader_RefusesAB64ThatIsNotAJSONBoolean(t *testing.T) {
+	understood := &model.JoseOptions{UnderstoodCriticalHeaders: []string{"b64"}}
+	for name, value := range map[string]any{
+		"the string false": "false",
+		"the string true":  "true",
+		"zero":             0,
+		"one":              1,
+		"null":             nil,
+		"an empty array":   []any{},
+		"an empty object":  map[string]any{},
+	} {
+		for _, crit := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s, crit %t", name, crit), func(t *testing.T) {
+				head := map[string]any{"alg": "ES256", "b64": value}
+				opts := &model.JoseOptions{}
+				if crit {
+					head["crit"] = []any{"b64"}
+					opts = understood
+				}
+				_, err := ValidateHeader(context.Background(), decodedHeader(t, head), nil, model.JWS, opts)
+				if !errors.Is(err, joseerror.ErrMalformedClaim) {
+					t.Fatalf("[RFC 7797 3] the b64 value is a JSON boolean, so %#v must be refused with ErrMalformedClaim, got %v", value, err)
+				}
+			})
+		}
 	}
 }
