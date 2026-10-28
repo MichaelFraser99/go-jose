@@ -4,4 +4,5 @@ linters:
     - exhaustive
   settings:
     exhaustive:
-      ignore-enum-types: "^crypto/x509\\."
+      ignore-types:
+        - "^crypto/x509\\."
