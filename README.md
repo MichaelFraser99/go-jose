@@ -148,13 +148,17 @@ pk := validator.Public()
 
 ## Keys a token carries
 
-A JOSE header can name the key that signed the token, through `jwk`, `jku`, `x5c` or `x5u`. `jwt.Validate` and `jws.VerifyCompactSerialization` use those keys by default. A caller wanting only its own key material opts out:
+A JOSE header can name the key that signed the token, through `jwk`, `jku`, `x5c` or `x5u`. `jwt.Validate` and `jws.VerifyCompactSerialization` do not use those keys unless you turn them on:
 
 ```go
-head, body, err := jwt.Validate(token, retriever, &model.JoseOptions{IgnoreTokenProvidedKeys: true})
+head, body, err := jwt.Validate(token, nil, &model.JoseOptions{UseTokenProvidedKeys: true})
 ```
 
-The sense is negative so the zero value is the default, which matters because a caller setting any other option constructs the struct. The field this replaced read `UseTokenProvidedKeys` and documented itself as defaulting to true — and that held only while you passed no options at all. Setting anything else zeroed it and silently turned every header key source off.
+They are off by default because anyone can sign a token and name their own key in its header. A token that verifies against a key it carries proves only that its signer holds that key. RFC 7515 section 10.3 says the technique used to get a public key "must authenticate the origin of the key". Turn the option on only when something else ties those keys to a party you trust, such as `X509Roots` for `x5c` and `x5u`.
+
+With the option off, supply your own key material through the retriever. That is the usual case.
+
+**This is a breaking change for a caller that passes no options.** v0.10.0 used the token's keys when `opts` was `nil`. Such a caller must now pass `UseTokenProvidedKeys: true` to keep that behaviour. A caller that set `UseTokenProvidedKeys` keeps the same meaning. A caller that constructed `JoseOptions` without it was already getting no token keys.
 
 ### jku and x5u need a client
 
@@ -162,8 +166,9 @@ The two remote headers name a URL this library fetches. Supply the client it sho
 
 ```go
 head, body, err := jwt.Validate(token, nil, &model.JoseOptions{
-    HttpClient: &http.Client{Timeout: 10 * time.Second, Transport: yourGuardedTransport},
-    X509Roots:  roots,
+    UseTokenProvidedKeys: true,
+    HttpClient:           &http.Client{Timeout: 10 * time.Second, Transport: yourGuardedTransport},
+    X509Roots:            roots,
 })
 ```
 
@@ -206,7 +211,7 @@ RFC 5280 path validation takes a trust anchor as an **input**. A chain cannot vo
 roots := x509.NewCertPool()
 roots.AppendCertsFromPEM(issuerRootPEM)
 
-head, body, err := jwt.Validate(token, nil, &model.JoseOptions{X509Roots: roots})
+head, body, err := jwt.Validate(token, nil, &model.JoseOptions{UseTokenProvidedKeys: true, X509Roots: roots})
 ```
 
 With no `X509Roots` configured, a token's `x5c` and `x5u` headers contribute no key. They are not an error — section 4.1.6 makes use of the header OPTIONAL — so the token still verifies if another key source does, and fails with `no cyptographic material provided for signature validation` if none does.
@@ -343,7 +348,7 @@ if errors.Is(err, joseerror.ErrInvalidSignature) {
 
 - An HMAC secret must be at least the hash output size, and a validator for an HMAC algorithm can only be built from a signer.
 - An Ed25519 jwk now carries a `kid`.
-- `JoseOptions.IgnoreTokenProvidedKeys` replaces `UseTokenProvidedKeys`, inverted so the zero value is the documented default.
+- `JoseOptions.UseTokenProvidedKeys` is off unless set, including when `opts` is `nil`.
 - A `crit` header naming an extension you have not declared in `UnderstoodCriticalHeaders` is refused.
 - `x5c` and `x5u` contribute no key unless `JoseOptions.X509Roots` is configured.
 

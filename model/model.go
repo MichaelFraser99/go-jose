@@ -11,15 +11,11 @@ import (
 )
 
 type JoseOptions struct {
-	// IgnoreTokenProvidedKeys stops the keys a token carries in its own header — jwk,
-	// jku, x5c and x5u — from being used for verification. They are used by default,
-	// so a caller wanting only its own key material opts out here.
-	//
-	// The sense is negative so that the zero value is the default. The field this
-	// replaced read UseTokenProvidedKeys and documented itself as defaulting to true,
-	// which held only while a caller passed no options at all: constructing the struct
-	// to set anything else zeroed it and silently turned every header key source off.
-	IgnoreTokenProvidedKeys bool
+	// UseTokenProvidedKeys lets the keys a token names in its own header — jwk, jku,
+	// x5c and x5u — verify it. Off by default, including when no options are passed:
+	// anyone can sign a token and name their own key, and RFC 7515 section 10.3 requires
+	// the origin of a key to be authenticated. x5c and x5u also need X509Roots.
+	UseTokenProvidedKeys bool
 
 	// HttpClient fetches the resources a token's jku and x5u headers name. Both URLs
 	// come from the header of the token being verified, so this library makes an

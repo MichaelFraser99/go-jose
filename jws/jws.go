@@ -43,7 +43,7 @@ func VerifyCompactSerialization(compactSerialization string, outOfBoundsPublicKe
 		return nil, nil, fmt.Errorf("%werror validating header: %w", joseerror.ErrMalformedToken, err)
 	}
 
-	if opts == nil || !opts.IgnoreTokenProvidedKeys {
+	if opts != nil && opts.UseTokenProvidedKeys {
 		jwkRetrievers = append(jwkRetrievers, headerJwkRetrievers...)
 	}
 
