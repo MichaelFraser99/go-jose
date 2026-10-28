@@ -102,7 +102,9 @@ The `Sign` method follows JOSE conventions per RFC 7518 rather than Go's `crypto
 - **JOSE mode** (`opts == nil` or `opts.HashFunc() == 0`): pass the raw JWS Signing Input — the signer hashes it internally using the algorithm's designated hash. This is the expected usage for JWS operations.
 - **Pre-hashed mode** (`opts.HashFunc() != 0`): pass an already-hashed digest — the signer skips internal hashing. This supports interoperability with callers following Go's `crypto.Signer` convention. ES, RS and PS implement this mode, and refuse a `Hash` that is not the algorithm's own with `ErrSigningError`.
 
-> **The HMAC algorithms do not implement pre-hashed mode.** HS256, HS384 and HS512 ignore `opts` entirely. HMAC is itself a keyed hash, so there is no internal hashing step to skip. Passing a pre-hashed digest to one produces a MAC over the digest rather than over the signing input, which no validator accepts, and `Sign` returns no error to say so. A wrong `Hash` is not refused either. Pass the signing input whole to an HS signer, and leave `opts` nil. Tracked as [#69](https://github.com/MichaelFraser99/go-jose/issues/69).
+> **The HMAC algorithms have no pre-hashed mode, and refuse one.** HMAC is itself a keyed hash, so there is no internal hashing step for a caller to skip. HS256, HS384 and HS512 refuse a non-zero `opts.HashFunc()` with `ErrSigningError`. Pass the signing input whole and leave `opts` nil.
+>
+> **This is a breaking change,** and it breaks two kinds of caller differently. One passed a pre-hashed digest with a non-zero `Hash`, as the old documentation described: they were already producing a MAC over the digest rather than over the signing input, which no validator accepts, with no error to say so. They now get an error at the call that causes it. The other is generic over `crypto.Signer` and passes a non-zero `Hash` alongside the **raw** signing input — that worked, because `opts` was ignored, and it no longer does. Such a caller should pass `nil` for an HS algorithm, or a zero `Hash`.
 
 A `SignerOpts` implementation is provided:
 ```go
@@ -268,7 +270,7 @@ type jwt.Opts struct {
 }
 ```
 
-Give it the algorithm the signer was built for. It decides which hash `New` applies to the signing input, so an algorithm that disagrees with the signer produces a signature nothing verifies.
+Give it the algorithm the signer was built for. `New` hashes the signing input only for an ES, RS or PS algorithm. A signer from this library refuses a hash that is not its own, and an HMAC signer refuses any hash. With an HS or EdDSA algorithm, or none, `New` passes the input whole and the signer signs with its own algorithm. A `crypto.Signer` from elsewhere makes no such check. If the hash `Opts` names is not the one that signer uses, the signature verifies against nothing.
 
 The second validates a jwt and returns the decoded head and body:
 
