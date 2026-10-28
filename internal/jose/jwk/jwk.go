@@ -10,28 +10,13 @@ import (
 	"github.com/MichaelFraser99/go-jose/model"
 )
 
-func InlineJWK(jwk map[string]any, kid *string, alg string) model.Retriever {
+// InlineJWK returns the key of a jwk header when SelectKeys would select it. A key it
+// would not select reports ErrNoKeyIdentifierMatch, or ErrMalformedClaim when one of
+// the members it judges by has the wrong type.
+func InlineJWK(jwk map[string]any, kid *string, alg string, ignoreKeyUse bool) model.Retriever {
 	return func() ([]crypto.PublicKey, error) {
-		if kid != nil {
-			if k, present := jwk["kid"]; present {
-				if sk, ok := k.(string); ok {
-					if sk != *kid {
-						return nil, fmt.Errorf("%wjwk kid does not match value from jose header", joseerror.ErrNoKeyIdentifierMatch)
-					}
-				} else {
-					return nil, fmt.Errorf("%wreturned jwk has malformed kid value", joseerror.ErrMalformedClaim)
-				}
-			}
-		}
-
-		if k, present := jwk["alg"]; present {
-			if sk, ok := k.(string); ok {
-				if sk != alg {
-					return nil, fmt.Errorf("%wjwk alg does not match value from jose header", joseerror.ErrNoKeyIdentifierMatch)
-				}
-			} else {
-				return nil, fmt.Errorf("%wreturned jwk has malformed alg value", joseerror.ErrMalformedClaim)
-			}
+		if err := checkMember(jwk, kid, alg, ignoreKeyUse); err != nil {
+			return nil, err
 		}
 
 		publicKey, err := PublicFromJwk(jwk)
@@ -43,7 +28,9 @@ func InlineJWK(jwk map[string]any, kid *string, alg string) model.Retriever {
 	}
 }
 
-func RetrieveJKU(jku string, fetch httputils.Fetch, kid *string, alg string) model.Retriever {
+// RetrieveJKU fetches the JWK Set a jku header names and returns the keys SelectKeys
+// takes from it. A set from which no key is selected reports ErrNoKeyIdentifierMatch.
+func RetrieveJKU(jku string, fetch httputils.Fetch, kid *string, alg string, ignoreKeyUse bool) model.Retriever {
 	return func() ([]crypto.PublicKey, error) {
 		response, err := fetch(jku, "jku")
 		if err != nil {
@@ -61,18 +48,7 @@ func RetrieveJKU(jku string, fetch httputils.Fetch, kid *string, alg string) mod
 			return nil, fmt.Errorf("%wfailed to unmarshal jku response: %w", joseerror.ErrApplicationError, err)
 		}
 
-		var keystore []crypto.PublicKey
-
-		filteredKeystore := SelectKeys(returnedKeystore, kid, &alg)
-
-		for _, jwk := range filteredKeystore.Keys {
-
-			publicKey, err := PublicFromJwk(jwk)
-			if err != nil {
-				continue
-			}
-			keystore = append(keystore, publicKey)
-		}
+		keystore := SelectKeys(returnedKeystore, kid, alg, ignoreKeyUse)
 		if len(keystore) == 0 {
 			return nil, fmt.Errorf("%wno usable jwk entry in the returned set matches the identifiers specified in the jose header", joseerror.ErrNoKeyIdentifierMatch)
 		}
@@ -147,39 +123,84 @@ func PublicFromJwk(jwk map[string]any) (crypto.PublicKey, error) {
 	}
 }
 
-func SelectKeys(keySet model.Jwks, kid, alg *string) model.Jwks { //todo: this can be refactored to be less verbose
-	var keys = keySet.Keys
+// SelectKeys returns the key of each member of keySet that can verify a JWS whose
+// header names kid and alg, in set order. Each member is judged on its own, so no
+// member admits or excludes another. A member is selected when:
+//   - this library can read it, since RFC 7517 section 5 says to ignore one it cannot;
+//   - its "kid" is absent or equals kid, which RFC 7515 section 4.1.4 calls a hint;
+//   - its "alg" is absent or equals alg, since RFC 8725 section 3.1 requires each key
+//     be used with exactly one algorithm;
+//   - unless ignoreKeyUse, its "use" is absent or "sig" and its "key_ops" is absent or
+//     includes "verify" (RFC 7517 sections 4.2 and 4.3).
+func SelectKeys(keySet model.Jwks, kid *string, alg string, ignoreKeyUse bool) []crypto.PublicKey {
+	var selected []crypto.PublicKey
+	for _, member := range keySet.Keys {
+		publicKey, err := PublicFromJwk(member)
+		if err != nil {
+			continue
+		}
+		if checkMember(member, kid, alg, ignoreKeyUse) != nil {
+			continue
+		}
+		selected = append(selected, publicKey)
+	}
+	return selected
+}
 
-	if kid != nil {
-		var kidMatches []map[string]any
+func checkMember(jwk map[string]any, kid *string, alg string, ignoreKeyUse bool) error {
+	if k, present := jwk["kid"]; present {
+		sk, ok := k.(string)
+		if !ok {
+			return fmt.Errorf("%wjwk has malformed kid value", joseerror.ErrMalformedClaim)
+		}
+		if kid != nil && sk != *kid {
+			return fmt.Errorf("%wjwk kid does not match value from jose header", joseerror.ErrNoKeyIdentifierMatch)
+		}
+	}
 
-		for _, k := range keys {
-			if jwkKid, found := k["kid"]; found {
-				if jwkKid == *kid {
-					kidMatches = append(kidMatches, k)
-				}
+	if a, present := jwk["alg"]; present {
+		sa, ok := a.(string)
+		if !ok {
+			return fmt.Errorf("%wjwk has malformed alg value", joseerror.ErrMalformedClaim)
+		}
+		if sa != alg {
+			return fmt.Errorf("%wjwk alg does not match value from jose header", joseerror.ErrNoKeyIdentifierMatch)
+		}
+	}
+
+	if ignoreKeyUse {
+		return nil
+	}
+
+	if u, present := jwk["use"]; present {
+		su, ok := u.(string)
+		if !ok {
+			return fmt.Errorf("%wjwk has malformed use value", joseerror.ErrMalformedClaim)
+		}
+		if su != "sig" {
+			return fmt.Errorf("%wjwk use %q is not sig", joseerror.ErrNoKeyIdentifierMatch, su)
+		}
+	}
+
+	if o, present := jwk["key_ops"]; present {
+		ops, ok := o.([]any)
+		if !ok {
+			return fmt.Errorf("%wjwk key_ops must be an array", joseerror.ErrMalformedClaim)
+		}
+		verify := false
+		for _, op := range ops {
+			sop, ok := op.(string)
+			if !ok {
+				return fmt.Errorf("%wjwk key_ops must hold strings", joseerror.ErrMalformedClaim)
+			}
+			if sop == "verify" {
+				verify = true
 			}
 		}
-		if len(kidMatches) > 0 { //if it has narrowed the list at all
-			keys = kidMatches
+		if !verify {
+			return fmt.Errorf("%wjwk key_ops do not include verify", joseerror.ErrNoKeyIdentifierMatch)
 		}
 	}
 
-	if alg != nil {
-		var algMatches []map[string]any
-		for _, k := range keys {
-			if jwkAlg, found := k["alg"]; found {
-				if jwkAlg == *alg {
-					algMatches = append(algMatches, k)
-				}
-			}
-		}
-		if len(algMatches) > 0 {
-			keys = algMatches
-		}
-	}
-
-	return model.Jwks{
-		Keys: keys,
-	}
+	return nil
 }

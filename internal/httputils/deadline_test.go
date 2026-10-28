@@ -17,7 +17,7 @@ const bound = 2 * time.Second
 func stallingServer(t *testing.T, sendHeaders bool) *httptest.Server {
 	t.Helper()
 	release := make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if sendHeaders {
 			w.WriteHeader(http.StatusOK)
 			if _, err := w.Write([]byte(`{"keys":[`)); err != nil {
@@ -56,10 +56,8 @@ func TestRetrieveResource_AStallingPeerIsCutOffByTheTimeout(t *testing.T) {
 	for name, sendHeaders := range tests {
 		t.Run(name, func(t *testing.T) {
 			server := stallingServer(t, sendHeaders)
-			client := &http.Client{}
-
 			start := time.Now()
-			err := fetchAll(context.Background(), client, 100*time.Millisecond, server.URL)
+			err := fetchAll(context.Background(), server.Client(), 100*time.Millisecond, server.URL)
 			elapsed := time.Since(start)
 
 			if err == nil {
@@ -78,7 +76,7 @@ func TestRetrieveResource_TheCallersContextCutsAFetchShort(t *testing.T) {
 	defer cancel()
 
 	start := time.Now()
-	err := fetchAll(ctx, &http.Client{}, time.Hour, server.URL)
+	err := fetchAll(ctx, server.Client(), time.Hour, server.URL)
 	elapsed := time.Since(start)
 
 	if err == nil {
@@ -115,7 +113,7 @@ func TestRetrieveResource_AFetchStoppedBeforeHeadersKeepsItsContextErrorClass(t 
 				time.AfterFunc(test.cancelAfter, cancel)
 			}
 
-			response, err := RetrieveResource(ctx, &http.Client{}, test.fetchTimeout, server.URL, "jku")
+			response, err := RetrieveResource(ctx, server.Client(), test.fetchTimeout, server.URL, "jku")
 			if err == nil {
 				_ = response.Body.Close()
 				t.Fatalf("[%s] a peer that never sends headers yields no resource", test.reference)
