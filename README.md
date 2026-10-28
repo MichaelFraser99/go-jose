@@ -102,7 +102,9 @@ The `Sign` method follows JOSE conventions per RFC 7518 rather than Go's `crypto
 - **JOSE mode** (`opts == nil` or `opts.HashFunc() == 0`): pass the raw JWS Signing Input — the signer hashes it internally using the algorithm's designated hash. This is the expected usage for JWS operations.
 - **Pre-hashed mode** (`opts.HashFunc() != 0`): pass an already-hashed digest — the signer skips internal hashing. This supports interoperability with callers following Go's `crypto.Signer` convention. ES, RS and PS implement this mode, and refuse a `Hash` that is not the algorithm's own with `ErrSigningError`.
 
-> **The HMAC algorithms do not implement pre-hashed mode.** HS256, HS384 and HS512 ignore `opts` entirely. HMAC is itself a keyed hash, so there is no internal hashing step to skip. Passing a pre-hashed digest to one produces a MAC over the digest rather than over the signing input, which no validator accepts, and `Sign` returns no error to say so. A wrong `Hash` is not refused either. Pass the signing input whole to an HS signer, and leave `opts` nil. Tracked as [#69](https://github.com/MichaelFraser99/go-jose/issues/69).
+> **The HMAC algorithms have no pre-hashed mode, and refuse one.** HMAC is itself a keyed hash, so there is no internal hashing step for a caller to skip. HS256, HS384 and HS512 refuse a non-zero `opts.HashFunc()` with `ErrSigningError`. Pass the signing input whole and leave `opts` nil.
+>
+> **This is a breaking change.** Earlier versions ignored `opts` and signed anyway, producing a MAC over the digest rather than over the signing input — a signature no validator accepts, with no error to say so. Any caller that was passing a non-nil `opts` to an HS signer was already producing signatures that did not verify; they now get an error at the call that causes it.
 
 A `SignerOpts` implementation is provided:
 ```go
