@@ -270,7 +270,7 @@ type jwt.Opts struct {
 }
 ```
 
-Give it the algorithm the signer was built for. It decides which hash `New` applies to the signing input. A signer from this library checks that hash. An HMAC signer returns an error for any algorithm that is not an HMAC algorithm. Any other signer returns an error for an algorithm whose hash differs from its own. In every other case the signer signs with its own algorithm. A `crypto.Signer` from elsewhere makes no such check. If the hash `Opts` names is not the one that signer uses, the signature verifies against nothing.
+Give it the algorithm the signer was built for. `New` hashes the signing input only for an ES, RS or PS algorithm. A signer from this library refuses a hash that is not its own, and an HMAC signer refuses any hash. With an HS or EdDSA algorithm, or none, `New` passes the input whole and the signer signs with its own algorithm. A `crypto.Signer` from elsewhere makes no such check. If the hash `Opts` names is not the one that signer uses, the signature verifies against nothing.
 
 The second validates a jwt and returns the decoded head and body:
 
