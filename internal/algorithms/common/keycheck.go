@@ -159,10 +159,10 @@ func CheckEd25519PublicKey(publicKey []byte, class error) error {
 	bigEndian[0] &= 0x7f
 	y := new(big.Int).SetBytes(bigEndian)
 	if y.Cmp(ed25519FieldPrime) >= 0 {
-		return fmt.Errorf("%wthe y of an Ed25519 public key is less than 2^255-19", class)
+		return fmt.Errorf("%wthe y of an Ed25519 public key must be less than 2^255-19", class)
 	}
 	if signBit && (y.Cmp(big.NewInt(1)) == 0 || y.Cmp(ed25519FieldPrimeMinusOne) == 0) {
-		return fmt.Errorf("%wan Ed25519 public key whose x is 0 has its sign bit clear", class)
+		return fmt.Errorf("%wan Ed25519 public key whose x is 0 must have its sign bit clear", class)
 	}
 	return nil
 }
