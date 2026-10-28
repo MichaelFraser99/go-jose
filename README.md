@@ -154,7 +154,7 @@ validator, err := jws.GetValidator(jwa.ES256, publicKey)
 
 // Construct a validator from a signer instance
 signer, err := jws.GetSigner(jwa.ES256, nil)
-validator, err := jws.GetValidator(signer.Alg(), signer.Public())
+signerValidator, err := jws.GetValidator(signer.Alg(), signer.Public())
 ```
 
 `jws.GetValidatorFromJwk` builds a validator from a jwk, decoded as a `map[string]any` rather than raw bytes. It reads the key by its `kty`, as `jwk.PublicFromJwk` does, so a jwk without a `kty`, or whose `kty` does not match its algorithm, is refused. RFC 8725 section 3.1 requires each key to be used with exactly one algorithm, so a jwk that carries an `alg` member is refused with `ErrInvalidPublicKey` unless that member is the algorithm you asked for. `EdDSA` and `Ed25519` count as the same algorithm here, because this library supports only the Ed25519 curve for `EdDSA`. It refuses the HMAC algorithms, because an `oct` key cannot be reached this way. The example below builds a validator for ES256:
@@ -369,7 +369,7 @@ jwkMap, err := jwk.PublicJwk(publicKey)
 // From a Signer. Note Public() is a call, and its result is already a pointer
 // for the EC and RSA algorithms
 signer, err := jws.GetSigner(jwa.ES256, nil)
-jwkMap, err := jwk.PublicJwk(signer.Public())
+signerJwkMap, err := jwk.PublicJwk(signer.Public())
 ```
 
 Two methods convert a jwk back into a key:
@@ -440,7 +440,7 @@ The second validates a jwt and returns the decoded head and body:
 func jwt.Validate(ctx context.Context, token string, outOfBoundsPublicKey model.Retriever, opts *model.JoseOptions) (head, body map[string]any, err error)
 ```
 
-The retriever supplies key material of your own. Pass nil only when you have turned on `UseTokenProvidedKeys`, so the token's header names the key. `model.JoseOptions` carries everything described under [Keys a token carries](#keys-a-token-carries), and may be nil for the defaults.
+The retriever supplies key material of your own. Pass nil only when a key the token's header names can verify it: when you have turned on `UseTokenProvidedKeys` for `jwk` and `jku`, or set `X509Roots` for `x5c` and `x5u`. `model.JoseOptions` carries everything described under [Keys a token carries](#keys-a-token-carries), and may be nil for the defaults.
 
 `Validate` checks each registered claim that is present:
 
