@@ -66,7 +66,7 @@ func TestRetrieveJKU_AMemberThatCannotBeReadIsSkipped(t *testing.T) {
 			server := serveKeySet(t, unreadable, usable)
 
 			kid := "shared"
-			keys, err := RetrieveJKU(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0), &kid, "RS256")()
+			keys, err := RetrieveJKU(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0), &kid, "RS256", false)()
 			if err != nil {
 				t.Fatalf("[RFC 7517 5] implementations SHOULD ignore a jwk they cannot use, so one unreadable member must not cost the set its usable key, got %v", err)
 			}
@@ -88,7 +88,7 @@ func TestRetrieveJKU_ASetWithNoUsableMemberMatchesNoKey(t *testing.T) {
 	server := serveKeySet(t, members...)
 
 	kid := "shared"
-	keys, err := RetrieveJKU(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0), &kid, "RS256")()
+	keys, err := RetrieveJKU(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0), &kid, "RS256", false)()
 	if err == nil {
 		t.Fatalf("[RFC 7517 5] a set whose every member is ignored yields no key, got %d keys", len(keys))
 	}
