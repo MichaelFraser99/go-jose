@@ -72,7 +72,7 @@ func Test_validateCertificateChain(t *testing.T) {
 		},
 		"an entry that decodes to no certificate": {
 			certificates: []string{""},
-			errMsg:       "entry 0 of the chain is not exactly one certificate: x509: malformed certificate",
+			errMsg:       "entry 0 of the chain is not exactly one certificate: \"x509: malformed certificate\"",
 			errTypes:     []error{joseerror.ErrMalformedClaim},
 		},
 		"a chain whose links do not join still parses": {
@@ -517,6 +517,7 @@ func TestRetrieveX5U_ReadsThePemEncodingTheClauseRequires(t *testing.T) {
 		"DER, which some servers send anyway":     {reference: "RFC 7515 4.1.5", body: derChain(2, 1, 0), accept: true},
 		"PEM carrying no certificate block":       {reference: "RFC 7515 4.1.5", body: []byte("-----BEGIN PRIVATE KEY-----\nAA==\n-----END PRIVATE KEY-----\n")},
 		"a body that is neither":                  {reference: "RFC 7515 4.1.5", body: []byte("not a certificate at all")},
+		"an empty body":                           {reference: "RFC 7515 4.1.5", body: []byte{}},
 	}
 
 	for name, tc := range tests {
