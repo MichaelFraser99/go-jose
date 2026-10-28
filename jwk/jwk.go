@@ -60,3 +60,10 @@ func PrivateJwk(privateKey crypto.PrivateKey) (*map[string]any, error) {
 	}
 	return &m, nil
 }
+
+// Thumbprint computes the RFC 7638 JWK SHA-256 Thumbprint of a jwk, base64url
+// encoded. It is the "kid" PublicJwk and PrivateJwk give a key, and the
+// thumbprint of a private jwk is that of its public key.
+func Thumbprint(jwk map[string]any) (string, error) {
+	return common.Thumbprint(jwk)
+}
