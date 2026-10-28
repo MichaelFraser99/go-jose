@@ -27,4 +27,5 @@ var (
 	ErrNotYetValid          = errors.New("not yet valid: ")
 	ErrAudienceMismatch     = errors.New("audience mismatch: ")
 	ErrInvalidOptions       = errors.New("invalid options: ")
+	ErrTooManyKeys          = errors.New("too many keys: ")
 )

@@ -201,12 +201,14 @@ Both apply the same rules to the token:
 - Each segment must be base64url exactly as RFC 7515 section 2 defines it. A segment holding a line break, whitespace, `=` padding or any other character outside `A-Z a-z 0-9 - _` is refused, as section 5.2 steps 2, 6 and 7 require. A final character whose unused low bits are not zero is refused too, as RFC 4648 section 3.5 permits. So each segment has exactly one accepted encoding.
 - The protected header must be a UTF-8 JSON object, as section 5.2 step 3 and RFC 8725 section 3.7 require. `VerifyCompactSerialization` holds the payload to the same rule.
 - A JSON string in the protected header must not hold an unpaired UTF-16 surrogate escape, such as `"\ud800"`. RFC 8259 section 8.2 calls the behaviour of a receiver of such a string unpredictable. Go would turn it into U+FFFD, so different signed bytes would give the same value. `VerifyCompactSerialization` holds the payload to the same rule.
-
-One message can still have more than one valid token. ECDSA signatures are malleable: for an `ES256`, `ES384` or `ES512` token, anyone can replace the signature's `S` with `n - S` and get a second token that verifies. This needs no key. So do not key a replay or deduplication cache on the raw token string. Key it on a claim such as `jti` instead.
 - An `alg` this library has no validator for is refused with `ErrUnsupportedAlgorithm` before any key is sought, so no `jku` or `x5u` is fetched for it.
 - A `b64` header of `false` is refused with `ErrMissingCriticalClaim`, even when you name `b64` in `UnderstoodCriticalHeaders`. RFC 7797 section 3 says such a payload is not base64url-encoded, and this library always decodes it.
 
+One message can still have more than one valid token. ECDSA signatures are malleable: for an `ES256`, `ES384` or `ES512` token, anyone can replace the signature's `S` with `n - S` and get a second token that verifies. This needs no key. So do not key a replay or deduplication cache on the raw token string. Key it on a claim such as `jti` instead.
+
 `VerifyCompactSerialization` refuses a nested JWT with `ErrMalformedToken`, before any key is sought. RFC 7519 section 5.2 marks one with a `cty` of `JWT`, compared as RFC 7515 section 4.1.10 describes: case-insensitively, with `application/` treated as prepended. Media-type parameters are ignored, so `application/jwt; charset=utf-8` is a nested JWT too. `Verify` does not look at `cty`, because section 4.1.10 says JWS implementations ignore it. To unwrap a nested JWT yourself, call `Verify` and verify the payload it returns.
+
+Both try the keys from every source until one verifies the signature, up to `JoseOptions.MaxKeysTried`, which is 100 when unset. RFC 7517 section 4.5 does not require a `kid` to be unique, so a key set a peer publishes can hold thousands of keys under one `kid`, and each costs a signature verification. A token that would need more keys than the limit is refused with `ErrTooManyKeys`, not `ErrInvalidSignature`, so you can tell an oversized key set from a forgery. Only a key that a validator can be built from for the token's `alg` counts. The limit covers the keys your retriever returns too.
 
 ## Keys a token carries
 
@@ -491,6 +493,7 @@ Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 | `ErrNotYetValid` | The token's `nbf` or `iat` is after the current time, allowing for `ClockSkewLeeway` |
 | `ErrAudienceMismatch` | `JoseOptions.ExpectedAudience` is set and the token's `aud` names none of its values |
 | `ErrInvalidOptions` | The options passed are themselves wrong, whatever the token. `JoseOptions.ExpectedAudience` holding an empty string is one case |
+| `ErrTooManyKeys` | The signature did not verify under as many keys as `JoseOptions.MaxKeysTried` allows, and more keys remained |
 
 Each sentinel carries a prefix terminated by `": "`, so wrap one with `%w` immediately followed by the rest of the message and no space:
 
@@ -549,6 +552,7 @@ Every change below is a compile error or a silent behaviour change for a consume
 - `jwt.New` refuses `EdDSA` with `ErrUnsupportedAlgorithm`, whether `Opts.Algorithm` or the head's `alg` names it. v0.10.0 signed an `EdDSA` token with an `ed25519.PrivateKey`. Name `jwa.Ed25519` instead. A verifier that does not yet know `Ed25519` will refuse the token, so make sure that your verifiers support it first.
 - A token whose `cty` is `JWT` is refused by `jws.VerifyCompactSerialization` and `jwt.Validate` with a message naming nested JWTs. Media-type parameters on the `cty` are ignored.
 - Header errors that echo a token value now use double quotes, not single quotes, and cut the value at 64 characters. Match errors with `errors.Is`, not their text.
+- A token's signature is checked against at most `JoseOptions.MaxKeysTried` keys, 100 by default, across every source. A token that would need more is refused with the new `ErrTooManyKeys`. If your retriever returns more than 100 keys that suit one `alg`, raise the limit.
 - `jws.Verify` is new. It returns the payload as octets, for a JWS whose payload is not a JSON object.
 - `jwt.New` refuses a head whose `alg` names a different algorithm from the one that signs, and an `alg` that is not a string, with `ErrUnsupportedAlgorithm`. It also refuses `Opts.Algorithm` naming a different algorithm from a signer of this library. Earlier versions wrote the caller's `alg` into the header unchecked.
 - `jwt.New` with a `crypto.Signer` from outside this library needs an algorithm, from `Opts.Algorithm` or the head's `alg`, and a key that suits it. Earlier versions emitted a token with no `alg`. With a standard library ECDSA or RSA key, they also emitted an ES or PS signature no verifier would accept.

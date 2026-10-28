@@ -33,6 +33,8 @@ func VerifyCompactSerialization(ctx context.Context, compactSerialization string
 	return protectedHeader, body, err
 }
 
+const defaultMaxKeysTried = 100
+
 func verify(ctx context.Context, compactSerialization string, outOfBoundsPublicKey model.Retriever, opts *model.JoseOptions, payloadIsJSONObject bool) (protectedHeader map[string]any, payload []byte, body map[string]any, err error) {
 	components := strings.Split(compactSerialization, ".")
 	if len(components) != 3 {
@@ -94,6 +96,12 @@ func verify(ctx context.Context, compactSerialization string, outOfBoundsPublicK
 
 	algorithm := jwa.GetAlgorithm(protectedHeader["alg"].(string)) //validated to exist and be of correct type earlier
 
+	maxKeysTried := defaultMaxKeysTried
+	if opts != nil && opts.MaxKeysTried > 0 {
+		maxKeysTried = opts.MaxKeysTried
+	}
+	keysTried := 0
+
 	var noKeyIdentifierErrors []error
 	for _, retriever := range jwkRetrievers {
 		var publicKeys []crypto.PublicKey
@@ -113,6 +121,10 @@ func verify(ctx context.Context, compactSerialization string, outOfBoundsPublicK
 			if err != nil {
 				continue //ignore public key invalid for given algorithm
 			}
+			if keysTried == maxKeysTried {
+				return nil, nil, nil, fmt.Errorf("%wthe signature did not verify under the %d keys JoseOptions.MaxKeysTried allows", joseerror.ErrTooManyKeys, maxKeysTried)
+			}
+			keysTried++
 
 			valid, err := validator.ValidateSignature([]byte(fmt.Sprintf("%s.%s", components[0], components[1])), signature)
 			if err != nil {
