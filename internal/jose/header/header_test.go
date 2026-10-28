@@ -80,6 +80,7 @@ func TestValidateHeader(t *testing.T) {
 	jwkKeysArray = append(jwkKeysArray, rsaKey.Public()) //twice - once for RS and once for PS entry
 	keySet.Keys = append(keySet.Keys, rsaJwk)
 	keySet.Keys = append(keySet.Keys, psJwk)
+	rs256JkuKeys := jwkKeysArray[:len(jwkKeysArray)-1]
 
 	m := http.NewServeMux()
 	m.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
@@ -137,7 +138,7 @@ func TestValidateHeader(t *testing.T) {
 			},
 			client: trustingClient,
 			retrievedKeys: [][]crypto.PublicKey{
-				jwkKeysArray,
+				rs256JkuKeys,
 			},
 		},
 		"happy path - jku with specified kid": {
@@ -148,7 +149,7 @@ func TestValidateHeader(t *testing.T) {
 			},
 			client: trustingClient,
 			retrievedKeys: [][]crypto.PublicKey{
-				{rsaKey.Public(), rsaKey.Public()}, //twice because we include one for RS and one for PS
+				{rsaKey.Public()},
 			},
 		},
 		"happy path - jku with kid and specified alg": {
@@ -159,7 +160,7 @@ func TestValidateHeader(t *testing.T) {
 			},
 			client: trustingClient,
 			retrievedKeys: [][]crypto.PublicKey{
-				{rsaKey.Public()}, //once as we include the alg claim specifically in the PS jwk
+				{rsaKey.Public(), rsaKey.Public()},
 			},
 		},
 		"happy path - jwk & jku": {
@@ -171,7 +172,7 @@ func TestValidateHeader(t *testing.T) {
 			client: trustingClient,
 			retrievedKeys: [][]crypto.PublicKey{
 				{rsaKey.Public()},
-				jwkKeysArray,
+				rs256JkuKeys,
 			},
 		},
 		"happy path - x5c just signing certificate": {
@@ -256,7 +257,7 @@ func TestValidateHeader(t *testing.T) {
 			retrievedKeys: [][]crypto.PublicKey{
 				{rsaKey.Public()},
 				{certificateKeys[4]},
-				jwkKeysArray,
+				rs256JkuKeys,
 				{certificateKeys[4]},
 			},
 		},
@@ -340,7 +341,6 @@ func generateCertificateChain(t *testing.T, numCerts int) ([][]byte, []crypto.Pu
 		NotBefore:             time.Now(),
 		NotAfter:              time.Now().AddDate(10, 0, 0),
 		IsCA:                  true,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		BasicConstraintsValid: true,
 	}
@@ -380,7 +380,6 @@ func generateCertificateChain(t *testing.T, numCerts int) ([][]byte, []crypto.Pu
 			NotBefore:             time.Now(),
 			NotAfter:              time.Now().AddDate(1, 0, 0),
 			IsCA:                  i != numCerts-1,
-			ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
 			KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 			BasicConstraintsValid: true,
 		}

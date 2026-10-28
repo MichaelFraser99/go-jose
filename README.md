@@ -202,11 +202,25 @@ head, body, err := jwt.Validate(ctx, token, nil, &model.JoseOptions{
 
 Both URLs come from the header of the token being verified, so this library makes an outbound request to an address a peer chose, before the signature is checked. Give the client a transport that rejects the destinations your deployment will not allow, such as private, loopback, link-local and other reserved ranges. The body is capped at 4 MiB whatever client you supply.
 
+Every request a fetch makes must use `https`, including each redirect hop. RFC 7515 sections 4.1.2 and 4.1.5 say an HTTP GET to retrieve the resource MUST use TLS, so a redirect to plain `http` is refused before the request is sent, whatever transport you supply. Your client's own redirect policy still applies. When it sets no `CheckRedirect`, Go's default stops after 10 redirects.
+
 Each fetch is also bounded in time, provided your client's transport honours the request's context. `JoseOptions.FetchTimeout` covers the whole fetch, from sending the request to reading the last byte of the body. When it is zero, the limit is 10 seconds. A deadline or cancellation on the `ctx` you pass to `jwt.Validate` or `jws.VerifyCompactSerialization` also stops the fetch. The limit applies to each fetch, so a token naming both `jku` and `x5u` can take two of them. Use `ctx` to bound the whole call.
 
 A fetch stopped by either limit returns an error that matches `ErrApplicationError` and `context.DeadlineExceeded`. One stopped by cancelling `ctx` matches `context.Canceled`.
 
-With no client, `jku` and `x5u` contribute no key. The members of a `jku` set are first narrowed by the token's `kid` and `alg`. Then any remaining member this library cannot read is skipped, as RFC 7517 section 5 recommends, and the rest are used. Because narrowing comes first, an unreadable member can still match the `kid` or `alg` and so keep a readable member out. A set whose `keys` array holds a number, string, boolean or array is not a JWK Set, so the whole set is refused. `jku` must be `https`, as RFC 7515 section 4.1.2 requires integrity protection, and an `x5u` resource is read as the PEM encoding section 4.1.5 requires. A server that sends raw DER instead is still read: a body that parses as DER certificates is taken as exactly those certificates, and is never searched for PEM text. Any other body is read as PEM text, so a body whose explanatory text is not valid UTF-8 is refused.
+With no client, `jku` and `x5u` contribute no key. Each member of a `jku` set is judged on its own, as [Which jwk and jku keys are used](#which-jwk-and-jku-keys-are-used) describes, and a member this library cannot read is skipped, as RFC 7517 section 5 recommends. A document that is not a JWK Set is refused as a whole: one without a `keys` member, one whose `keys` is null or not an array, and one whose `keys` array holds a number, string, boolean or array. `jku` must be `https`, as RFC 7515 section 4.1.2 requires integrity protection, and an `x5u` resource is read as the PEM encoding section 4.1.5 requires. A server that sends raw DER instead is still read: a body that parses as DER certificates is taken as exactly those certificates, and is never searched for PEM text. Any other body is read as PEM text, so a body whose explanatory text is not valid UTF-8 is refused.
+
+### Which jwk and jku keys are used
+
+A key from a `jwk` header, or a member of a `jku` set, verifies the token only when all of these hold:
+
+- Its `kid` is absent or equals the header's `kid`. RFC 7515 section 4.1.4 calls the header's `kid` a hint, and RFC 7517 section 4.5 makes a jwk's `kid` optional, so a key that names no `kid` stays a candidate.
+- Its `alg` is absent or equals the header's `alg`. RFC 8725 section 3.1 says "each key MUST be used with exactly one algorithm". A key that names no `alg` stays a candidate, since RFC 7517 section 4.4 makes `alg` optional. Such a key verifies under any algorithm its key type allows, so pin `AllowedSigningAlgorithms` to bind it to one.
+- Its `use` is absent or `"sig"`, and its `key_ops` is absent or includes `"verify"`. RFC 7517 sections 4.2 and 4.3 let a publisher mark a key as not for verifying signatures.
+
+A `jku` set is never used whole because nothing in it matched. When no member qualifies, the set contributes no key and the `jku` retriever's error matches `ErrNoKeyIdentifierMatch`. `VerifyCompactSerialization` then tries the next key source, and if no key verifies it reports `ErrInvalidSignature`, naming the retriever's error only in its message. A `kid`, `alg`, `use` or `key_ops` of the wrong JSON type disqualifies a `jku` member, and refuses an inline `jwk` with `ErrMalformedClaim`, whatever the header holds.
+
+No RFC makes `use` or `key_ops` a requirement: section 4.3 leaves it to each application to say which, if either, it honours. This library honours both by default. Set `JoseOptions.IgnoreKeyUse` to skip that check. It never relaxes the `kid` and `alg` rules.
 
 ### Stating what you expect of a header
 
@@ -248,9 +262,23 @@ head, body, err := jwt.Validate(ctx, token, nil, &model.JoseOptions{X509Roots: r
 
 With no `X509Roots` configured, a token's `x5c` and `x5u` headers contribute no key. They are not an error — section 4.1.6 makes use of the header OPTIONAL — so the token still verifies if another key source does, and fails with `no cyptographic material provided for signature validation` if none does.
 
-A malformed `x5c` is refused whether or not roots are configured, because its shape is a property of the claim rather than of your trust configuration. An array that is not an array of strings, an empty array, or an entry that is not exactly one base64-encoded DER certificate is `ErrMalformedClaim`.
+A malformed `x5c` is refused whether or not roots are configured, because its shape is a property of the claim rather than of your trust configuration. An array that is not an array of strings, an empty array, or an entry that is not exactly one base64-encoded DER certificate is `ErrMalformedClaim`. Section 4.1.6 names the base64 of RFC 4648 section 4, and RFC 4648 section 3.3 says a decoder MUST reject characters outside the alphabet. So an entry holding a line break is refused, as is one whose pad bits are not zero. An `x5u` body is PEM, where line breaks are part of the format, so this does not apply to it.
 
 The signing key is taken from the first certificate, and that certificate is the one validated against your roots, as section 4.1.6 requires. The algorithm the issuer used to sign that certificate is not compared with the token's `alg`. An ES256 key in a certificate issued by an RSA root is usable.
+
+That first certificate must also be one whose key may verify a signature. `x5c` and `x5u` get the same checks:
+
+- **Key usage.** When the certificate has a key usage extension, it must assert `digitalSignature` or `nonRepudiation` (`x509.KeyUsageContentCommitment`). RFC 5280 section 4.2.1.3 defines both as the bits for a key that verifies signatures, and requires at least one bit to be set when the extension appears, so an extension with no bit set is refused. A CA certificate that asserts only `keyCertSign` is refused, as is a key agreement certificate.
+- **Extended key usage.** RFC 5280 section 4.2.1.12 says that when the extension is present, the certificate "MUST only be used for one of the purposes indicated". No purpose is registered for JWS, so you name the ones you accept in `JoseOptions.X509ExtKeyUsages`. When it is unset, only the signing certificate is checked: if its extension is present, it must name `anyExtendedKeyUsage`. When it is set, it is passed to Go's chain verification, which nests extended key usage, so the signing certificate and every CA above it must permit one of those purposes. A certificate with no extended key usage extension is accepted either way. A signing certificate whose extension names no purpose is refused in every case, because the section defines it as a sequence of at least one.
+
+```go
+head, body, err := jwt.Validate(ctx, token, nil, &model.JoseOptions{
+    X509Roots:        roots,
+    X509ExtKeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageCodeSigning},
+})
+```
+
+Naming `x509.ExtKeyUsageAny` turns the purpose check off, as it does in Go's `x509.VerifyOptions`. A purpose Go has no constant for, such as a private OID, cannot be named, so a certificate restricted to one is accepted only with the check off. A refusal for either usage matches `ErrNoKeyIdentifierMatch`, as a chain that does not validate does.
 
 Configuring roots does not make `jwk` or `jku` usable. Nothing anchors those keys, so they need `UseTokenProvidedKeys`, as described under [Keys a token carries](#keys-a-token-carries).
 
@@ -307,6 +335,12 @@ An `OKP` jwk is read only when its `crv` is `Ed25519`, the one OKP subtype this 
 
 **This is a breaking change for OKP keys.** Earlier versions ignored the value of `crv`, so an `X25519` or `Ed448` key was returned as an Ed25519 key. They also accepted any length of `x` and `d`, and did not compare `x` with `d`. A key that those versions read can now be refused.
 
+### Key sets
+
+`model.Jwks` holds a JWK Set. Decoding JSON into it follows RFC 7517 section 5: the document must be an object with a `keys` member holding an array of JWKs. Anything else is refused with `ErrKeystoreError`, including a missing `keys`, `"keys": null` and a document that is itself `null`. A field that may hold no set should be a `*model.Jwks`, which `null` leaves nil. The member is found by its exact name, `keys`, as RFC 7515 section 5.3 compares names; `KEYS`, `Keys` and other spellings are ignored like any unknown member.
+
+`Jwks.RetrieveByKeyID` returns every key that carries the given `kid`, in set order, because RFC 7517 section 4.5 does not make a `kid` unique. It returns an error only when no key carries it.
+
 ## JWTs
 This library includes two methods for jwt handling
 
@@ -353,7 +387,7 @@ Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 | `ErrMissingClaim` | A required claim is absent |
 | `ErrMissingCriticalClaim` | A header named in `crit` is absent, or names an extension this library does not understand |
 | `ErrNoKeyIdentifierMatch` | No key could be selected. The `kid` matches nothing, a `jku` set holds no usable key that matches the header, a certificate chain does not reach a configured root, or an `x5t` thumbprint does not match the chain |
-| `ErrKeystoreError` | A `model.Jwks` lookup or addition failed, or the configuration needed to use a key source is absent, such as `X509Roots` for a certificate chain |
+| `ErrKeystoreError` | A `model.Jwks` lookup or addition failed, a document decoded into `model.Jwks` is not a JWK Set, or the configuration needed to use a key source is absent, such as `X509Roots` for a certificate chain |
 | `ErrApplicationError` | Key material a header named could not be obtained, decoded or used. Covers a failed `jku` or `x5u` fetch, a local decode of what one returned, and an inline `jwk` of a key type or curve this library does not support. A fetch that ran out of time also matches `context.DeadlineExceeded`, and one cancelled through `ctx` matches `context.Canceled` |
 | `ErrMalformedToken` | The token is not a well formed JOSE object |
 
@@ -367,6 +401,25 @@ That reads `invalid private key: should be an instance of *ecdsa.PrivateKey`, an
 
 ## Upgrading from 0.10.x
 
+Every change below is a compile error or a silent behaviour change for a consumer of v0.10.0.
+
+- `jwt.Validate` and `jws.VerifyCompactSerialization` take a `context.Context` first. It bounds any `jku` or `x5u` fetch.
+- `model.Jwks.RetrieveByKeyID` returns `[]map[string]any`, every key carrying the `kid` in set order, not one `map[string]any`. It returns an error only when no key carries the `kid`. To keep the old exactly-one meaning, check `len(keys) == 1` and use `keys[0]`.
+- Every error sentinel's message now ends in `": "`, so it composes with the text that wraps it. A match on an error string breaks; match with `errors.Is` instead.
+- An HMAC secret must be at least the hash output size.
+- An Ed25519 jwk now carries a `kid`.
+- An `OKP` jwk is read only when it is a well-formed Ed25519 key.
+- `PublicJwk` and `PrivateJwk` refuse a key they cannot encode, rather than panic or produce a malformed jwk.
+- `JoseOptions.UseTokenProvidedKeys` is off unless set, including when `opts` is `nil`, and now covers only `jwk` and `jku`. `x5c` and `x5u` are used when `X509Roots` is set.
+- A `crit` header naming an extension you have not declared in `UnderstoodCriticalHeaders` is refused.
+- `x5c` and `x5u` contribute no key unless `JoseOptions.X509Roots` is configured.
+- `jku` and `x5u` can now supply a key. They are fetched with the client you set in `JoseOptions.HttpClient`, which v0.10.0 did not have: it passed no client, so neither header could ever be fetched. With no client, both still contribute no key.
+- A `jku` set is no longer used whole when no member matches the header's `kid` or `alg`. A member whose `kid` or `alg` differs from the header's is never used, and one that names no `alg` is no longer dropped beside one that does. See [Which jwk and jku keys are used](#which-jwk-and-jku-keys-are-used).
+- A `jwk` or `jku` key whose `use` is present and not `"sig"`, or whose `key_ops` is present and lacks `"verify"`, no longer verifies a token. Set `JoseOptions.IgnoreKeyUse` to accept it.
+- Decoding JSON into `model.Jwks` refuses a document with no `keys` member, with `"keys": null`, or that is `null`, and reads `keys` only by its exact name. See [Key sets](#key-sets).
+- An `x5c` or `x5u` signing certificate whose extended key usage extension is present must name `anyExtendedKeyUsage`, or a purpose you list in the new `JoseOptions.X509ExtKeyUsages`. Previously the extension was not checked. If your issuer gives signing certificates `clientAuth`, `serverAuth`, `codeSigning` or another purpose, list it, for example `X509ExtKeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}`. See [x5c and x5u need trust anchors](#x5c-and-x5u-need-trust-anchors).
+- An `x5c` or `x5u` signing certificate whose key usage extension asserts neither `digitalSignature` nor `nonRepudiation` is refused. This includes a CA certificate that asserts only `keyCertSign`.
+- An `x5c` entry holding a line break, or whose base64 pad bits are not zero, is refused as `ErrMalformedClaim`.
 - RS and PS signers and validators refuse a modulus under 2048 bits or over 8192 bits, wherever the key comes from. `GetSigner` refuses an `Opts.BitSize` over 8192. An `Opts.BitSize` under 2048 is now refused with `ErrInvalidPrivateKey`, so its message gains that error's `invalid private key: ` prefix.
 - RS and PS signers and validators refuse a public exponent that is even, under 3, or over 2^31 - 1, with `ErrInvalidPrivateKey` or `ErrInvalidPublicKey`.
 - An ES validator refuses a key on another curve, so `GetValidator(jwa.ES384, p256Key)` now fails with `ErrInvalidPublicKey`.
@@ -377,7 +430,7 @@ That reads `invalid private key: should be an instance of *ecdsa.PrivateKey`, an
 
 ## Upgrading from the pre-0.10 line
 
-Every change below is a compile error or a silent behaviour change for a consumer of the previous release.
+Every change below is a compile error or a silent behaviour change for a consumer of the release before v0.10.0. Apply [Upgrading from 0.10.x](#upgrading-from-010x) as well.
 
 ### Packages moved
 
@@ -389,9 +442,7 @@ Every change below is a compile error or a silent behaviour change for a consume
 
 ### Error sentinels
 
-`ErrSigning` is now `ErrSigningError`. Eight sentinels are new.
-
-**Every sentinel message now ends in `": "`,** so a sentinel composes with the text that wraps it into one sentence. If you match on an error string, that match breaks. Match with `errors.Is` instead:
+`ErrSigning` is now `ErrSigningError`. Eight sentinels are new. Match a sentinel with `errors.Is`:
 
 ```go
 if errors.Is(err, joseerror.ErrInvalidSignature) {
@@ -403,20 +454,13 @@ if errors.Is(err, joseerror.ErrInvalidSignature) {
 | --- | --- |
 | `jwa.GetAlgorithm` | Returns `Algorithm`, not `*Algorithm`. Returns `jwa.Unknown` rather than nil for an unknown name, and the comparison is now case sensitive |
 | `jwt.New` | Takes a fourth parameter, `jwt.Opts`, naming the algorithm to sign with |
-| `jwt.Validate` | Takes `(ctx context.Context, token string, retriever model.Retriever, opts *model.JoseOptions)`. The `publicKey` parameter is gone: supply key material through the retriever, or turn on `UseTokenProvidedKeys` to use what the token's header names |
-| `jws.VerifyCompactSerialization` | Takes a `context.Context` first. It bounds any `jku` or `x5u` fetch |
+| `jwt.Validate` | Takes a `model.Retriever` and `*model.JoseOptions` after the token. The `publicKey` parameter is gone: supply key material through the retriever, or turn on `UseTokenProvidedKeys` to use what the token's header names |
 | `jws.GetValidatorFromJwk` | Takes `map[string]any`, not `[]byte` |
 | `jwk.PublicJwk`, `jwk.PrivateJwk` | Return `*map[string]any`, not `map[string]string` |
 
 ### Behaviour changes documented elsewhere in this file
 
-- An HMAC secret must be at least the hash output size, and a validator for an HMAC algorithm can only be built from a signer.
-- An Ed25519 jwk now carries a `kid`.
-- An `OKP` jwk is read only when it is a well-formed Ed25519 key.
-- `PublicJwk` and `PrivateJwk` refuse a key they cannot encode, rather than panic or produce a malformed jwk.
-- `JoseOptions.UseTokenProvidedKeys` is off unless set, including when `opts` is `nil`, and now covers only `jwk` and `jku`. `x5c` and `x5u` are used when `X509Roots` is set.
-- A `crit` header naming an extension you have not declared in `UnderstoodCriticalHeaders` is refused.
-- `x5c` and `x5u` contribute no key unless `JoseOptions.X509Roots` is configured.
+- A validator for an HMAC algorithm can only be built from a signer.
 
 ### Not implemented
 

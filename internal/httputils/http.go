@@ -63,10 +63,31 @@ func timeoutOrDefault(timeout time.Duration) time.Duration {
 	return timeout
 }
 
+var errNotTLS = errors.New("refusing a request that does not use TLS")
+
+type httpsOnly struct {
+	next http.RoundTripper
+}
+
+func (h httpsOnly) RoundTrip(request *http.Request) (*http.Response, error) {
+	if request.URL.Scheme != "https" {
+		return nil, errNotTLS
+	}
+	next := h.next
+	if next == nil {
+		next = http.DefaultTransport
+	}
+	return next.RoundTrip(request)
+}
+
+// RetrieveResource fetches url through a copy of client whose transport refuses any
+// hop that is not https, keeping the client's own transport and redirect policy.
 func RetrieveResource(ctx context.Context, client *http.Client, timeout time.Duration, url, alias string) (*http.Response, error) {
 	if client == nil {
 		return nil, fmt.Errorf("%w%s is specified but no client exists", joseerror.ErrApplicationError, alias)
 	}
+	tlsOnly := *client
+	tlsOnly.Transport = httpsOnly{next: client.Transport}
 
 	ctx, cancel := context.WithTimeout(ctx, timeoutOrDefault(timeout))
 
@@ -76,7 +97,7 @@ func RetrieveResource(ctx context.Context, client *http.Client, timeout time.Dur
 		return nil, fmt.Errorf("%wfailed to create request to specified %s: %w", joseerror.ErrApplicationError, alias, err)
 	}
 
-	response, err := client.Do(req)
+	response, err := tlsOnly.Do(req)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("%wfailed to retrieve %s: %w", joseerror.ErrApplicationError, alias, err)

@@ -139,7 +139,6 @@ func generateCertificateChain(t *testing.T, numCerts int) ([][]byte, error) {
 		NotBefore:             time.Now(),
 		NotAfter:              time.Now().AddDate(10, 0, 0),
 		IsCA:                  true,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		BasicConstraintsValid: true,
 	}
@@ -178,7 +177,6 @@ func generateCertificateChain(t *testing.T, numCerts int) ([][]byte, error) {
 			NotBefore:             time.Now(),
 			NotAfter:              time.Now().AddDate(1, 0, 0),
 			IsCA:                  i != numCerts-1,
-			ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
 			KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 			BasicConstraintsValid: true,
 		}
@@ -227,7 +225,7 @@ func TestInlineCertificate_AcceptsTheThumbprintTheRFCDefines(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			keys, err := InlineCertificate([]string{base64.StdEncoding.EncodeToString(cert)}, tc.x5t, tc.x5ts256, poolOf(t, cert))()
+			keys, err := InlineCertificate([]string{base64.StdEncoding.EncodeToString(cert)}, tc.x5t, tc.x5ts256, poolOf(t, cert), nil)()
 			if err != nil {
 				t.Fatalf("[%s] a header carrying the thumbprint this clause defines must be accepted, got %v", tc.reference, err)
 			}
@@ -270,7 +268,7 @@ func TestInlineCertificate_RefusesAThumbprintThatDoesNotMatch(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			keys, err := InlineCertificate([]string{base64.StdEncoding.EncodeToString(cert)}, tc.x5t, tc.x5ts256, poolOf(t, cert))()
+			keys, err := InlineCertificate([]string{base64.StdEncoding.EncodeToString(cert)}, tc.x5t, tc.x5ts256, poolOf(t, cert), nil)()
 			if err == nil {
 				t.Fatalf("[%s] a thumbprint that is not this certificate's must be refused, got %d keys", tc.reference, len(keys))
 			}
@@ -293,7 +291,7 @@ func TestRetrieveX5U_HoldsTheCertificateToItsThumbprint(t *testing.T) {
 	correctX5t, correctX5tS256 := x5tPair(t, cert)
 	otherX5t, otherX5tS256 := x5tPair(t, other)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		if _, err := w.Write(cert); err != nil {
 			t.Errorf("failed to serve the certificate: %v", err)
 		}
@@ -317,7 +315,7 @@ func TestRetrieveX5U_HoldsTheCertificateToItsThumbprint(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			keys, err := RetrieveX5U(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0), tc.x5t, tc.x5ts256, poolOf(t, cert))()
+			keys, err := RetrieveX5U(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0), tc.x5t, tc.x5ts256, poolOf(t, cert), nil)()
 			if tc.accept {
 				if err != nil {
 					t.Fatalf("[%s] the certificate this URL serves carries that thumbprint, so it must be accepted, got %v", tc.reference, err)
@@ -401,7 +399,7 @@ func TestInlineCertificate_AChainIsValidatedAgainstTheConfiguredRootsNotItself(t
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			keys, err := InlineCertificate(tc.chain, nil, nil, tc.roots)()
+			keys, err := InlineCertificate(tc.chain, nil, nil, tc.roots, nil)()
 			if tc.accept {
 				if err != nil {
 					t.Fatalf("[%s] a chain that validates to a configured trust anchor must yield its key, got %v", tc.reference, err)
@@ -530,7 +528,7 @@ func TestRetrieveX5U_ReadsThePemEncodingTheClauseRequires(t *testing.T) {
 			}))
 			defer server.Close()
 
-			keys, err := RetrieveX5U(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0), nil, nil, roots)()
+			keys, err := RetrieveX5U(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0), nil, nil, roots, nil)()
 			if tc.accept {
 				if err != nil {
 					t.Fatalf("[%s] the clause requires the resource be PEM-encoded, so %s must be read, got %v", tc.reference, name, err)

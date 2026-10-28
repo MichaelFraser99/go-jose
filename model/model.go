@@ -3,6 +3,7 @@ package model
 import (
 	"crypto"
 	"crypto/x509"
+	"encoding/json"
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
@@ -26,6 +27,9 @@ type JoseOptions struct {
 	// rejects the destinations your deployment will not allow. FetchTimeout bounds each
 	// fetch whatever Timeout the client sets, provided its transport honours the
 	// request's context.
+	//
+	// Every request of a fetch, including each redirect hop, must be https, as RFC 7515
+	// sections 4.1.2 and 4.1.5 require. Any other is refused before it is sent.
 	//
 	// With no client, jku and x5u contribute no key.
 	HttpClient *http.Client
@@ -75,6 +79,25 @@ type JoseOptions struct {
 	// When a retriever is also given, any certificate that chains to these roots can
 	// verify the token, not only the retriever's key.
 	X509Roots *x509.CertPool
+
+	// IgnoreKeyUse lets a jwk or jku key verify a token whatever its "use" and "key_ops"
+	// members say. Off by default, including when no options are passed: a key whose
+	// "use" is present and is not "sig", or whose "key_ops" is present and lacks
+	// "verify", is refused, because its publisher marked it as not for verifying
+	// signatures (RFC 7517 sections 4.2 and 4.3). Neither member is required by any RFC,
+	// so turn this on to accept keys whose publisher marks them inconsistently.
+	IgnoreKeyUse bool
+
+	// X509ExtKeyUsages names the extended key usages that permit an x5c or x5u
+	// certificate to verify a JWS. RFC 5280 section 4.2.1.12 says a certificate whose
+	// extension is present MUST only be used for a purpose it names, and no purpose is
+	// registered for JWS. When unset, only the signing certificate is checked, and
+	// if its extension is present it must name anyExtendedKeyUsage. When set, Go's
+	// chain verification nests extended key usage, so the signing certificate and
+	// every certificate above it must permit one of these, or carry no extended key
+	// usage. Naming x509.ExtKeyUsageAny turns this purpose check off. A signing
+	// certificate whose extension names no purpose is refused in every case.
+	X509ExtKeyUsages []x509.ExtKeyUsage
 }
 
 // Retriever supplies the keys a token may be verified with. A bare
@@ -100,6 +123,43 @@ type Jwks struct {
 	Opts struct {
 		EnforceUniqueKIDs bool //todo: we should enforce this on marshal too
 	} `json:"-"`
+}
+
+// MarshalJSON writes a JWK Set. RFC 7517 section 5 requires the "keys" member to be an
+// array, so a set with no keys is written as an empty array rather than null.
+func (j Jwks) MarshalJSON() ([]byte, error) {
+	keys := j.Keys
+	if keys == nil {
+		keys = []map[string]any{}
+	}
+	return json.Marshal(struct {
+		Keys []map[string]any `json:"keys"`
+	}{keys})
+}
+
+// UnmarshalJSON reads a JWK Set. RFC 7517 section 5 requires a JSON object with a
+// "keys" member holding an array of JWKs, so anything else, including a JSON null, is
+// refused with ErrKeystoreError. The member name is matched exactly, by the RFC 7515
+// section 5.3 comparison rules; other members are ignored. A struct field that may
+// hold no set should be a *Jwks, which a JSON null leaves nil.
+func (j *Jwks) UnmarshalJSON(data []byte) error {
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(data, &members); err != nil {
+		return fmt.Errorf("%wa JWK Set must be a JSON object: %w", joseerror.ErrKeystoreError, err)
+	}
+	raw, present := members["keys"]
+	if !present {
+		return fmt.Errorf("%wa JWK Set must have a \"keys\" member", joseerror.ErrKeystoreError)
+	}
+	var keys []map[string]any
+	if err := json.Unmarshal(raw, &keys); err != nil {
+		return fmt.Errorf("%wthe \"keys\" member of a JWK Set must be an array of JWKs: %w", joseerror.ErrKeystoreError, err)
+	}
+	if keys == nil {
+		return fmt.Errorf("%wthe \"keys\" member of a JWK Set must be an array, not null", joseerror.ErrKeystoreError)
+	}
+	j.Keys = keys
+	return nil
 }
 
 // RetrieveByKeyID returns every jwk in the key set whose kid matches the one given,
