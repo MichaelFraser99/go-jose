@@ -11,5 +11,5 @@ jobs:
       - uses: actions/setup-python@v7
       - uses: actions/setup-go@v7
         with:
-          go-version-file: 'go.mod'
+          go-version: stable
       - uses: pre-commit/action@v3.0.1
