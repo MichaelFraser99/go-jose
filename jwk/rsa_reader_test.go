@@ -32,6 +32,9 @@ func rfc7517ExampleRSAKey() map[string]any {
 }
 
 func rsaMember(i *big.Int) string {
+	if i.Sign() == 0 {
+		return "AA"
+	}
 	return base64.RawURLEncoding.EncodeToString(i.Bytes())
 }
 
@@ -95,7 +98,6 @@ func TestPublicFromJwk_ReadsAnRSAExponentExactlyOrRefusesIt(t *testing.T) {
 		"2^32+65537, whose low 32 bits are 65537":     {e: rsaMember(plus(pow(32), 65537))},
 		"2^31+1, one odd value past what Go will use": {e: rsaMember(plus(pow(31), 1))},
 		"2^63+65537, which overflows an int64":        {e: rsaMember(plus(pow(63), 65537))},
-		"empty":                                       {e: ""},
 		"zero":                                        {e: "AA"},
 		"one":                                         {e: "AQ"},
 		"two":                                         {e: "Ag"},

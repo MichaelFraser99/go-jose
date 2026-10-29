@@ -46,12 +46,13 @@ func NewSignerFromPrivateKey(privateKey crypto.PrivateKey) (*Signer, error) {
 	if !ok {
 		return nil, fmt.Errorf("%wshould be instance of *rsa.PrivateKey", joseerror.ErrInvalidPrivateKey)
 	}
-	if err := common.CheckRSAPrivateKey(rsaPrivateKey); err != nil {
+	completed, err := common.CompleteRSAPrivateKey(rsaPrivateKey)
+	if err != nil {
 		return nil, err
 	}
 	return &Signer{
 		alg:        jwa.PS256,
-		privateKey: keycopy.RSAPrivateKey(rsaPrivateKey),
+		privateKey: completed,
 	}, nil
 }
 

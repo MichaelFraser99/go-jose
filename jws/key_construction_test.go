@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"sync"
 	"testing"
 
 	"github.com/MichaelFraser99/go-jose/joseerror"
@@ -44,6 +45,60 @@ func rsaPublicKeyOfBits(bits int) *rsa.PublicKey {
 
 func rsaPrivateKeyOfBits(bits int) *rsa.PrivateKey {
 	return &rsa.PrivateKey{PublicKey: *rsaPublicKeyOfBits(bits), D: big.NewInt(3)}
+}
+
+var consistentRSAKeys sync.Map
+
+func rsaConsistentPrivateKeyOfBits(t *testing.T, bits int, e int) *rsa.PrivateKey {
+	t.Helper()
+	type shape struct{ bits, e int }
+	if key, ok := consistentRSAKeys.Load(shape{bits, e}); ok {
+		return key.(*rsa.PrivateKey)
+	}
+	bigE := big.NewInt(int64(e))
+	one := big.NewInt(1)
+	coprime := func(p *big.Int) bool {
+		return new(big.Int).GCD(nil, nil, bigE, new(big.Int).Sub(p, one)).Cmp(one) == 0
+	}
+	n := big.NewInt(1)
+	var primes []*big.Int
+	for n.BitLen() < bits-1024 {
+		p, err := rand.Prime(rand.Reader, 512)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if coprime(p) && new(big.Int).Mod(n, p).Sign() != 0 {
+			primes = append(primes, p)
+			n.Mul(n, p)
+		}
+	}
+	low := new(big.Int).Div(new(big.Int).Lsh(one, uint(bits-1)), n)
+	low.Add(low, one)
+	span := new(big.Int).Sub(new(big.Int).Div(new(big.Int).Sub(new(big.Int).Lsh(one, uint(bits)), one), n), low)
+	for {
+		q, err := rand.Int(rand.Reader, span)
+		if err != nil {
+			t.Fatal(err)
+		}
+		q.Add(q, low)
+		q.SetBit(q, 0, 1)
+		if q.ProbablyPrime(32) && coprime(q) && new(big.Int).Mod(n, q).Sign() != 0 {
+			primes = append(primes, q)
+			n.Mul(n, q)
+			break
+		}
+	}
+	lambda := big.NewInt(1)
+	for _, p := range primes {
+		pMinus := new(big.Int).Sub(p, one)
+		lambda.Div(new(big.Int).Mul(lambda, pMinus), new(big.Int).GCD(nil, nil, lambda, pMinus))
+	}
+	key := &rsa.PrivateKey{PublicKey: rsa.PublicKey{N: n, E: e}, D: new(big.Int).ModInverse(bigE, lambda), Primes: primes}
+	if key.N.BitLen() != bits {
+		t.Fatalf("the fixture must be a %d-bit modulus, got %d", bits, key.N.BitLen())
+	}
+	consistentRSAKeys.Store(shape{bits, e}, key)
+	return key
 }
 
 func rsaJwkOf(key *rsa.PublicKey) map[string]any {
@@ -90,7 +145,11 @@ func TestRSAConstructors_RefuseAModulusOutsideTheSupportedRange(t *testing.T) {
 						return v, err
 					},
 					"GetSignerFromPrivateKey": func() (any, error) {
-						s, err := GetSignerFromPrivateKey(alg, rsaPrivateKeyOfBits(test.bits))
+						privateKey := rsaPrivateKeyOfBits(test.bits)
+						if test.accept {
+							privateKey = rsaConsistentPrivateKeyOfBits(t, test.bits, 65537)
+						}
+						s, err := GetSignerFromPrivateKey(alg, privateKey)
 						return s, err
 					},
 				}
@@ -157,6 +216,9 @@ func TestRSAConstructors_AcceptOnlyAnOddPublicExponentFromThreeToTheCryptoRSABou
 				publicKey := rsaPublicKeyOfBits(2048)
 				publicKey.E = int(test.e)
 				privateKey := &rsa.PrivateKey{PublicKey: *publicKey, D: big.NewInt(3)}
+				if test.accept {
+					privateKey = rsaConsistentPrivateKeyOfBits(t, 2048, int(test.e))
+				}
 				constructions := map[string]struct {
 					construct func() (any, error)
 					class     error

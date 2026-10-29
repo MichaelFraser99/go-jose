@@ -8,14 +8,12 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"math/big"
 	"slices"
 
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
 )
-
-var fieldPrime = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 255), big.NewInt(19))
 
 var smallOrderYCoordinates = map[string]bool{
 	"0000000000000000000000000000000000000000000000000000000000000000": true,
@@ -100,11 +98,7 @@ func checkPoint(key ed25519.PublicKey) error {
 	if smallOrderYCoordinates[hex.EncodeToString(encodedY)] {
 		return fmt.Errorf("%wan Ed25519 public key of small order verifies forged signatures, so full public key validation refuses it", joseerror.ErrInvalidPublicKey)
 	}
-	slices.Reverse(encodedY)
-	if new(big.Int).SetBytes(encodedY).Cmp(fieldPrime) >= 0 {
-		return fmt.Errorf("%wan Ed25519 public key must encode a y below 2^255 - 19", joseerror.ErrInvalidPublicKey)
-	}
-	return nil
+	return common.CheckEd25519PublicKey(key, joseerror.ErrInvalidPublicKey)
 }
 
 func (signer *Signer) Alg() jwa.Algorithm {

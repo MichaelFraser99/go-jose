@@ -94,7 +94,7 @@ func PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error) {
 			return nil, fmt.Errorf("%wthe 'kty' claim is not one of EC, RSA, OKP and AKP", joseerror.ErrUnsupportedAlgorithm)
 		}
 	} else {
-		return nil, fmt.Errorf("no kty claim present in jwk, cannot infer type of private key to return")
+		return nil, fmt.Errorf("%wa jwk must carry the REQUIRED 'kty' claim naming its key type", joseerror.ErrInvalidPrivateKey)
 	}
 }
 
@@ -133,7 +133,7 @@ func PublicFromJwk(jwk map[string]any) (crypto.PublicKey, error) {
 			return nil, fmt.Errorf("%wthe 'kty' claim is not one of EC, RSA, OKP and AKP", joseerror.ErrUnsupportedAlgorithm)
 		}
 	} else {
-		return nil, fmt.Errorf("no kty claim present in jwk, cannot infer type of public key to return")
+		return nil, fmt.Errorf("%wa jwk must carry the REQUIRED 'kty' claim naming its key type", joseerror.ErrInvalidPublicKey)
 	}
 }
 
@@ -185,34 +185,42 @@ func checkMember(jwk map[string]any, kid *string, alg string, ignoreKeyUse bool)
 	if ignoreKeyUse {
 		return nil
 	}
+	return CheckKeyUse(jwk, joseerror.ErrNoKeyIdentifierMatch, joseerror.ErrMalformedClaim)
+}
 
+// CheckKeyUse refuses a jwk its publisher marked as not for verifying signatures:
+// one whose "use" is present and is not "sig" (RFC 7517 section 4.2), or whose
+// "key_ops" is present and lacks "verify" (RFC 7517 section 4.3). A member of the
+// wrong type is refused with malformed, and a mark that excludes verifying with
+// refused.
+func CheckKeyUse(jwk map[string]any, refused, malformed error) error {
 	if u, present := jwk["use"]; present {
 		su, ok := u.(string)
 		if !ok {
-			return fmt.Errorf("%wjwk has malformed use value", joseerror.ErrMalformedClaim)
+			return fmt.Errorf("%wjwk has malformed use value", malformed)
 		}
 		if su != "sig" {
-			return fmt.Errorf("%wjwk use %s is not sig", joseerror.ErrNoKeyIdentifierMatch, jsonutils.QuoteBounded(su))
+			return fmt.Errorf("%wjwk use %s is not sig", refused, jsonutils.QuoteBounded(su))
 		}
 	}
 
 	if o, present := jwk["key_ops"]; present {
 		ops, ok := o.([]any)
 		if !ok {
-			return fmt.Errorf("%wjwk key_ops must be an array", joseerror.ErrMalformedClaim)
+			return fmt.Errorf("%wjwk key_ops must be an array", malformed)
 		}
 		verify := false
 		for _, op := range ops {
 			sop, ok := op.(string)
 			if !ok {
-				return fmt.Errorf("%wjwk key_ops must hold strings", joseerror.ErrMalformedClaim)
+				return fmt.Errorf("%wjwk key_ops must hold strings", malformed)
 			}
 			if sop == "verify" {
 				verify = true
 			}
 		}
 		if !verify {
-			return fmt.Errorf("%wjwk key_ops do not include verify", joseerror.ErrNoKeyIdentifierMatch)
+			return fmt.Errorf("%wjwk key_ops do not include verify", refused)
 		}
 	}
 
