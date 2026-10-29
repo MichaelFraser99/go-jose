@@ -22,32 +22,6 @@ import (
 //
 // On success, a series of Retriever functions are returned which will yield key(s) for validation purposes.
 // On failure, an error object is returned
-type carriedSourceError struct {
-	err error
-}
-
-func (c carriedSourceError) Error() string { return c.err.Error() }
-
-func (c carriedSourceError) Unwrap() error { return c.err }
-
-func carried(retriever model.Retriever) model.Retriever {
-	return func() ([]crypto.PublicKey, error) {
-		keys, err := retriever()
-		if err != nil {
-			return nil, carriedSourceError{err: err}
-		}
-		return keys, nil
-	}
-}
-
-// FromCarriedSource reports whether err came from a key the token carries in its
-// header, a jwk or an x5c, rather than one fetched from a jku or an x5u. Those
-// bytes are in the signed header, so a fault in them is the same every time.
-func FromCarriedSource(err error) bool {
-	var c carriedSourceError
-	return errors.As(err, &c)
-}
-
 func ValidateHeader(ctx context.Context, header map[string]any, client *http.Client, mode model.Mode, opts *model.JoseOptions) ([]model.Retriever, error) {
 	if opts == nil {
 		opts = &model.JoseOptions{}
@@ -114,6 +88,32 @@ func ValidateHeader(ctx context.Context, header map[string]any, client *http.Cli
 	}
 
 	return jwkRetrievers, nil
+}
+
+type carriedSourceError struct {
+	err error
+}
+
+func (c carriedSourceError) Error() string { return c.err.Error() }
+
+func (c carriedSourceError) Unwrap() error { return c.err }
+
+func carried(retriever model.Retriever) model.Retriever {
+	return func() ([]crypto.PublicKey, error) {
+		keys, err := retriever()
+		if err != nil {
+			return nil, carriedSourceError{err: err}
+		}
+		return keys, nil
+	}
+}
+
+// FromCarriedSource reports whether err came from a key the token carries in its
+// header, a jwk or an x5c, rather than one fetched from a jku or an x5u. Those
+// bytes are in the signed header, so a fault in them is the same every time.
+func FromCarriedSource(err error) bool {
+	var c carriedSourceError
+	return errors.As(err, &c)
 }
 
 type headerShape struct {
