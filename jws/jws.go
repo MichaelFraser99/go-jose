@@ -65,7 +65,7 @@ func verify(ctx context.Context, compactSerialization string, outOfBoundsPublicK
 		client = opts.HttpClient
 	}
 
-	headerJwkRetrievers, err := header.ValidateHeader(ctx, protectedHeader, client, model.JWS, opts)
+	headerJwkRetrievers, err := header.ValidateHeader(ctx, protectedHeader, client, opts)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("%werror validating header: %w", joseerror.ErrMalformedToken, err)
 	}

@@ -144,10 +144,22 @@ func signingAlgorithm(signer crypto.Signer, head map[string]any, opts Opts) (jwa
 	if alg == jwa.EdDSA {
 		return jwa.Unknown, fmt.Errorf("%wEdDSA is accepted only for verification: RFC 9864 section 4.1.2 deprecates it, so sign with Ed25519", joseerror.ErrUnsupportedAlgorithm)
 	}
+	if isKeyManagement(alg) {
+		return jwa.Unknown, fmt.Errorf("%w%s is a JWE key management algorithm, not a signature algorithm", joseerror.ErrUnsupportedAlgorithm, alg)
+	}
 	if alg.String() == "" {
 		return jwa.Unknown, fmt.Errorf("%wno algorithm to sign with: name one in opts or in the 'alg' header", joseerror.ErrUnsupportedAlgorithm)
 	}
 	return alg, nil
+}
+
+func isKeyManagement(alg jwa.Algorithm) bool {
+	switch alg {
+	case jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512, jwa.A128KW, jwa.A192KW, jwa.A256KW, jwa.Dir:
+		return true
+	case jwa.ES256, jwa.ES384, jwa.ES512, jwa.RS256, jwa.RS384, jwa.RS512, jwa.PS256, jwa.PS384, jwa.PS512, jwa.HS256, jwa.HS384, jwa.HS512, jwa.EdDSA, jwa.Ed25519, jwa.MLDSA44, jwa.MLDSA65, jwa.MLDSA87, jwa.Unknown:
+	}
+	return false
 }
 
 func isNil(signer crypto.Signer) bool {
@@ -198,7 +210,7 @@ func signingHash(alg jwa.Algorithm) crypto.Hash {
 		return crypto.SHA384
 	case jwa.RS512, jwa.PS512, jwa.ES512:
 		return crypto.SHA512
-	case jwa.HS256, jwa.HS384, jwa.HS512, jwa.EdDSA, jwa.Ed25519, jwa.MLDSA44, jwa.MLDSA65, jwa.MLDSA87, jwa.Unknown:
+	case jwa.HS256, jwa.HS384, jwa.HS512, jwa.EdDSA, jwa.Ed25519, jwa.MLDSA44, jwa.MLDSA65, jwa.MLDSA87, jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512, jwa.A128KW, jwa.A192KW, jwa.A256KW, jwa.Dir, jwa.Unknown:
 		return 0
 	}
 	return 0
@@ -279,7 +291,7 @@ func signWithCryptoSigner(signer crypto.Signer, alg jwa.Algorithm, signingInput 
 			return nil, err
 		}
 		return signer.Sign(rand.Reader, signingInput, crypto.Hash(0))
-	case jwa.HS256, jwa.HS384, jwa.HS512, jwa.EdDSA, jwa.Unknown:
+	case jwa.HS256, jwa.HS384, jwa.HS512, jwa.EdDSA, jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512, jwa.A128KW, jwa.A192KW, jwa.A256KW, jwa.Dir, jwa.Unknown:
 	}
 	return nil, fmt.Errorf("%wonly a signer from this library can sign %s", joseerror.ErrInvalidPrivateKey, alg)
 }

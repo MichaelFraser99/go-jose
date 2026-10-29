@@ -83,7 +83,7 @@ func GetSigner(alg jwa.Algorithm, opts *model.Opts) (model.Signer, error) {
 
 	case jwa.EdDSA:
 		return nil, errSignWithEdDSA
-	case jwa.Unknown:
+	case jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512, jwa.A128KW, jwa.A192KW, jwa.A256KW, jwa.Dir, jwa.Unknown:
 		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg)
 	default:
 		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg)
@@ -134,7 +134,7 @@ func GetSignerFromPrivateKey(alg jwa.Algorithm, privateKey crypto.PrivateKey) (m
 
 	case jwa.EdDSA:
 		return nil, errSignWithEdDSA
-	case jwa.Unknown:
+	case jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512, jwa.A128KW, jwa.A192KW, jwa.A256KW, jwa.Dir, jwa.Unknown:
 		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg)
 	default:
 		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg)

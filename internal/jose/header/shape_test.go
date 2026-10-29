@@ -25,7 +25,7 @@ func TestValidateHeader_RefusesATypOrCtyThatIsNotAString(t *testing.T) {
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			_, err := ValidateHeader(context.Background(), test.header, nil, model.JWS, test.opts)
+			_, err := ValidateHeader(context.Background(), test.header, nil, test.opts)
 			if !errors.Is(err, joseerror.ErrMalformedClaim) {
 				t.Fatalf("[%s] a media type is a string, so header %v must be refused with ErrMalformedClaim, got %v", test.clause, test.header, err)
 			}
@@ -35,7 +35,7 @@ func TestValidateHeader_RefusesATypOrCtyThatIsNotAString(t *testing.T) {
 
 func TestValidateHeader_AcceptsATypAndCtyThatAreStrings(t *testing.T) {
 	header := map[string]any{"alg": "ES256", "typ": "JWT", "cty": "example"}
-	if _, err := ValidateHeader(context.Background(), header, nil, model.JWS, nil); err != nil {
+	if _, err := ValidateHeader(context.Background(), header, nil, nil); err != nil {
 		t.Fatalf("[RFC 7515 4.1.9, 4.1.10] header %v holds string media types and must be accepted, got %v", header, err)
 	}
 }

@@ -297,3 +297,36 @@ func TestValidate_RefusesATokenOfTheWrongShape(t *testing.T) {
 		})
 	}
 }
+
+func TestNew_RefusesAJweKeyManagementAlgorithm(t *testing.T) {
+	inner, err := es256.NewSigner()
+	if err != nil {
+		t.Fatalf("building an ES256 signer: %s", err)
+	}
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("building an RSA key: %s", err)
+	}
+
+	for _, alg := range []jwa.Algorithm{jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512, jwa.A128KW, jwa.A192KW, jwa.A256KW, jwa.Dir} {
+		tests := []struct {
+			name   string
+			signer crypto.Signer
+			head   map[string]any
+			opts   Opts
+		}{
+			{name: "a model.Signer whose Alg names it", signer: algOverrideSigner{Signer: inner, alg: alg}},
+			{name: "a standard library key with opts naming it", signer: rsaKey, opts: Opts{Algorithm: alg}},
+			{name: "a standard library key with the alg header naming it", signer: rsaKey, head: map[string]any{"alg": alg.String()}},
+			{name: "a signer from outside the library with opts naming it", signer: opaqueSigner{rsaKey}, opts: Opts{Algorithm: alg}},
+		}
+		for _, tt := range tests {
+			t.Run(alg.String()+"/"+tt.name, func(t *testing.T) {
+				token, err := New(tt.signer, tt.head, nil, tt.opts)
+				if !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || token != nil {
+					t.Errorf("[RFC 7518 4.1] %s is registered for key management only, so want ErrUnsupportedAlgorithm and no token, got %v and %v", alg, token, err)
+				}
+			})
+		}
+	}
+}
