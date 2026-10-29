@@ -7,14 +7,12 @@ import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
-	"crypto/mldsa"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/asn1"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
 	"github.com/MichaelFraser99/go-jose/internal/jose/header"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
@@ -254,19 +252,17 @@ func signWithCryptoSigner(signer crypto.Signer, alg jwa.Algorithm, signingInput 
 	}
 	switch alg {
 	case jwa.ES256, jwa.ES384, jwa.ES512:
-		curves := map[jwa.Algorithm]elliptic.Curve{jwa.ES256: elliptic.P256(), jwa.ES384: elliptic.P384(), jwa.ES512: elliptic.P521()}
-		public, _ := signer.Public().(*ecdsa.PublicKey)
-		if err := common.CheckECDSAPublicKey(public, curves[alg], joseerror.ErrInvalidPrivateKey); err != nil {
+		if err := checkSignerKey(signer, alg); err != nil {
 			return nil, err
 		}
+		public := signer.Public().(*ecdsa.PublicKey)
 		der, err := signer.Sign(rand.Reader, digest, hash)
 		if err != nil {
 			return nil, err
 		}
 		return concatenatedRS(der, public.Params())
 	case jwa.RS256, jwa.RS384, jwa.RS512, jwa.PS256, jwa.PS384, jwa.PS512:
-		public, _ := signer.Public().(*rsa.PublicKey)
-		if err := common.CheckRSAPublicKey(public, joseerror.ErrInvalidPrivateKey); err != nil {
+		if err := checkSignerKey(signer, alg); err != nil {
 			return nil, err
 		}
 		if alg == jwa.PS256 || alg == jwa.PS384 || alg == jwa.PS512 {
@@ -274,20 +270,25 @@ func signWithCryptoSigner(signer crypto.Signer, alg jwa.Algorithm, signingInput 
 		}
 		return signer.Sign(rand.Reader, digest, hash)
 	case jwa.Ed25519:
-		if public, _ := signer.Public().(ed25519.PublicKey); len(public) != ed25519.PublicKeySize {
-			return nil, fmt.Errorf("%w%s needs an ed25519 public key of %d octets", joseerror.ErrInvalidPrivateKey, alg, ed25519.PublicKeySize)
+		if err := checkSignerKey(signer, alg); err != nil {
+			return nil, err
 		}
 		return signer.Sign(rand.Reader, digest, crypto.Hash(0))
 	case jwa.MLDSA44, jwa.MLDSA65, jwa.MLDSA87:
-		public, _ := signer.Public().(*mldsa.PublicKey)
-		params, _ := common.MLDSAParameters(alg.String())
-		if _, err := common.UsableMLDSAPublicKey(public, params, joseerror.ErrInvalidPrivateKey); err != nil {
-			return nil, fmt.Errorf("%w%s needs an %s key", joseerror.ErrInvalidPrivateKey, alg, alg)
+		if err := checkSignerKey(signer, alg); err != nil {
+			return nil, err
 		}
 		return signer.Sign(rand.Reader, signingInput, crypto.Hash(0))
 	case jwa.HS256, jwa.HS384, jwa.HS512, jwa.EdDSA, jwa.Unknown:
 	}
 	return nil, fmt.Errorf("%wonly a signer from this library can sign %s", joseerror.ErrInvalidPrivateKey, alg)
+}
+
+func checkSignerKey(signer crypto.Signer, alg jwa.Algorithm) error {
+	if _, err := jws.GetValidator(alg, signer.Public()); err != nil {
+		return fmt.Errorf("%w%s cannot be signed with this key, as a %s validator refuses its public key: %s", joseerror.ErrInvalidPrivateKey, alg, alg, err.Error())
+	}
+	return nil
 }
 
 func concatenatedRS(der []byte, curve *elliptic.CurveParams) ([]byte, error) {

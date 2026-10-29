@@ -117,7 +117,7 @@ func verify(ctx context.Context, compactSerialization string, outOfBoundsPublicK
 		}
 		if err != nil {
 			fromCaller := outOfBoundsPublicKey != nil && i == 0
-			if !fromCaller && errors.Is(err, joseerror.ErrMalformedClaim) {
+			if !fromCaller && errors.Is(err, joseerror.ErrMalformedClaim) && !errors.Is(err, joseerror.ErrApplicationError) {
 				return nil, nil, nil, err
 			}
 			sourceFailures = append(sourceFailures, err)
@@ -144,7 +144,7 @@ func verify(ctx context.Context, compactSerialization string, outOfBoundsPublicK
 		return nil, nil, nil, wrapAll(sourceFailures)
 	}
 	if len(noKeyIdentifierErrors) > 0 {
-		return nil, nil, nil, fmt.Errorf("%wunable to validate jws signature - possibly due to the following errors encountered retrieving cryptographic material: %v", joseerror.ErrInvalidSignature, noKeyIdentifierErrors)
+		return nil, nil, nil, fmt.Errorf("%wunable to validate jws signature - possibly due to the following errors encountered retrieving cryptographic material: %w", joseerror.ErrInvalidSignature, wrapAll(noKeyIdentifierErrors))
 	}
 	return nil, nil, nil, fmt.Errorf("%wunable to validate jws signature", joseerror.ErrInvalidSignature)
 }

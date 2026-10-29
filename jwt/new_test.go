@@ -363,6 +363,8 @@ func TestNew_RefusesAStandardLibrarySignerThatCannotSignTheAlgorithm(t *testing.
 		{name: "Ed25519 with an rsa key", signer: rsaKey, alg: jwa.Ed25519, want: joseerror.ErrInvalidPrivateKey, clause: "RFC 9864 4.1.1"},
 		{name: "ML-DSA-44 with an ML-DSA-65 key", signer: mldsa65, alg: jwa.MLDSA44, want: joseerror.ErrInvalidPrivateKey, clause: "RFC 9964 5"},
 		{name: "ML-DSA-44 with an ecdsa key", signer: p256, alg: jwa.MLDSA44, want: joseerror.ErrInvalidPrivateKey, clause: "RFC 9964 5"},
+		{name: "Ed25519 with a signer whose public key is of small order", signer: fixedOutputSigner{public: ed25519.PublicKey(append([]byte{1}, make([]byte, 31)...))}, alg: jwa.Ed25519, want: joseerror.ErrInvalidPrivateKey, clause: "NIST SP 800-186 D.1.3.2"},
+		{name: "Ed25519 with a signer whose public key is not a canonical encoding", signer: fixedOutputSigner{public: ed25519.PublicKey(append(append([]byte{0xed}, bytes.Repeat([]byte{0xff}, 30)...), 0x7f))}, alg: jwa.Ed25519, want: joseerror.ErrInvalidPrivateKey, clause: "RFC 8032 5.1.3"},
 		{name: "ML-DSA-44 with a signer whose public key is a nil *mldsa.PublicKey", signer: fixedOutputSigner{public: (*mldsa.PublicKey)(nil)}, alg: jwa.MLDSA44, want: joseerror.ErrInvalidPrivateKey, clause: "RFC 9964 5"},
 		{name: "ML-DSA-44 with a signer whose public key is a zero-value *mldsa.PublicKey", signer: fixedOutputSigner{public: &mldsa.PublicKey{}}, alg: jwa.MLDSA44, want: joseerror.ErrInvalidPrivateKey, clause: "RFC 9964 5"},
 		{name: "HS256 with an ecdsa key", signer: p256, alg: jwa.HS256, want: joseerror.ErrInvalidPrivateKey, clause: "RFC 7518 3.2"},
