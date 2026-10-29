@@ -57,59 +57,12 @@ func ValidateHeader(ctx context.Context, header map[string]any, client *http.Cli
 
 	}
 
-	jku, err := jsonutils.RetrieveClaim(header, "jku", jsonutils.ValidateHttpsUrlClaim)
-	if err != nil && !errors.Is(err, joseerror.ErrMissingClaim) {
+	params, err := readHeaderShape(header)
+	if err != nil {
 		return nil, err
 	}
 
-	includedJwk, err := jsonutils.RetrieveClaim[map[string]any](header, "jwk")
-	if err != nil && !errors.Is(err, joseerror.ErrMissingClaim) {
-		return nil, err
-	}
-
-	kid, err := jsonutils.RetrieveClaim[string](header, "kid")
-	if err != nil && !errors.Is(err, joseerror.ErrMissingClaim) {
-		return nil, err
-	}
-
-	x5u, err := jsonutils.RetrieveClaim(header, "x5u", jsonutils.ValidateHttpsUrlClaim)
-	if err != nil && !errors.Is(err, joseerror.ErrMissingClaim) {
-		return nil, err
-	}
-
-	var x5c *[]string
-	if rawX5c, present := header["x5c"]; present {
-		chain, err := x5.CertificateChainStrings(rawX5c)
-		if err != nil {
-			return nil, err
-		}
-		if err := x5.ValidateCertificateChain(header, chain); err != nil {
-			return nil, err
-		}
-		x5c = &chain
-	}
-
-	x5t, err := jsonutils.RetrieveClaim(header, "x5t", jsonutils.ValidateBase64Url)
-	if err != nil && !errors.Is(err, joseerror.ErrMissingClaim) {
-		return nil, err
-	}
-
-	x5ts256, err := jsonutils.RetrieveClaim(header, "x5t#S256", jsonutils.ValidateBase64Url)
-	if err != nil && !errors.Is(err, joseerror.ErrMissingClaim) {
-		return nil, err
-	}
-
-	if b64, present := header["b64"]; present {
-		encoded, ok := b64.(bool)
-		if !ok {
-			return nil, fmt.Errorf("%wthe 'b64' header must be a JSON boolean", joseerror.ErrMalformedClaim)
-		}
-		if !encoded {
-			return nil, fmt.Errorf("%wthe 'b64' header is false, and this library always base64url-decodes the payload", joseerror.ErrMissingCriticalClaim)
-		}
-	}
-
-	critValidators := []jsonutils.Validator[[]any]{jsonutils.ValidateNonEmptySlice, jsonutils.ValidateNoDuplicateSliceValues, jsonutils.ValidateNoBannedCriticalValues, jsonutils.ValidateCriticalValuesPresent, jsonutils.UnderstoodCriticalValues(opts.UnderstoodCriticalHeaders)}
+	critValidators := []jsonutils.Validator[[]any]{jsonutils.UnderstoodCriticalValues(opts.UnderstoodCriticalHeaders)}
 	if mode == model.JWE {
 		critValidators = append(critValidators, jsonutils.ValidateNoBannedCriticalJWEValues)
 	}
@@ -120,20 +73,115 @@ func ValidateHeader(ctx context.Context, header map[string]any, client *http.Cli
 	}
 
 	var jwkRetrievers []model.Retriever
-	if includedJwk != nil && opts.UseTokenProvidedKeys {
-		jwkRetrievers = append(jwkRetrievers, jwk.InlineJWK(*includedJwk, kid, *alg, opts.IgnoreKeyUse))
+	if params.jwk != nil && opts.UseTokenProvidedKeys {
+		jwkRetrievers = append(jwkRetrievers, jwk.InlineJWK(*params.jwk, params.kid, *alg, opts.IgnoreKeyUse))
 	}
-	if x5c != nil && opts.X509Roots != nil {
-		jwkRetrievers = append(jwkRetrievers, x5.InlineCertificate(*x5c, x5t, x5ts256, opts.X509Roots, opts.X509ExtKeyUsages))
+	if params.x5c != nil && opts.X509Roots != nil {
+		jwkRetrievers = append(jwkRetrievers, x5.InlineCertificate(*params.x5c, params.x5t, params.x5ts256, opts.X509Roots, opts.X509ExtKeyUsages))
 	}
-	if jku != nil && opts.UseTokenProvidedKeys && client != nil {
-		jwkRetrievers = append(jwkRetrievers, jwk.RetrieveJKU(*jku, httputils.Fetcher(ctx, client, opts.FetchTimeout), kid, *alg, opts.IgnoreKeyUse))
+	if params.jku != nil && opts.UseTokenProvidedKeys && client != nil {
+		jwkRetrievers = append(jwkRetrievers, jwk.RetrieveJKU(*params.jku, httputils.Fetcher(ctx, client, opts.FetchTimeout), params.kid, *alg, opts.IgnoreKeyUse))
 	}
-	if x5u != nil && opts.X509Roots != nil && client != nil {
-		jwkRetrievers = append(jwkRetrievers, x5.RetrieveX5U(*x5u, httputils.Fetcher(ctx, client, opts.FetchTimeout), x5t, x5ts256, opts.X509Roots, opts.X509ExtKeyUsages))
+	if params.x5u != nil && opts.X509Roots != nil && client != nil {
+		jwkRetrievers = append(jwkRetrievers, x5.RetrieveX5U(*params.x5u, httputils.Fetcher(ctx, client, opts.FetchTimeout), params.x5t, params.x5ts256, opts.X509Roots, opts.X509ExtKeyUsages))
 	}
 
 	return jwkRetrievers, nil
+}
+
+type headerShape struct {
+	jku, kid, x5u, x5t, x5ts256 *string
+	jwk                         *map[string]any
+	x5c                         *[]string
+}
+
+// CheckHeaderShape refuses a JWS header whose registered parameters break the
+// type and format rules of RFC 7515 section 4.1 or RFC 7797 section 3. It reads
+// no key and fetches nothing, so a producer can hold a header it emits to the
+// rules ValidateHeader applies to one it receives.
+//
+// "jku" and "x5u" must be HTTPS URLs (sections 4.1.2 and 4.1.5), "jwk" an object
+// (section 4.1.3), "kid", "typ" and "cty" strings (sections 4.1.4, 4.1.9 and
+// 4.1.10), "x5c" a non-empty array of base64 DER certificates (section 4.1.6),
+// and "x5t" and "x5t#S256" base64url (sections 4.1.7 and 4.1.8). "crit" must be
+// a non-empty array of distinct names, each present in the header and none
+// defined by RFC 7515 (section 4.1.11). Each fault is ErrMalformedClaim, except
+// a "crit" name the header does not hold, which is ErrMissingCriticalClaim. "b64"
+// must be a boolean, else ErrMalformedClaim, and a "b64" of false is refused with
+// ErrMissingCriticalClaim, since this library handles only a base64url-encoded
+// payload.
+func CheckHeaderShape(header map[string]any) error {
+	_, err := readHeaderShape(header)
+	return err
+}
+
+func readHeaderShape(header map[string]any) (headerShape, error) {
+	var params headerShape
+	var err error
+
+	params.jku, err = jsonutils.RetrieveClaim(header, "jku", jsonutils.ValidateHttpsUrlClaim)
+	if err != nil && !errors.Is(err, joseerror.ErrMissingClaim) {
+		return headerShape{}, err
+	}
+
+	params.jwk, err = jsonutils.RetrieveClaim[map[string]any](header, "jwk")
+	if err != nil && !errors.Is(err, joseerror.ErrMissingClaim) {
+		return headerShape{}, err
+	}
+
+	params.kid, err = jsonutils.RetrieveClaim[string](header, "kid")
+	if err != nil && !errors.Is(err, joseerror.ErrMissingClaim) {
+		return headerShape{}, err
+	}
+
+	params.x5u, err = jsonutils.RetrieveClaim(header, "x5u", jsonutils.ValidateHttpsUrlClaim)
+	if err != nil && !errors.Is(err, joseerror.ErrMissingClaim) {
+		return headerShape{}, err
+	}
+
+	if rawX5c, present := header["x5c"]; present {
+		chain, err := x5.CertificateChainStrings(rawX5c)
+		if err != nil {
+			return headerShape{}, err
+		}
+		if err := x5.ValidateCertificateChain(header, chain); err != nil {
+			return headerShape{}, err
+		}
+		params.x5c = &chain
+	}
+
+	params.x5t, err = jsonutils.RetrieveClaim(header, "x5t", jsonutils.ValidateBase64Url)
+	if err != nil && !errors.Is(err, joseerror.ErrMissingClaim) {
+		return headerShape{}, err
+	}
+
+	params.x5ts256, err = jsonutils.RetrieveClaim(header, "x5t#S256", jsonutils.ValidateBase64Url)
+	if err != nil && !errors.Is(err, joseerror.ErrMissingClaim) {
+		return headerShape{}, err
+	}
+
+	for _, name := range []string{"typ", "cty"} {
+		if _, err := jsonutils.RetrieveClaim[string](header, name); err != nil && !errors.Is(err, joseerror.ErrMissingClaim) {
+			return headerShape{}, err
+		}
+	}
+
+	if b64, present := header["b64"]; present {
+		encoded, ok := b64.(bool)
+		if !ok {
+			return headerShape{}, fmt.Errorf("%wthe 'b64' header must be a JSON boolean", joseerror.ErrMalformedClaim)
+		}
+		if !encoded {
+			return headerShape{}, fmt.Errorf("%wthe 'b64' header is false, and this library handles only a base64url-encoded payload", joseerror.ErrMissingCriticalClaim)
+		}
+	}
+
+	_, err = jsonutils.RetrieveClaim[[]any](header, "crit", jsonutils.ValidateNonEmptySlice, jsonutils.ValidateNoDuplicateSliceValues, jsonutils.ValidateNoBannedCriticalValues, jsonutils.ValidateCriticalValuesPresent)
+	if err != nil && !errors.Is(err, joseerror.ErrMissingClaim) {
+		return headerShape{}, err
+	}
+
+	return params, nil
 }
 
 func validateExpectedType(header map[string]any, accepted []string) error {
