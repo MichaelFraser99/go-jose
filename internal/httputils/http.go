@@ -82,6 +82,8 @@ func (h httpsOnly) RoundTrip(request *http.Request) (*http.Response, error) {
 
 // RetrieveResource fetches url through a copy of client whose transport refuses any
 // hop that is not https, keeping the client's own transport and redirect policy.
+// The copy has no cookie jar, so the fetch sends no cookies and keeps none, as RFC
+// 8725 section 3.10 asks of a jku or x5u request.
 // The fetch is bounded by the earlier of timeout and the client's own Timeout, so a
 // body that either limit cuts short is never taken as complete.
 func RetrieveResource(ctx context.Context, client *http.Client, timeout time.Duration, url, alias string) (*http.Response, error) {
@@ -90,6 +92,7 @@ func RetrieveResource(ctx context.Context, client *http.Client, timeout time.Dur
 	}
 	tlsOnly := *client
 	tlsOnly.Transport = httpsOnly{next: client.Transport}
+	tlsOnly.Jar = nil
 	limit := timeoutOrDefault(timeout)
 	if client.Timeout > 0 && client.Timeout < limit {
 		limit = client.Timeout

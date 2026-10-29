@@ -1,11 +1,17 @@
 package common
 
 import (
+	"bytes"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/rsa"
 	"fmt"
+	"io"
+	"math/big"
 
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/keycopy"
 	jose_errors "github.com/MichaelFraser99/go-jose/joseerror"
 )
 
@@ -31,9 +37,6 @@ func CheckRSAPublicKey(publicKey *rsa.PublicKey, class error) error {
 	if err := checkRSAPublicKey(publicKey, class); err != nil {
 		return err
 	}
-	if e := publicKey.E; e < 3 || e%2 == 0 || e > MaximumRSAPublicExponent {
-		return fmt.Errorf("%wan RSA public exponent is odd and in [3, %d], got %d", class, MaximumRSAPublicExponent, e)
-	}
 	if bits := publicKey.N.BitLen(); bits < MinimumRSAModulusBits || bits > MaximumRSAModulusBits {
 		return fmt.Errorf("%wan RSA modulus of %d to %d bits is required, got %d", class, MinimumRSAModulusBits, MaximumRSAModulusBits, bits)
 	}
@@ -41,21 +44,122 @@ func CheckRSAPublicKey(publicKey *rsa.PublicKey, class error) error {
 }
 
 // CheckRSAPrivateKey refuses an RSA private key whose public half
-// CheckRSAPublicKey refuses, or whose d is not in [1, n-1]. RFC 7518 section
-// 6.3.2 makes "d" the only required private member, so a key without primes
-// is accepted.
+// CheckRSAPublicKey refuses, or whose private members are not the private key
+// of that public half, as PrivateFromJwk judges them. RFC 7518 section 6.3.2
+// makes "d" the only required private member, so a key without primes is
+// accepted when its two primes can be recovered from n, e and d.
 func CheckRSAPrivateKey(privateKey *rsa.PrivateKey) error {
+	_, err := CompleteRSAPrivateKey(privateKey)
+	return err
+}
+
+// CompleteRSAPrivateKey returns a copy of an RSA private key CheckRSAPrivateKey
+// accepts. The copy shares no memory with privateKey and carries its primes and
+// CRT values. A key with no primes has them recovered from n, e and d by NIST
+// SP 800-56B Rev. 2 Appendix C.1, which assumes n is the product of two primes,
+// so a key with no primes whose modulus has more than two is refused.
+func CompleteRSAPrivateKey(privateKey *rsa.PrivateKey) (*rsa.PrivateKey, error) {
 	if privateKey == nil {
-		return fmt.Errorf("%wan RSA key needs a positive modulus and exponent", jose_errors.ErrInvalidPrivateKey)
+		return nil, fmt.Errorf("%wan RSA key needs a positive modulus and exponent", jose_errors.ErrInvalidPrivateKey)
 	}
 	if err := CheckRSAPublicKey(&privateKey.PublicKey, jose_errors.ErrInvalidPrivateKey); err != nil {
-		return err
+		return nil, err
 	}
-	if privateKey.D == nil || privateKey.D.Sign() <= 0 || privateKey.D.Cmp(privateKey.N) >= 0 {
-		return fmt.Errorf("%wan RSA private key needs d with 0 < d < n", jose_errors.ErrInvalidPrivateKey)
+	completed, err := completeRSAPrivateKey(privateKey)
+	if err != nil {
+		return nil, err
+	}
+	return keycopy.RSAPrivateKey(completed), nil
+}
+
+func checkRSAPublicKey(publicKey *rsa.PublicKey, class error) error {
+	if publicKey == nil || publicKey.N == nil || publicKey.N.Sign() <= 0 {
+		return fmt.Errorf("%wan RSA key needs a positive modulus", class)
+	}
+	if e := publicKey.E; e < 3 || e%2 == 0 || e > MaximumRSAPublicExponent {
+		return fmt.Errorf("%wan RSA public exponent is odd and in [3, %d], got %d", class, MaximumRSAPublicExponent, e)
 	}
 	return nil
 }
+
+func completeRSAPrivateKey(privateKey *rsa.PrivateKey) (*rsa.PrivateKey, error) {
+	if privateKey.D == nil || privateKey.D.Sign() <= 0 || privateKey.D.Cmp(privateKey.N) >= 0 {
+		return nil, fmt.Errorf("%wthe d of an RSA private key is a positive integer less than n", jose_errors.ErrInvalidPrivateKey)
+	}
+	primes := privateKey.Primes
+	if len(primes) == 0 {
+		if bits := privateKey.N.BitLen(); bits > MaximumRSAModulusBits {
+			return nil, fmt.Errorf("%wthe primes of an RSA private key are recovered only up to a %d-bit modulus, got %d", jose_errors.ErrInvalidPrivateKey, MaximumRSAModulusBits, bits)
+		}
+		recovered, err := recoverRSAPrimes(rand.Reader, privateKey.N, privateKey.E, privateKey.D)
+		if err != nil {
+			return nil, err
+		}
+		primes = recovered
+	}
+	for _, prime := range primes {
+		if prime == nil || prime.Sign() <= 0 {
+			return nil, fmt.Errorf("%wthe primes of an RSA private key must be positive", jose_errors.ErrInvalidPrivateKey)
+		}
+	}
+	candidate := &rsa.PrivateKey{PublicKey: privateKey.PublicKey, D: privateKey.D, Primes: primes}
+	if err := candidate.Validate(); err != nil {
+		return nil, fmt.Errorf("%wthe members of an RSA private key are not one key: %w", jose_errors.ErrInvalidPrivateKey, err)
+	}
+	return candidate, nil
+}
+
+const rsaPrimeRecoveryTries = 100
+
+func recoverRSAPrimes(random io.Reader, n *big.Int, e int, d *big.Int) ([]*big.Int, error) {
+	one := big.NewInt(1)
+	two := big.NewInt(2)
+	nMinusOne := new(big.Int).Sub(n, one)
+	m := new(big.Int).Mul(d, big.NewInt(int64(e)))
+	m.Sub(m, one)
+	if m.Bit(0) == 1 {
+		return nil, errRSAPrimesNotFound
+	}
+	t := m.TrailingZeroBits()
+	r := new(big.Int).Rsh(m, t)
+tries:
+	for i := 0; i < rsaPrimeRecoveryTries; i++ {
+		g, err := rand.Int(random, n)
+		if err != nil {
+			return nil, fmt.Errorf("%wfailed to read a random value to recover the primes of an RSA private key: %w", jose_errors.ErrInvalidPrivateKey, err)
+		}
+		if shared := new(big.Int).GCD(nil, nil, g, n); shared.Cmp(n) == 0 {
+			continue
+		} else if shared.Cmp(one) > 0 {
+			return []*big.Int{shared, new(big.Int).Div(n, shared)}, nil
+		}
+		blinding, err := rand.Int(rand.Reader, rsaRecoveryBlindingBound)
+		if err != nil {
+			return nil, fmt.Errorf("%wfailed to read a random value to blind the recovery of the primes of an RSA private key: %w", jose_errors.ErrInvalidPrivateKey, err)
+		}
+		y := new(big.Int).Exp(g, blinding.Mul(blinding, m).Add(blinding, r), n)
+		if y.Cmp(one) == 0 || y.Cmp(nMinusOne) == 0 {
+			continue
+		}
+		for j := uint(1); j <= t; j++ {
+			x := new(big.Int).Exp(y, two, n)
+			if x.Cmp(one) == 0 {
+				p := new(big.Int).GCD(nil, nil, new(big.Int).Sub(y, one), n)
+				return []*big.Int{p, new(big.Int).Div(n, p)}, nil
+			}
+			if x.Cmp(nMinusOne) == 0 {
+				continue tries
+			}
+			y = x
+		}
+		return nil, errRSAPrimesNotFound
+	}
+	return nil, errRSAPrimesNotFound
+}
+
+var rsaRecoveryBlindingBound = new(big.Int).Lsh(big.NewInt(1), 64)
+
+var errRSAPrimesNotFound = fmt.Errorf("%wthe primes of an RSA private key with none listed cannot be recovered from its n, e and d, so its d does not invert e or its modulus is not two primes", jose_errors.ErrInvalidPrivateKey)
 
 // CheckECDSAPublicKey refuses, with the error class given, an ECDSA public key
 // that is not a point on curve. RFC 7518 section 3.1 defines each ES algorithm
@@ -79,11 +183,73 @@ func CheckECDSAPrivateKey(privateKey *ecdsa.PrivateKey, curve elliptic.Curve) er
 	if err := CheckECDSAPublicKey(&privateKey.PublicKey, curve, jose_errors.ErrInvalidPrivateKey); err != nil {
 		return err
 	}
+	_, err := checkECDSAPrivateScalar(privateKey)
+	return err
+}
+
+func checkECDSAPrivateScalar(privateKey *ecdsa.PrivateKey) ([]byte, error) {
 	if privateKey.D == nil { //nolint:staticcheck
-		return fmt.Errorf("%wan ECDSA private key's scalar d is in [1, n-1]", jose_errors.ErrInvalidPrivateKey)
+		return nil, fmt.Errorf("%wan ECDSA private key needs its scalar d", jose_errors.ErrInvalidPrivateKey)
 	}
-	if _, err := privateKey.Bytes(); err != nil {
-		return fmt.Errorf("%wan ECDSA private key's scalar d is in [1, n-1]: %w", jose_errors.ErrInvalidPrivateKey, err)
+	scalar, err := privateKey.Bytes()
+	if err != nil {
+		return nil, fmt.Errorf("%wan ECDSA private key's scalar d is in [1, n-1]: %w", jose_errors.ErrInvalidPrivateKey, err)
+	}
+	if _, err := ecdsaPrivateKeyOfPoint(scalar, &privateKey.PublicKey); err != nil {
+		return nil, err
+	}
+	return scalar, nil
+}
+
+func ecdsaPrivateKeyOfPoint(scalar []byte, publicKey *ecdsa.PublicKey) (*ecdsa.PrivateKey, error) {
+	privateKey, err := ecdsa.ParseRawPrivateKey(publicKey.Curve, scalar)
+	if err != nil {
+		return nil, fmt.Errorf("%wthe scalar d of a %s key is %d octets in [1, n-1]: %w", jose_errors.ErrInvalidPrivateKey, publicKey.Params().Name, (publicKey.Params().N.BitLen()+7)/8, err)
+	}
+	if !privateKey.PublicKey.Equal(publicKey) {
+		return nil, fmt.Errorf("%wthe point of an EC key is not the public point of its scalar d", jose_errors.ErrInvalidPrivateKey)
+	}
+	return privateKey, nil
+}
+
+var (
+	ed25519FieldPrime         = new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 255), big.NewInt(19))
+	ed25519FieldPrimeMinusOne = new(big.Int).Sub(ed25519FieldPrime, big.NewInt(1))
+)
+
+// CheckEd25519PublicKey refuses, with the error class given, an Ed25519 public
+// key that is not 32 octets or not the canonical encoding of a point. RFC 8032
+// section 5.1.3 fails decoding when y is p or more, and when x is 0 but its
+// sign bit is set. x is 0 only where y is 1 or p-1.
+func CheckEd25519PublicKey(publicKey []byte, class error) error {
+	if len(publicKey) != ed25519.PublicKeySize {
+		return fmt.Errorf("%wan Ed25519 public key is %d octets, got %d", class, ed25519.PublicKeySize, len(publicKey))
+	}
+	bigEndian := make([]byte, ed25519.PublicKeySize)
+	for i, octet := range publicKey {
+		bigEndian[ed25519.PublicKeySize-1-i] = octet
+	}
+	signBit := bigEndian[0]&0x80 != 0
+	bigEndian[0] &= 0x7f
+	y := new(big.Int).SetBytes(bigEndian)
+	if y.Cmp(ed25519FieldPrime) >= 0 {
+		return fmt.Errorf("%wthe y of an Ed25519 public key must be less than 2^255-19", class)
+	}
+	if signBit && (y.Cmp(big.NewInt(1)) == 0 || y.Cmp(ed25519FieldPrimeMinusOne) == 0) {
+		return fmt.Errorf("%wan Ed25519 public key whose x is 0 must have its sign bit clear", class)
+	}
+	return nil
+}
+
+// CheckEd25519PrivateKey refuses an Ed25519 private key that is not a 32-octet
+// seed followed by the public key RFC 8032 section 5.1.5 derives from it.
+func CheckEd25519PrivateKey(privateKey []byte) error {
+	if len(privateKey) != ed25519.PrivateKeySize {
+		return fmt.Errorf("%wan Ed25519 private key is %d octets, got %d", jose_errors.ErrInvalidPrivateKey, ed25519.PrivateKeySize, len(privateKey))
+	}
+	derived := ed25519.NewKeyFromSeed(privateKey[:ed25519.SeedSize])
+	if !bytes.Equal(derived[ed25519.SeedSize:], privateKey[ed25519.SeedSize:]) {
+		return fmt.Errorf("%wthe public key of an Ed25519 private key is not the one its seed derives", jose_errors.ErrInvalidPrivateKey)
 	}
 	return nil
 }

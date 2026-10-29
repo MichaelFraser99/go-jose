@@ -37,7 +37,7 @@ func TestJwks_Add(t *testing.T) {
 			},
 			keyToAdd:    map[string]any{"kid": "key1", "alg": "RS256"},
 			expectErr:   true,
-			expectedErr: fmt.Errorf("%w provided jwk has kid value matching a value already present in the keyset", joseerror.ErrKeystoreError),
+			expectedErr: fmt.Errorf("%wprovided jwk has kid value matching a value already present in the keyset", joseerror.ErrKeystoreError),
 		},
 		{
 			name: "Add duplicate key with unique KIDs not enforced",
@@ -74,7 +74,7 @@ func TestJwks_Add(t *testing.T) {
 			},
 			keyToAdd:    map[string]any{"kid": 12345, "alg": "RS256"},
 			expectErr:   true,
-			expectedErr: fmt.Errorf("%w malformed key ID found for JWK", joseerror.ErrKeystoreError),
+			expectedErr: fmt.Errorf("%wmalformed key ID found for JWK", joseerror.ErrKeystoreError),
 		},
 	}
 

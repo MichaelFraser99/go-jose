@@ -116,10 +116,11 @@ signer, err := jws.GetSignerFromPrivateKey(jwa.ES256, privateKey)
 
 - **RS and PS:** the modulus must be 2048 to 8192 bits. RFC 7518 sections 3.3 and 3.5 make 2048 bits a MUST. The 8192-bit ceiling is this library's: the cost of an RSA verification grows with the square of the modulus, and a token can name its own key, so an unbounded modulus lets a peer hold a core for seconds. 8192 bits is also the default cap `crypto/tls` puts on a peer's RSA key. `Opts.BitSize` takes the same range.
 - **RS and PS exponent:** the public exponent must be odd and between 3 and 2^31 - 1. RFC 8017 section 3.1 puts e between 3 and n - 1 with GCD(e, λ(n)) = 1, and λ(n) is even, so e is odd. With e = 1 a signature is its own encoded message, so anyone could forge one. `crypto/rsa` refuses such a key when it verifies, and this library refuses it earlier, when the signer or validator is built.
-- **ES:** the key must lie on the algorithm's own curve: P-256 for ES256, P-384 for ES384 and P-521 for ES512. RFC 7518 section 3.1 defines each algorithm by its curve.
+- **ES:** the key must lie on the algorithm's own curve: P-256 for ES256, P-384 for ES384 and P-521 for ES512. RFC 7518 section 3.1 defines each algorithm by its curve. A private key's `d` must be the private key of its point.
+- **Every family:** the signer and validator keep their own copy of the key, so a later change to your key does not affect them. `Public` returns a new copy each time, so a change to that copy does not affect them either.
 - **ML-DSA:** the key must be an `*mldsa.PrivateKey` or `*mldsa.PublicKey` of the algorithm's own parameter set, so an ML-DSA-65 key is refused for ML-DSA-44. A zero-value key, such as `&mldsa.PrivateKey{}`, is refused. A zero-value private key reports the all-zero seed, so it is not rebuilt from it: that is the published example key of RFC 9964 Appendix A.
-- **Ed25519:** the key must be an `ed25519.PrivateKey` or `ed25519.PublicKey`, or a pointer to one. A private key must be 64 bytes, and its public half must be the public key of its seed. A public key must be 32 bytes. RFC 8032 section 5.1.5 sets these sizes. The signer and validator keep a copy of the key, so a later change to your key does not affect them.
-- **Every family:** a nil key, or one missing the modulus, exponent, curve, coordinates or private scalar, is refused when the signer or validator is built rather than panicking later. An RSA private key needs only `D`: RFC 7518 section 6.3.2 makes the primes optional.
+- **Ed25519:** the key must be an `ed25519.PrivateKey` or `ed25519.PublicKey`, or a pointer to one. A private key must be 64 bytes, and its public half must be the public key of its seed. A public key must be 32 bytes. RFC 8032 section 5.1.5 sets these sizes. A public key must encode a y below 2^255 - 19, because RFC 8032 section 5.1.3 says that any other y fails to decode. A public key of small order is refused too. NIST SP 800-186 appendix D.1.3.2 refuses such a key in full public key validation, and under the neutral element one fixed signature verifies every message. This check does not refuse a key of mixed order.
+- **Every family:** a nil key, or one missing the modulus, exponent, curve, coordinates or private scalar, is refused when the signer or validator is built rather than panicking later. An RSA private key needs only `D`, as RFC 7518 section 6.3.2 makes the primes optional. Without primes, the signer recovers the two primes from `N`, `E` and `D`, as NIST SP 800-56B Rev. 2 Appendix C.1 describes, and signs with them. If `D` does not undo `E`, or the modulus is not the product of two primes, the key is refused. With primes, the key must pass `rsa.PrivateKey.Validate`.
 
 ## Signing Contract
 The `Sign` method follows JOSE conventions per RFC 7518 rather than Go's `crypto.Signer` contract. It supports two modes:
@@ -129,11 +130,13 @@ The `Sign` method follows JOSE conventions per RFC 7518 rather than Go's `crypto
 
 > **The HMAC algorithms have no pre-hashed mode, and refuse one.** HMAC is itself a keyed hash, so there is no internal hashing step for a caller to skip. HS256, HS384 and HS512 refuse a non-zero `opts.HashFunc()` with `ErrSigningError`. Pass the signing input whole and leave `opts` nil.
 >
-> **Ed25519 has no pre-hashed mode either, and refuses one.** Ed25519 hashes the whole signing input as part of the signature. For a non-zero hash, `crypto/ed25519` signs with Ed25519ph, which is a different algorithm. So the Ed25519 signer refuses a non-zero `opts.HashFunc()` with `ErrSigningError`.
+> **Ed25519 has no pre-hashed mode either, and refuses one.** Ed25519 hashes the whole signing input as part of the signature. For a non-zero hash, `crypto/ed25519` signs with Ed25519ph, which is a different algorithm. So the Ed25519 signer refuses a non-zero `opts.HashFunc()` with `ErrSigningError`. An `*ed25519.Options` with a non-empty `Context` is refused the same way: RFC 8032 section 5.1 gives Ed25519 no context, and a context asks `crypto/ed25519` for Ed25519ctx.
 >
 > **ML-DSA has no pre-hashed mode either, and refuses one.** RFC 9964 section 5 signs the whole input. ML-DSA signers refuse a non-zero `opts.HashFunc()` with `ErrSigningError`, including `crypto.MLDSAMu`, which asks `crypto/mldsa` to sign an externally computed mu. RFC 9964 section 5 also requires an empty context, so an `*mldsa.Options` with a non-empty `Context` is refused the same way. An ML-DSA signature is hedged, the default variant of FIPS 204 section 3.4, so two signatures of one input differ.
 >
 > **This is a breaking change,** and it breaks two kinds of caller differently. One passed a pre-hashed digest with a non-zero `Hash`, as the old documentation described: they were already producing a MAC over the digest rather than over the signing input, which no validator accepts, with no error to say so. They now get an error at the call that causes it. The other is generic over `crypto.Signer` and passes a non-zero `Hash` alongside the **raw** signing input — that worked, because `opts` was ignored, and it no longer does. Such a caller should pass `nil` for an HS algorithm, or a zero `Hash`.
+
+Every signer accepts a nil `rand`. PS signatures are randomised, so the PS signers then read from `crypto/rand.Reader`.
 
 A `SignerOpts` implementation is provided:
 ```go
@@ -157,7 +160,7 @@ signer, err := jws.GetSigner(jwa.ES256, nil)
 signerValidator, err := jws.GetValidator(signer.Alg(), signer.Public())
 ```
 
-`jws.GetValidatorFromJwk` builds a validator from a jwk, decoded as a `map[string]any` rather than raw bytes. It reads the key by its `kty`, as `jwk.PublicFromJwk` does, so a jwk without a `kty`, or whose `kty` does not match its algorithm, is refused. RFC 8725 section 3.1 requires each key to be used with exactly one algorithm, so a jwk that carries an `alg` member is refused with `ErrInvalidPublicKey` unless that member is the algorithm you asked for. `EdDSA` and `Ed25519` count as the same algorithm here, because this library supports only the Ed25519 curve for `EdDSA`. It refuses the HMAC algorithms, because an `oct` key cannot be reached this way. The example below builds a validator for ES256:
+`jws.GetValidatorFromJwk` builds a validator from a jwk, decoded as a `map[string]any` rather than raw bytes. It reads the key by its `kty`, as `jwk.PublicFromJwk` does, so a jwk without a `kty`, or whose `kty` does not match its algorithm, is refused. RFC 8725 section 3.1 requires each key to be used with exactly one algorithm, so a jwk that carries an `alg` member is refused with `ErrInvalidPublicKey` unless that member is the algorithm you asked for. `EdDSA` and `Ed25519` count as the same algorithm here, because this library supports only the Ed25519 curve for `EdDSA`. A jwk whose `use` is present and is not `"sig"` is refused with `ErrInvalidPublicKey`. So is a jwk whose `key_ops` is present and does not include `"verify"`. RFC 7517 sections 4.2 and 4.3 let a publisher mark a key as not for verifying signatures. `IgnoreKeyUse` does not apply to `GetValidatorFromJwk`. To verify with such a key, read it with `jwk.PublicFromJwk` and give the key to `GetValidator`, which has no key-use rule. It refuses the HMAC algorithms, because an `oct` key cannot be reached this way. The example below builds a validator for ES256:
 ```go
 // Construct a validator from a jwk public key
 validator, err := jws.GetValidatorFromJwk(jwa.ES256, publicKeyMap)
@@ -202,13 +205,14 @@ Both apply the same rules to the token:
 - The protected header must be a UTF-8 JSON object, as section 5.2 step 3 and RFC 8725 section 3.7 require. `VerifyCompactSerialization` holds the payload to the same rule.
 - A JSON string in the protected header must not hold an unpaired UTF-16 surrogate escape, such as `"\ud800"`. RFC 8259 section 8.2 calls the behaviour of a receiver of such a string unpredictable. Go would turn it into U+FFFD, so different signed bytes would give the same value. `VerifyCompactSerialization` holds the payload to the same rule.
 - An `alg` this library has no validator for is refused with `ErrUnsupportedAlgorithm` before any key is sought, so no `jku` or `x5u` is fetched for it.
-- A `b64` header of `false` is refused with `ErrMissingCriticalClaim`, even when you name `b64` in `UnderstoodCriticalHeaders`. RFC 7797 section 3 says such a payload is not base64url-encoded, and this library always decodes it.
+- A `b64` header of `false` is refused with `ErrMissingCriticalClaim`, even when you name `b64` in `UnderstoodCriticalHeaders`. RFC 7797 section 3 says such a payload is not base64url-encoded, and this library always decodes it. A `b64` header that is not a JSON boolean is refused with `ErrMalformedClaim`, as RFC 7797 section 3 requires.
+- A `typ` or `cty` header that is not a string is refused with `ErrMalformedClaim`, whether or not you set `AcceptedTypes`. RFC 7515 sections 4.1.9 and 4.1.10 define each as a media type, which is a string.
 
 One message can still have more than one valid token. ECDSA signatures are malleable: for an `ES256`, `ES384` or `ES512` token, anyone can replace the signature's `S` with `n - S` and get a second token that verifies. This needs no key. So do not key a replay or deduplication cache on the raw token string. Key it on a claim such as `jti` instead.
 
 `VerifyCompactSerialization` refuses a nested JWT with `ErrMalformedToken`, before any key is sought. RFC 7519 section 5.2 marks one with a `cty` of `JWT`, compared as RFC 7515 section 4.1.10 describes: case-insensitively, with `application/` treated as prepended. Media-type parameters are ignored, so `application/jwt; charset=utf-8` is a nested JWT too. `Verify` does not look at `cty`, because section 4.1.10 says JWS implementations ignore it. To unwrap a nested JWT yourself, call `Verify` and verify the payload it returns.
 
-Both try the keys from every source until one verifies the signature, up to `JoseOptions.MaxKeysTried`, which is 100 when unset. RFC 7517 section 4.5 does not require a `kid` to be unique, so a key set a peer publishes can hold thousands of keys under one `kid`, and each costs a signature verification. A token that would need more keys than the limit is refused with `ErrTooManyKeys`, not `ErrInvalidSignature`, so you can tell an oversized key set from a forgery. Only a key that a validator can be built from for the token's `alg` counts. The limit covers the keys your retriever returns too.
+Both try the keys from every source until one verifies the signature, up to `JoseOptions.MaxKeysTried`, which is 100 when unset. RFC 7517 section 4.5 does not require a `kid` to be unique, so a key set a peer publishes can hold thousands of keys under one `kid`, and each costs a signature verification. A token that would need more keys than the limit is refused with `ErrTooManyKeys`, not `ErrInvalidSignature`, so you can tell an oversized key set from a forgery. Only a key that a validator can be built from for the token's `alg` counts. The limit covers the keys your retriever returns too. When the limit is reached, no further `jku` or `x5u` is fetched.
 
 ## Keys a token carries
 
@@ -244,7 +248,7 @@ head, body, err := jwt.Validate(ctx, token, nil, &model.JoseOptions{
 })
 ```
 
-Both URLs come from the header of the token being verified, so this library makes an outbound request to an address a peer chose, before the signature is checked. Give the client a transport that rejects the destinations your deployment will not allow, such as private, loopback, link-local and other reserved ranges. The body is capped at 4 MiB whatever client you supply.
+Both URLs come from the header of the token being verified, so this library makes an outbound request to an address a peer chose, before the signature is checked. Give the client a transport that rejects the destinations your deployment will not allow, such as private, loopback, link-local and other reserved ranges. The body is capped at 4 MiB whatever client you supply. Each fetch uses a copy of your client without its cookie jar. The fetch sends no cookies, and a cookie the server sets does not go into your jar. RFC 8725 section 3.10 asks for this.
 
 Every request a fetch makes must use `https`, including each redirect hop. RFC 7515 sections 4.1.2 and 4.1.5 say an HTTP GET to retrieve the resource MUST use TLS, so a redirect to plain `http` is refused before the request is sent, whatever transport you supply. Your client's own redirect policy still applies. When it sets no `CheckRedirect`, Go's default stops after 10 redirects.
 
@@ -262,7 +266,9 @@ A key from a `jwk` header, or a member of a `jku` set, verifies the token only w
 - Its `alg` is absent or equals the header's `alg`. RFC 8725 section 3.1 says "each key MUST be used with exactly one algorithm". `EdDSA` and `Ed25519` count as equal, because with an Ed25519 key they name the same algorithm. A key that names no `alg` stays a candidate, since RFC 7517 section 4.4 makes `alg` optional. Such a key verifies under any algorithm its key type allows, so pin `AllowedSigningAlgorithms` to bind it to one.
 - Its `use` is absent or `"sig"`, and its `key_ops` is absent or includes `"verify"`. RFC 7517 sections 4.2 and 4.3 let a publisher mark a key as not for verifying signatures.
 
-A `jku` set is never used whole because nothing in it matched. When no member qualifies, the set contributes no key and the `jku` retriever's error matches `ErrNoKeyIdentifierMatch`. `VerifyCompactSerialization` then tries the next key source, and if no key verifies it reports `ErrInvalidSignature`, naming the retriever's error only in its message. A `kid`, `alg`, `use` or `key_ops` of the wrong JSON type disqualifies a `jku` member, and refuses an inline `jwk` with `ErrMalformedClaim`, whatever the header holds.
+A `jku` set is never used whole because nothing in it matched. When no member qualifies, the set contributes no key and the `jku` retriever's error matches `ErrNoKeyIdentifierMatch`. `VerifyCompactSerialization` then tries the next key source. If no key verifies, it reports `ErrInvalidSignature` and names the retriever's error only in its message, unless another source failed.
+
+When a key source fails, verification continues with the next source. A source fails when a fetch fails, a body is too large, a body does not decode, or your retriever returns an error. A key the token carries that is itself malformed is different: it is wrong in the signed header every time. So when verification reaches it, a `jwk` with a member of the wrong type, or an `x5c` or `x5u` chain out of order, refuses the token at once with `ErrMalformedClaim`, and no later source is tried. Verification stops at the first key that verifies, so a key from your own retriever, which is tried first, can verify the token before a malformed header source is read. If no key verifies the signature, the error wraps each failure. It matches `ErrApplicationError` for a failed fetch, and `context.DeadlineExceeded` or `context.Canceled` when applicable. It does not match `ErrInvalidSignature`. A `kid`, `alg`, `use` or `key_ops` of the wrong JSON type disqualifies a `jku` member, and refuses an inline `jwk` with `ErrMalformedClaim`, whatever the header holds.
 
 No RFC makes `use` or `key_ops` a requirement: section 4.3 leaves it to each application to say which, if either, it honours. This library honours both by default. Set `JoseOptions.IgnoreKeyUse` to skip that check. It never relaxes the `kid` and `alg` rules.
 
@@ -281,7 +287,7 @@ head, body, err := jwt.Validate(ctx, token, retriever, &model.JoseOptions{
 
 Each is off when unset, so none of this changes what an existing caller sees — except `crit`, below.
 
-`AcceptedTypes` compares as RFC 7515 section 4.1.9 requires: case-insensitively, with `application/` treated as prepended to any value containing no `/`. So naming `example+jwt` accepts `application/example+jwt` and `Example+JWT`, and refuses `x-example+jwt`.
+`AcceptedTypes` compares as RFC 7515 section 4.1.9 requires: case-insensitively, with `application/` treated as prepended to any value containing no `/`. So naming `example+jwt` accepts `application/example+jwt` and `Example+JWT`, and refuses `x-example+jwt`. Media-type parameters are ignored on both sides, so `example+jwt; v=1` matches `example+jwt`. A `typ` with no type before its parameters matches nothing.
 
 `RequireKeyIdentifier` refuses a `kid` that is absent or is not a non-empty string. RFC 7517 section 4.5 leaves `kid` optional, which is why it is off by default.
 
@@ -309,6 +315,8 @@ With no `X509Roots` configured, a token's `x5c` and `x5u` headers contribute no 
 A malformed `x5c` is refused whether or not roots are configured, because its shape is a property of the claim rather than of your trust configuration. An array that is not an array of strings, an empty array, or an entry that is not exactly one base64-encoded DER certificate is `ErrMalformedClaim`. Section 4.1.6 names the base64 of RFC 4648 section 4, and RFC 4648 section 3.3 says a decoder MUST reject characters outside the alphabet. So an entry holding a line break is refused, as is one whose pad bits are not zero. An `x5u` body is PEM, where line breaks are part of the format, so this does not apply to it.
 
 The signing key is taken from the first certificate, and that certificate is the one validated against your roots, as section 4.1.6 requires. The algorithm the issuer used to sign that certificate is not compared with the token's `alg`. An ES256 key in a certificate issued by an RSA root is usable.
+
+An `x5c` or `x5u` chain must be in order. Each certificate after the first must be the one that signed the certificate before it, as RFC 7515 sections 4.1.5 and 4.1.6 require. Its subject must be the issuer of the certificate before it. A chain can hold at most 16 certificates. A chain that breaks either rule is refused with `ErrMalformedClaim`. This library checks the `x5c` count even when no roots are configured.
 
 That first certificate must also be one whose key may verify a signature. `x5c` and `x5u` get the same checks:
 
@@ -353,7 +361,12 @@ A key that cannot be encoded is refused with the same errors:
 - An EC key on a curve other than P-256, P-384 and P-521, the curves RFC 7518 section 6.2.1.1 registers. The curve must be the standard library's own `elliptic.P256()`, `P384()` or `P521()`; another curve that carries one of those names is refused.
 - An EC key whose point is not on its curve, including a negative coordinate or one too large for the curve.
 - An EC private key whose `d` is outside `[1, n-1]`, where `n` is the order of the curve.
-- An RSA private key whose `d` is not between 0 and `n`.
+- An EC private key whose `d` is not the private key of its point.
+- An Ed25519 private key whose second half is not the public key of its seed.
+- An Ed25519 public key that is not the canonical encoding of a point. RFC 8032 section 5.1.3 refuses a `y` of 2^255-19 or more, and a set sign bit when `x` is 0.
+- An RSA key whose `e` is not an odd integer from 3 to 2^31-1.
+- An RSA private key whose `d` is not between 0 and `n`, or does not undo `e`.
+- An RSA private key with no primes and a modulus over 8192 bits.
 - An RSA private key with one prime, or more than two. RFC 7518 section 6.3.2.7 says a consumer that does not support more than two MUST NOT use such a key, and `PrivateFromJwk` refuses a jwk that carries `oth`.
 - An RSA private key with a prime that is not positive. RFC 8017 section 3.2 makes `p` and `q` positive integers.
 - A two-prime RSA private key that `rsa.PrivateKey.Validate` rejects, such as one whose primes do not multiply to `n`.
@@ -381,7 +394,7 @@ func jwk.PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error)
 
 The value returned is a pointer to the respective key, such as `*ecdsa.PublicKey` or `*rsa.PublicKey`.
 
-An `OKP` jwk is read only when its `crv` is `Ed25519`, the one OKP subtype this library supports. RFC 8037 section 2 requires `crv`, so a jwk without a string `crv` is refused as an invalid key. Any other subtype is refused with `ErrUnsupportedAlgorithm`. Each of `x` and `d` must be 32 octets, the key sizes RFC 8032 section 5.1.5 sets for Ed25519. For a private key, `x` must be the public key of `d`.
+An `OKP` jwk is read only when its `crv` is `Ed25519`, the one OKP subtype this library supports. RFC 8037 section 2 requires `crv`, so a jwk without a string `crv` is refused as an invalid key. Any other subtype is refused with `ErrUnsupportedAlgorithm`. Each of `x` and `d` must be 32 octets, the key sizes RFC 8032 section 5.1.5 sets for Ed25519. For a private key, `x` must be the public key of `d`. `x` must be the canonical encoding of a point, so one key has one `x` and one thumbprint.
 
 **This is a breaking change for OKP keys.** Earlier versions ignored the value of `crv`, so an `X25519` or `Ed448` key was returned as an Ed25519 key. They also accepted any length of `x` and `d`, and did not compare `x` with `d`. A key that those versions read can now be refused.
 
@@ -391,13 +404,15 @@ An `EC` jwk is read only when its `crv` is P-256, P-384 or P-521. Any other curv
 
 Each integer member of an `RSA` jwk (`n`, `e`, `d`, `p`, `q`, `dp`, `dq` and `qi`) must use the minimum number of octets, as RFC 7518 section 2 requires of a Base64urlUInt. A member with a leading zero octet is refused with `ErrMalformedClaim`. Zero itself is the one octet `"AA"`. Without this rule one key would have more than one jwk, and so more than one RFC 7638 thumbprint.
 
-An `RSA` jwk's `e` must be an odd integer from 3 to 2^31-1. RFC 3447 section 3.1 sets the lower bound and requires an odd value, and `crypto/rsa` refuses a larger one. A private key's `d` must be a positive integer less than `n`, as RFC 3447 section 3.2 defines it. When `p` and `q` are present, the key must pass `rsa.PrivateKey.Validate`, and `dp`, `dq` and `qi` must be the CRT values of `p`, `q` and `d`. When they are absent, `d` must undo `e`. The reader cannot compute lambda(n) without the primes, so `crypto/rsa` signs 32 random 32-byte messages with the key and verifies each signature under `n` and `e`. A wrong `d` passes only if all 32 signatures come out right. Each signature costs one full-size private exponentiation, so reading a key with no primes takes noticeably longer than reading one with them. `crypto/rsa` refuses a key under 1024 bits unless `GODEBUG=rsa1024min=0` is set, so such a key with no primes is refused when it is read, as it could not sign either. `PrivateFromJwk` refuses a bad `n` or `e` in an RSA private key with `ErrInvalidPrivateKey`, and a refused `e` also matches `ErrInvalidPublicKey`.
+An `RSA` jwk's `e` must be an odd integer from 3 to 2^31-1. RFC 3447 section 3.1 sets the lower bound and requires an odd value, and `crypto/rsa` refuses a larger one. A private key's `d` must be a positive integer less than `n`, as RFC 3447 section 3.2 defines it. When `p` and `q` are present, the key must pass `rsa.PrivateKey.Validate`, and `dp`, `dq` and `qi` must be the CRT values of `p`, `q` and `d`. When they are absent, the reader recovers `p` and `q` from `n`, `e` and `d`, as NIST SP 800-56B Rev. 2 Appendix C.1 describes. The key must then pass `rsa.PrivateKey.Validate`. The key that the reader returns carries `p`, `q` and their CRT values, so it signs as fast as a key read with them. If `d` does not undo `e`, the primes are not found or the key fails `Validate`, and the jwk is refused. The method recovers only two primes, so a key with no primes whose modulus has more than two is refused, like a jwk that carries `oth`. An `*rsa.PrivateKey` that lists more than two primes, as `rsa.GenerateMultiPrimeKey` returns, is still accepted by the signers. Recovery usually costs one or two full-size exponentiations. `PrivateFromJwk` refuses a bad `n` or `e` in an RSA private key with `ErrInvalidPrivateKey`, and a refused `e` also matches `ErrInvalidPublicKey`. A Base64urlUInt with no octets is refused with `ErrMalformedClaim`. An `n` of zero is refused. With no primes, a modulus over 8192 bits is refused before the primes are recovered.
 
-The error for an unsupported `kty` or `crv` names the values this library supports. It does not repeat the value the jwk carried, so a peer's text does not reach your logs.
+A jwk with no `kty` is refused with `ErrInvalidPublicKey` or `ErrInvalidPrivateKey`. The error for an unsupported `kty` or `crv` names the values this library supports. It does not repeat the value the jwk carried, so a peer's text does not reach your logs.
 
 ### Key sets
 
-`model.Jwks` holds a JWK Set. Decoding JSON into it follows RFC 7517 section 5: the document must be an object with a `keys` member holding an array of JWKs. Anything else is refused with `ErrKeystoreError`, including a missing `keys`, `"keys": null` and a document that is itself `null`. A field that may hold no set should be a `*model.Jwks`, which `null` leaves nil. The member is found by its exact name, `keys`, as RFC 7515 section 5.3 compares names; `KEYS`, `Keys` and other spellings are ignored like any unknown member.
+`model.Jwks` holds a JWK Set. Decoding JSON into it follows RFC 7517 section 5: the document must be an object with a `keys` member holding an array of JWKs. Anything else is refused with `ErrKeystoreError`, including a missing `keys`, `"keys": null` and a document that is itself `null`. A field that may hold no set should be a `*model.Jwks`, which `null` leaves nil. The member is found by its exact name, `keys`, as RFC 7515 section 5.3 compares names; `KEYS`, `Keys` and other spellings are ignored like any unknown member. A `keys` member that is `null`, or that is not a JSON object, is refused. A document that is not UTF-8, or that holds an unpaired UTF-16 surrogate escape, is refused with `ErrKeystoreError`. RFC 8259 sections 8.1 and 8.2 give these rules.
+
+`Opts.EnforceUniqueKIDs` applies to `Add` only. Decoding keeps every key, including keys with the same `kid`.
 
 `Jwks.RetrieveByKeyID` returns every key that carries the given `kid`, in set order, because RFC 7517 section 4.5 does not make a `kid` unique. It returns an error only when no key carries it.
 
@@ -433,6 +448,21 @@ A `crypto.Signer` from elsewhere, such as an `*ecdsa.PrivateKey`, an `*rsa.Priva
 - For Ed25519, the key must be an Ed25519 key.
 - For ML-DSA-44, ML-DSA-65 and ML-DSA-87, the key must be an ML-DSA key of that parameter set. `New` passes the whole signing input with a zero hash, so `crypto/mldsa` signs it with an empty context.
 - A key that does not suit the algorithm, and any HS algorithm, is refused with `ErrInvalidPrivateKey`.
+- `New` passes an `*ecdsa.PrivateKey`, `*rsa.PrivateKey`, `ed25519.PrivateKey` or `*ed25519.PrivateKey` to `GetSignerFromPrivateKey`, and refuses each key that `GetSignerFromPrivateKey` refuses. So an RS or PS key needs a modulus of 2048 to 8192 bits. For any other `crypto.Signer`, `New` checks the public key that `Public` returns, the same way a validator does.
+- `New` refuses a nil signer, or a nil pointer, with `ErrInvalidPrivateKey`. It does not panic.
+- `New` refuses an `alg` outside `jwa`, such as `jwa.Algorithm(999)`, with `ErrUnsupportedAlgorithm`. RFC 7515 section 4.1.1 says `alg` must be present and understood.
+- `New` checks the header it will sign with the same rules `Validate` applies, and returns the same errors. So it does not sign a header that its own `Validate` refuses for its shape:
+  - `jku` and `x5u` must be HTTPS URLs. RFC 7515 sections 4.1.2 and 4.1.5 require TLS.
+  - `jwk` must be a JSON object (section 4.1.3).
+  - `kid`, `typ` and `cty` must be strings (sections 4.1.4, 4.1.9 and 4.1.10).
+  - `x5c` must be a non-empty array of base64 DER certificates (section 4.1.6).
+  - `x5t` and `x5t#S256` must be base64url (sections 4.1.7 and 4.1.8).
+  - `crit` must be a non-empty array of distinct names. Each name must be in the header, and must not be a parameter that RFC 7515 defines (section 4.1.11).
+  - `b64` must be a JSON boolean (RFC 7797 section 3).
+
+  A fault is `ErrMalformedClaim`. A `crit` name that the header does not hold is `ErrMissingCriticalClaim`.
+- `New` refuses a `b64` of `false` with `ErrMissingCriticalClaim`, because it always encodes the payload.
+- `New` refuses a `b64` that `crit` does not name with `ErrMissingCriticalClaim`. RFC 7797 section 6 says `crit` MUST include `b64` when `b64` is used. To sign with `"b64": true`, also set `"crit": ["b64"]`. A verifier must then name `b64` in `UnderstoodCriticalHeaders`.
 
 The second validates a jwt and returns the decoded head and body:
 
@@ -448,7 +478,7 @@ The retriever supplies key material of your own. Pass nil only when a key the to
 | --- | --- | --- |
 | `iss`, `sub`, `jti` | Must be a string (RFC 7519 sections 4.1.1, 4.1.2 and 4.1.7) | `ErrMalformedClaim` |
 | `aud` | Must be a string or an array of strings (RFC 7519 section 4.1.3) | `ErrMalformedClaim` |
-| `iat`, `nbf`, `exp` | Must be a JSON number, a NumericDate (RFC 7519 section 2). A fractional value keeps its fraction | `ErrMalformedClaim` |
+| `iat`, `nbf`, `exp` | Must be a JSON number, a NumericDate (RFC 7519 section 2). A fractional value keeps its fraction, and is compared as float64 seconds, to within a microsecond | `ErrMalformedClaim` |
 | `exp` | The current time must be before `exp` (RFC 7519 section 4.1.4). A token is expired at the instant `exp` names | `ErrExpired` |
 | `nbf` | The current time must be at or after `nbf` (RFC 7519 section 4.1.5) | `ErrNotYetValid` |
 | `iat` | Must not be after the current time | `ErrNotYetValid` |
@@ -457,7 +487,9 @@ The `iat` rule is this library's own. RFC 7519 section 4.1.6 sets no acceptance 
 
 `JoseOptions.ClockSkewLeeway` widens the window the three time claims are judged against: `nbf` and `iat` may be up to the leeway in the future, and a token stays valid until the leeway has passed after `exp`.
 
-A value too large for any clock, such as an `nbf` of `1e19`, is judged as a time far in the future. It is not converted to an integer, so the result is the same on every CPU.
+A value too large for any clock, such as an `nbf` of `1e19`, is judged as a time far in the future. It is not converted to an integer, so the result is the same on every CPU. A number outside the float64 range, such as `1e400`, is different: the JSON decoder refuses the token with `ErrMalformedToken` before any claim is read. RFC 8259 section 6 lets a recipient limit the range of numbers.
+
+`Validate` refuses a token that does not have three segments with `ErrMalformedToken`. A token of five segments is a JWE, which this library does not support, so it is refused with `ErrUnsupportedAlgorithm`.
 
 To check the audience, name this recipient in `JoseOptions.ExpectedAudience`:
 
@@ -482,18 +514,18 @@ Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 | `ErrDecryptionFailed` | Reserved for JWE. Nothing returns it: the `jwe` package is a stub and exports nothing |
 | `ErrUnsupportedAlgorithm` | The algorithm named is not supported, has no validator in this library, or is not permitted by the options given |
 | `ErrSigningError` | Signing failed |
-| `ErrMalformedClaim` | A claim is present but its type or value is wrong |
+| `ErrMalformedClaim` | A claim is present but its type or value is wrong. This includes a `b64` that is not a boolean, and an `x5c` or `x5u` chain that is out of order or longer than 16 certificates |
 | `ErrMissingClaim` | A required claim is absent |
 | `ErrMissingCriticalClaim` | A header named in `crit` is absent, or names an extension this library does not understand, or `b64` is `false` |
 | `ErrNoKeyIdentifierMatch` | No key could be selected. The `kid` matches nothing, a `jku` set holds no usable key that matches the header, a certificate chain does not reach a configured root, or an `x5t` thumbprint does not match the chain |
 | `ErrKeystoreError` | A `model.Jwks` lookup or addition failed, a document decoded into `model.Jwks` is not a JWK Set, or the configuration needed to use a key source is absent, such as `X509Roots` for a certificate chain |
-| `ErrApplicationError` | Key material a header named could not be obtained, decoded or used. Covers a failed `jku` or `x5u` fetch, a local decode of what one returned, and an inline `jwk` of a key type or curve this library does not support. A fetch that ran out of time also matches `context.DeadlineExceeded`, and one cancelled through `ctx` matches `context.Canceled` |
+| `ErrApplicationError` | Key material a header named could not be obtained, decoded or used. Covers a failed `jku` or `x5u` fetch, a local decode of what one returned (an empty `x5u` body is a failed decode), and an inline `jwk` of a key type or curve this library does not support. A fetch that ran out of time also matches `context.DeadlineExceeded`, and one cancelled through `ctx` matches `context.Canceled` |
 | `ErrMalformedToken` | The token is not a well formed JOSE object |
 | `ErrExpired` | The current time is not before the token's `exp`, allowing for `ClockSkewLeeway` |
 | `ErrNotYetValid` | The token's `nbf` or `iat` is after the current time, allowing for `ClockSkewLeeway` |
 | `ErrAudienceMismatch` | `JoseOptions.ExpectedAudience` is set and the token's `aud` names none of its values |
-| `ErrInvalidOptions` | The options passed are themselves wrong, whatever the token. `JoseOptions.ExpectedAudience` holding an empty string is one case |
-| `ErrTooManyKeys` | The signature did not verify under as many keys as `JoseOptions.MaxKeysTried` allows, and more keys remained |
+| `ErrInvalidOptions` | The options passed are themselves wrong, whatever the token. A nil `ctx`, and a `JoseOptions.ExpectedAudience` that holds an empty string, are two cases |
+| `ErrTooManyKeys` | The signature did not verify under as many keys as `JoseOptions.MaxKeysTried` allows, and more keys or key sources remained |
 
 Each sentinel carries a prefix terminated by `": "`, so wrap one with `%w` immediately followed by the rest of the message and no space:
 
@@ -503,7 +535,7 @@ fmt.Errorf("%wshould be an instance of *ecdsa.PrivateKey", joseerror.ErrInvalidP
 
 That reads `invalid private key: should be an instance of *ecdsa.PrivateKey`, and `errors.Is` still matches.
 
-When a header check echoes a value from the token in its error, the value is quoted with Go escaping and cut to its first 64 characters, with `...` marking the cut. A peer cannot put a raw line break or kilobytes of text into your logs this way.
+When a header check echoes a value from the token in its error, the value is quoted with Go escaping and cut to its first 64 characters, with `...` marking the cut. A peer cannot put a raw line break or kilobytes of text into your logs this way. This includes the error from parsing an `x5c` or `x5u` certificate.
 
 ## Upgrading from 0.10.x
 

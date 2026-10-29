@@ -18,6 +18,7 @@ import (
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs384"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rs512"
 	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
+	internal_jwk "github.com/MichaelFraser99/go-jose/internal/jose/jwk"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
 	"github.com/MichaelFraser99/go-jose/jwk"
@@ -84,7 +85,12 @@ func hasValidator(alg jwa.Algorithm) bool {
 // publicJwk - jwk format public key. Its "kty" selects the key type, and the key
 // must suit alg as GetValidator requires. RFC 8725 section 3.1 requires each key
 // to be used with exactly one algorithm, so a jwk carrying an "alg" member is
-// refused unless that member is the string alg names.
+// refused unless that member is the string alg names. A jwk whose "use" is
+// present and is not "sig", or whose "key_ops" is present and lacks "verify",
+// is refused too, as RFC 7517 sections 4.2 and 4.3 mark it as not for verifying
+// signatures. Every refusal carries ErrInvalidPublicKey. To verify with such a
+// key anyway, read it with jwk.PublicFromJwk and pass it to GetValidator,
+// which applies no key-use rule.
 func GetValidatorFromJwk(alg jwa.Algorithm, publicJwk map[string]any) (model.Validator, error) {
 	switch alg {
 	case jwa.ES256, jwa.ES384, jwa.ES512, jwa.RS256, jwa.RS384, jwa.RS512, jwa.PS256, jwa.PS384, jwa.PS512, jwa.EdDSA, jwa.Ed25519, jwa.MLDSA44, jwa.MLDSA65, jwa.MLDSA87:
@@ -103,6 +109,9 @@ func GetValidatorFromJwk(alg jwa.Algorithm, publicJwk map[string]any) (model.Val
 			}
 			return nil, fmt.Errorf("%wthe jwk's alg %s does not name %s", joseerror.ErrInvalidPublicKey, named, alg.String())
 		}
+	}
+	if err := internal_jwk.CheckKeyUse(publicJwk, joseerror.ErrInvalidPublicKey, joseerror.ErrInvalidPublicKey); err != nil {
+		return nil, err
 	}
 	publicKey, err := jwk.PublicFromJwk(publicJwk)
 	if err != nil {

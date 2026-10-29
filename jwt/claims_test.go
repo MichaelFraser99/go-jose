@@ -68,7 +68,7 @@ func claimsTestRun(t *testing.T, tests []claimsTestCase) {
 	}
 }
 
-func TestValidate_TimeClaimsAreJudgedAtFullPrecision(t *testing.T) {
+func TestValidate_TimeClaimsKeepTheirFraction(t *testing.T) {
 	leeway := &model.JoseOptions{ClockSkewLeeway: 30 * time.Second}
 	claimsTestRun(t, []claimsTestCase{
 		{name: "exp equal to now is expired", payload: `{"exp":1700000000.4}`, want: joseerror.ErrExpired, clause: "RFC 7519 4.1.4"},
@@ -169,6 +169,31 @@ func TestValidate_AnEmptyExpectedAudienceIsRefusedBeforeTheTokenIsRead(t *testin
 		_, _, err := Validate(context.Background(), token, nil, &model.JoseOptions{ExpectedAudience: []string{""}})
 		if !errors.Is(err, joseerror.ErrInvalidOptions) {
 			t.Errorf("[RFC 7519 4.1.3] an empty string names no recipient, so the options are refused whatever the token %q: want %q, got %v", token, joseerror.ErrInvalidOptions, err)
+		}
+	}
+}
+
+func TestValidate_TimeClaimsAreJudgedToTheMicrosecond(t *testing.T) {
+	claimsTestRun(t, []claimsTestCase{
+		{name: "exp a microsecond ahead is accepted", payload: `{"exp":1700000000.400001}`, clause: "RFC 7519 4.1.4"},
+		{name: "exp a microsecond behind is expired", payload: `{"exp":1700000000.399999}`, want: joseerror.ErrExpired, clause: "RFC 7519 4.1.4"},
+		{name: "nbf a microsecond ahead is not yet valid", payload: `{"nbf":1700000000.400001}`, want: joseerror.ErrNotYetValid, clause: "RFC 7519 4.1.5"},
+		{name: "nbf a microsecond behind is accepted", payload: `{"nbf":1700000000.399999}`, clause: "RFC 7519 4.1.5"},
+	})
+}
+
+func TestValidate_ANumberBeyondTheFloat64RangeIsRefusedAsAMalformedToken(t *testing.T) {
+	claimsTestRun(t, []claimsTestCase{
+		{name: "exp of 1e400", payload: `{"exp":1e400}`, want: joseerror.ErrMalformedToken, clause: "RFC 8259 6"},
+		{name: "nbf of -1e400", payload: `{"nbf":-1e400}`, want: joseerror.ErrMalformedToken, clause: "RFC 8259 6"},
+		{name: "a private claim of 1e400", payload: `{"n":1e400}`, want: joseerror.ErrMalformedToken, clause: "RFC 8259 6"},
+		{name: "exp of the largest float64 is accepted", payload: `{"exp":1.7976931348623157e308}`, clause: "RFC 7519 4.1.4"},
+		{name: "nbf of the largest float64 is not yet valid", payload: `{"nbf":1.7976931348623157e308}`, want: joseerror.ErrNotYetValid, clause: "RFC 7519 4.1.5"},
+	})
+	for _, payload := range []string{`{"exp":1e400}`, `{"iat":1e400}`} {
+		claimsTestFixClock(t, claimsTestNow)
+		if err := claimsTestValidate(t, payload, nil); errors.Is(err, joseerror.ErrMalformedClaim) {
+			t.Errorf("[RFC 8259 6] %s is refused by the JSON decoder before any claim is judged, so it must not match ErrMalformedClaim, got %q", payload, err)
 		}
 	}
 }

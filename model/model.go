@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
 	"net/http"
@@ -26,7 +27,8 @@ type JoseOptions struct {
 	// outbound request to an address a peer chose: supply a client whose transport
 	// rejects the destinations your deployment will not allow. FetchTimeout bounds each
 	// fetch whatever Timeout the client sets, provided its transport honours the
-	// request's context.
+	// request's context. A fetch uses a copy of this client with no cookie jar, so it
+	// sends no cookies and stores none, as RFC 8725 section 3.10 asks.
 	//
 	// Every request of a fetch, including each redirect hop, must be https, as RFC 7515
 	// sections 4.1.2 and 4.1.5 require. Any other is refused before it is sent.
@@ -161,25 +163,33 @@ func (j Jwks) MarshalJSON() ([]byte, error) {
 }
 
 // UnmarshalJSON reads a JWK Set. RFC 7517 section 5 requires a JSON object with a
-// "keys" member holding an array of JWKs, so anything else, including a JSON null, is
-// refused with ErrKeystoreError. The member name is matched exactly, by the RFC 7515
-// section 5.3 comparison rules; other members are ignored. A struct field that may
-// hold no set should be a *Jwks, which a JSON null leaves nil.
+// "keys" member holding an array of JWKs, each a JSON object, so anything else,
+// including a JSON null in place of the set or of a member, is refused with
+// ErrKeystoreError. So is a document that is not UTF-8 (RFC 8259 section 8.1) or that
+// holds an unpaired UTF-16 surrogate escape (RFC 8259 section 8.2). The member name is
+// matched exactly, by the RFC 7515 section 5.3 comparison rules; other members are
+// ignored. A struct field that may hold no set should be a *Jwks, which a JSON null
+// leaves nil. Opts.EnforceUniqueKIDs applies to Add, not to decoding.
 func (j *Jwks) UnmarshalJSON(data []byte) error {
-	var members map[string]json.RawMessage
-	if err := json.Unmarshal(data, &members); err != nil {
-		return fmt.Errorf("%wa JWK Set must be a JSON object: %w", joseerror.ErrKeystoreError, err)
+	members, err := jsonutils.DecodeJSONObject(data)
+	if err != nil {
+		return fmt.Errorf("%wa JWK Set must be a UTF-8 JSON object: %w", joseerror.ErrKeystoreError, err)
 	}
 	raw, present := members["keys"]
 	if !present {
 		return fmt.Errorf("%wa JWK Set must have a \"keys\" member", joseerror.ErrKeystoreError)
 	}
-	var keys []map[string]any
-	if err := json.Unmarshal(raw, &keys); err != nil {
-		return fmt.Errorf("%wthe \"keys\" member of a JWK Set must be an array of JWKs: %w", joseerror.ErrKeystoreError, err)
+	values, isArray := raw.([]any)
+	if !isArray {
+		return fmt.Errorf("%wthe \"keys\" member of a JWK Set must be an array of JWKs", joseerror.ErrKeystoreError)
 	}
-	if keys == nil {
-		return fmt.Errorf("%wthe \"keys\" member of a JWK Set must be an array, not null", joseerror.ErrKeystoreError)
+	keys := make([]map[string]any, 0, len(values))
+	for i, value := range values {
+		key, isObject := value.(map[string]any)
+		if !isObject {
+			return fmt.Errorf("%wmember %d of the \"keys\" array of a JWK Set must be a JSON object", joseerror.ErrKeystoreError, i)
+		}
+		keys = append(keys, key)
 	}
 	j.Keys = keys
 	return nil
@@ -212,10 +222,10 @@ func (j *Jwks) RetrieveByKeyID(kid string) ([]map[string]any, error) {
 func (j *Jwks) Add(jwk map[string]any) error {
 	if kid, ok := jwk["kid"]; ok && j.Opts.EnforceUniqueKIDs {
 		if sKid, ok := kid.(string); !ok {
-			return fmt.Errorf("%w malformed key ID found for JWK", joseerror.ErrKeystoreError)
+			return fmt.Errorf("%wmalformed key ID found for JWK", joseerror.ErrKeystoreError)
 		} else {
 			if existing, _ := j.RetrieveByKeyID(sKid); len(existing) > 0 {
-				return fmt.Errorf("%w provided jwk has kid value matching a value already present in the keyset", joseerror.ErrKeystoreError)
+				return fmt.Errorf("%wprovided jwk has kid value matching a value already present in the keyset", joseerror.ErrKeystoreError)
 			}
 		}
 	}
@@ -236,7 +246,8 @@ func (j *Jwks) Add(jwk map[string]any) error {
 //     algorithms. The HS algorithms have no such mode, because HMAC is itself the keyed
 //     hash, and refuse a non-zero HashFunc rather than mac an already hashed digest.
 //     Ed25519 refuses it too: RFC 9864 section 4.1.1 names pure Ed25519, which signs
-//     the whole input.
+//     the whole input. So does ML-DSA: RFC 9964 section 5 signs with FIPS 204
+//     Algorithm 2, pure ML-DSA, over the whole input.
 type Signer interface {
 	Alg() jwa.Algorithm
 	crypto.Signer
@@ -263,8 +274,9 @@ type Opts struct {
 
 // SignerOpts implements crypto.SignerOpts and signals that the digest passed to
 // Sign has already been hashed. ES, RS and PS signers skip their internal hashing
-// when Hash is non-zero, and refuse a Hash that is not their own. HMAC and Ed25519
-// signers have no pre-hashed mode and refuse a non-zero Hash.
+// when Hash is non-zero, and refuse a Hash that is not their own. HMAC, Ed25519 and
+// ML-DSA signers have no pre-hashed mode and refuse a non-zero Hash (RFC 9964
+// section 5 for ML-DSA).
 type SignerOpts struct {
 	Hash crypto.Hash
 }

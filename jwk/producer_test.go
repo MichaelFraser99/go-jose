@@ -379,9 +379,10 @@ func TestPrivateJwk_AnECScalarOutsideOneToNMinusOneIsRefused(t *testing.T) {
 		})
 	}
 
-	key := &ecdsa.PrivateKey{PublicKey: ecdsa.PublicKey{Curve: elliptic.P256(), X: params.Gx, Y: params.Gy}, D: new(big.Int).Sub(params.N, big.NewInt(1))}
+	minusG := ecdsa.PublicKey{Curve: elliptic.P256(), X: params.Gx, Y: new(big.Int).Sub(params.P, params.Gy)}
+	key := &ecdsa.PrivateKey{PublicKey: minusG, D: new(big.Int).Sub(params.N, big.NewInt(1))}
 	if _, err := produce(t, func() (*map[string]any, error) { return PrivateJwk(key) }); err != nil {
-		t.Errorf("[RFC 7518 6.2.2.1] d is a SEC1 private key, an integer in [1, n-1], so n-1 must be encoded, got %v", err)
+		t.Errorf("[RFC 7518 6.2.2.1] d is a SEC1 private key, an integer in [1, n-1], so n-1 with its point -G must be encoded, got %v", err)
 	}
 }
 
@@ -462,19 +463,32 @@ func TestJwk_AnRSAKeyWithOnlyDRoundTrips(t *testing.T) {
 		t.Fatalf("[RFC 7518 6.3.2] d is the only REQUIRED private member, so a jwk of n, e and d must read, got %v", err)
 	}
 
-	tests := map[string]*rsa.PrivateKey{
-		"built by hand":            {PublicKey: full.PublicKey, D: full.D},
-		"read from n, e and d jwk": read.(*rsa.PrivateKey),
+	tests := map[string]struct {
+		key        *rsa.PrivateKey
+		withPrimes bool
+	}{
+		"built by hand":            {key: &rsa.PrivateKey{PublicKey: full.PublicKey, D: full.D}},
+		"read from n, e and d jwk": {key: read.(*rsa.PrivateKey), withPrimes: true},
 	}
-	for name, key := range tests {
+	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			jwk, err := produce(t, func() (*map[string]any, error) { return PrivateJwk(key) })
+			jwk, err := produce(t, func() (*map[string]any, error) { return PrivateJwk(test.key) })
 			if err != nil {
 				t.Fatalf("[RFC 7518 6.3.2] d is the only REQUIRED private member, so a key with no primes must be encoded, got %v", err)
 			}
-			for _, member := range []string{"p", "q", "dp", "dq", "qi", "oth"} {
-				if _, present := (*jwk)[member]; present {
-					t.Errorf("[RFC 7518 6.3.2] a key with no primes has no %s to encode, got %v", member, (*jwk)[member])
+			if _, present := (*jwk)["oth"]; present {
+				t.Errorf("[RFC 7518 6.3.2.7] a two-prime key has no oth to encode, got %v", (*jwk)["oth"])
+			}
+			for _, member := range []string{"p", "q", "dp", "dq", "qi"} {
+				if _, present := (*jwk)[member]; present != test.withPrimes {
+					t.Errorf("[RFC 7518 6.3.2] a key read from n, e and d carries its recovered primes and a key built by hand does not, so %s presence must be %t, got %v", member, test.withPrimes, (*jwk)[member])
+				}
+			}
+			if test.withPrimes {
+				p, q := (*jwk)["p"], (*jwk)["q"]
+				matches := p == encode(full.Primes[0]) && q == encode(full.Primes[1]) || p == encode(full.Primes[1]) && q == encode(full.Primes[0])
+				if !matches {
+					t.Errorf("[SP 800-56B Rev. 2 C.1 step 5] the primes encoded must be the ones crypto/rsa generated, got p %v and q %v", p, q)
 				}
 			}
 			if (*jwk)["d"] != encode(full.D) {

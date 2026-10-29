@@ -1,0 +1,106 @@
+package jws
+
+import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"errors"
+	"testing"
+
+	"github.com/MichaelFraser99/go-jose/joseerror"
+	"github.com/MichaelFraser99/go-jose/jwa"
+	"github.com/MichaelFraser99/go-jose/jwk"
+)
+
+func TestGetValidatorFromJwk_RefusesAJwkMarkedAsNotForVerifying(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	public, err := jwk.PublicJwk(&key.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := map[string]struct {
+		members map[string]any
+		accept  bool
+		clause  string
+	}{
+		"no use and no key_ops":            {members: map[string]any{}, accept: true, clause: "RFC 7517 4.2"},
+		"use of sig":                       {members: map[string]any{"use": "sig"}, accept: true, clause: "RFC 7517 4.2"},
+		"key_ops holding verify":           {members: map[string]any{"key_ops": []any{"verify"}}, accept: true, clause: "RFC 7517 4.3"},
+		"key_ops holding sign and verify":  {members: map[string]any{"key_ops": []any{"sign", "verify"}}, accept: true, clause: "RFC 7517 4.3"},
+		"use of sig and key_ops of verify": {members: map[string]any{"use": "sig", "key_ops": []any{"verify"}}, accept: true, clause: "RFC 7517 4.3"},
+		"use of enc":                       {members: map[string]any{"use": "enc"}, clause: "RFC 7517 4.2"},
+		"use of SIG, compared exactly":     {members: map[string]any{"use": "SIG"}, clause: "RFC 7517 4.2"},
+		"use that is not a string":         {members: map[string]any{"use": 7}, clause: "RFC 7517 4.2"},
+		"key_ops holding only sign":        {members: map[string]any{"key_ops": []any{"sign"}}, clause: "RFC 7517 4.3"},
+		"key_ops holding none":             {members: map[string]any{"key_ops": []any{}}, clause: "RFC 7517 4.3"},
+		"key_ops that is a string":         {members: map[string]any{"key_ops": "verify"}, clause: "RFC 7517 4.3"},
+		"key_ops holding a number":         {members: map[string]any{"key_ops": []any{"verify", 7}}, clause: "RFC 7517 4.3"},
+		"use of sig and key_ops of sign":   {members: map[string]any{"use": "sig", "key_ops": []any{"sign"}}, clause: "RFC 7517 4.3"},
+		"use of enc and key_ops of verify": {members: map[string]any{"use": "enc", "key_ops": []any{"verify"}}, clause: "RFC 7517 4.2"},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			candidate := map[string]any{}
+			for k, v := range *public {
+				candidate[k] = v
+			}
+			for k, v := range test.members {
+				candidate[k] = v
+			}
+			validator, err := GetValidatorFromJwk(jwa.ES256, candidate)
+			if test.accept {
+				if err != nil || validator == nil {
+					t.Fatalf("[%s] a jwk with %s permits verifying, so it must build a validator, got %v", test.clause, name, err)
+				}
+				return
+			}
+			if !errors.Is(err, joseerror.ErrInvalidPublicKey) {
+				t.Errorf("[%s] a jwk with %s is not marked for verifying signatures, so it must be refused with ErrInvalidPublicKey, got %v", test.clause, name, err)
+			}
+			if errors.Is(err, joseerror.ErrNoKeyIdentifierMatch) {
+				t.Errorf("[%s] GetValidatorFromJwk matches no key identifier, so its refusal must not carry ErrNoKeyIdentifierMatch, got %v", test.clause, err)
+			}
+			if validator != nil {
+				t.Errorf("[%s] no validator may be returned alongside the refusal, got %#v", test.clause, validator)
+			}
+		})
+	}
+}
+
+func TestGetValidator_VerifiesWithAJwkMarkedForEncryptionWhenTheCallerReadsItFirst(t *testing.T) {
+	signer, err := GetSigner(jwa.ES256, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	public, err := jwk.PublicJwk(signer.Public())
+	if err != nil {
+		t.Fatal(err)
+	}
+	(*public)["use"] = "enc"
+
+	if validator, err := GetValidatorFromJwk(jwa.ES256, *public); !errors.Is(err, joseerror.ErrInvalidPublicKey) {
+		t.Fatalf("[RFC 7517 4.2] GetValidatorFromJwk must refuse a jwk whose use is enc, got %v and %#v", err, validator)
+	}
+
+	key, err := jwk.PublicFromJwk(*public)
+	if err != nil {
+		t.Fatalf("[RFC 7517 4.2] PublicFromJwk reads a key whatever its use, got %v", err)
+	}
+	validator, err := GetValidator(jwa.ES256, key)
+	if err != nil {
+		t.Fatalf("[RFC 7517 4.2] GetValidator carries no key-use rule, so the key read from a jwk whose use is enc must build a validator, got %v", err)
+	}
+	input := []byte("the signing input")
+	signature, err := signer.Sign(rand.Reader, input, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if valid, err := validator.ValidateSignature(input, signature); err != nil || !valid {
+		t.Errorf("[RFC 7518 3.4] the validator built from the key read must verify its signer's signature, got %t and %v", valid, err)
+	}
+}

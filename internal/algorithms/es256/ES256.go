@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/keycopy"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
 	"io"
@@ -46,7 +47,7 @@ func NewSignerFromPrivateKey(privateKey crypto.PrivateKey) (*Signer, error) {
 	}
 	return &Signer{
 		alg:        jwa.ES256,
-		privateKey: ecdsaPrivateKey,
+		privateKey: keycopy.ECDSAPrivateKey(ecdsaPrivateKey),
 	}, nil
 }
 
@@ -59,7 +60,7 @@ func NewValidator(publicKey crypto.PublicKey) (*Validator, error) {
 		return nil, err
 	}
 	return &Validator{
-		publicKey: ecdsaPublicKey,
+		publicKey: keycopy.ECDSAPublicKey(ecdsaPublicKey),
 	}, nil
 }
 
@@ -68,7 +69,7 @@ func (signer *Signer) Alg() jwa.Algorithm {
 }
 
 func (signer *Signer) Public() crypto.PublicKey {
-	return signer.privateKey.Public()
+	return keycopy.ECDSAPublicKey(&signer.privateKey.PublicKey)
 }
 
 func (signer *Signer) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error) {
@@ -104,5 +105,5 @@ func (validator *Validator) ValidateSignature(digest, signature []byte) (bool, e
 }
 
 func (validator *Validator) Public() crypto.PublicKey {
-	return validator.publicKey
+	return keycopy.ECDSAPublicKey(validator.publicKey)
 }

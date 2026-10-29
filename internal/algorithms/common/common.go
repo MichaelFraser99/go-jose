@@ -1,12 +1,10 @@
 package common
 
 import (
-	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -61,15 +59,7 @@ func ECDSAPrivateKeyFromJwk(jwk map[string]any) (*ecdsa.PrivateKey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%wan EC private key jwk must carry 'd': %w", jose_errors.ErrInvalidPrivateKey, err)
 	}
-	privateKey, err := ecdsa.ParseRawPrivateKey(publicKey.Curve, dBytes)
-	if err != nil {
-		return nil, fmt.Errorf("%wthe 'd' of a %s jwk is %d octets in [1, n-1]: %w", jose_errors.ErrInvalidPrivateKey, publicKey.Params().Name, (publicKey.Params().N.BitLen()+7)/8, err)
-	}
-	if !privateKey.PublicKey.Equal(publicKey) {
-		return nil, fmt.Errorf("%wthe 'x' and 'y' of an EC jwk are not the public point of its 'd'", jose_errors.ErrInvalidPrivateKey)
-	}
-
-	return privateKey, nil
+	return ecdsaPrivateKeyOfPoint(dBytes, publicKey)
 }
 
 // ECDSAPublicKeyFromJwk reads the jwk of an ECDSA public key.
@@ -176,8 +166,10 @@ func checkECDSAPublicKey(publicKey *ecdsa.PublicKey, class error, unsupportedCur
 
 // JwkFromECDSAPrivateKey builds the jwk of an ECDSA private key.
 //
-// RFC 7518 section 6.2.2.1 fixes "d" at the length of the curve order n, so a
-// d outside [1, n-1] is refused rather than encoded.
+// RFC 7518 section 6.2.2.1 fixes "d" at the length of the curve order n and
+// makes it the private key value of the point "x", "y", so a d outside
+// [1, n-1] or whose public point is not the key's point is refused rather than
+// encoded.
 func JwkFromECDSAPrivateKey(privateKey *ecdsa.PrivateKey) (map[string]any, error) {
 	if privateKey == nil {
 		return nil, fmt.Errorf("%wan ECDSA key needs a curve and a point", jose_errors.ErrInvalidPrivateKey)
@@ -185,12 +177,9 @@ func JwkFromECDSAPrivateKey(privateKey *ecdsa.PrivateKey) (map[string]any, error
 	if err := checkECDSAPublicKey(&privateKey.PublicKey, jose_errors.ErrInvalidPrivateKey, jwkCurves); err != nil {
 		return nil, err
 	}
-	if privateKey.D == nil { //nolint:staticcheck
-		return nil, fmt.Errorf("%wan ECDSA private key needs its scalar d", jose_errors.ErrInvalidPrivateKey)
-	}
-	scalar, err := privateKey.Bytes()
+	scalar, err := checkECDSAPrivateScalar(privateKey)
 	if err != nil {
-		return nil, fmt.Errorf("%wan ECDSA private key's scalar d is in [1, n-1]: %w", jose_errors.ErrInvalidPrivateKey, err)
+		return nil, err
 	}
 
 	jwk, err := JwkFromECDSAPublicKey(&privateKey.PublicKey)
@@ -204,14 +193,14 @@ func JwkFromECDSAPrivateKey(privateKey *ecdsa.PrivateKey) (map[string]any, error
 // JwkFromEdDSAPublicKey builds the jwk of an Ed25519 public key.
 //
 // RFC 8032 section 5.1.5 makes an Ed25519 public key 32 octets, and RFC 8037
-// section 2 carries it as "x", so a key of any other length is refused rather
-// than encoded into a buffer sized for 32.
+// section 2 carries it as "x", so a key CheckEd25519PublicKey refuses is
+// refused rather than encoded.
 func JwkFromEdDSAPublicKey(publicKey *ed25519.PublicKey) (map[string]any, error) {
 	if publicKey == nil {
 		return nil, fmt.Errorf("%wan Ed25519 public key is %d bytes, got none", jose_errors.ErrInvalidPublicKey, ed25519.PublicKeySize)
 	}
-	if len(*publicKey) != ed25519.PublicKeySize {
-		return nil, fmt.Errorf("%wan Ed25519 public key is %d bytes, got %d", jose_errors.ErrInvalidPublicKey, ed25519.PublicKeySize, len(*publicKey))
+	if err := CheckEd25519PublicKey(*publicKey, jose_errors.ErrInvalidPublicKey); err != nil {
+		return nil, err
 	}
 	jwk := map[string]any{}
 
@@ -228,13 +217,14 @@ func JwkFromEdDSAPublicKey(publicKey *ed25519.PublicKey) (map[string]any, error)
 //
 // RFC 8032 section 5.1.5 makes an Ed25519 private key 32 octets and its public
 // key 32 octets. RFC 8037 section 2 carries them as "d" and "x", the two halves
-// of an ed25519.PrivateKey.
+// of an ed25519.PrivateKey, so a key whose second half is not the public key
+// of its first is refused rather than encoded.
 func JwkFromEdDSAPrivateKey(privateKey *ed25519.PrivateKey) (map[string]any, error) {
 	if privateKey == nil {
 		return nil, fmt.Errorf("%wan Ed25519 private key is %d bytes, got none", jose_errors.ErrInvalidPrivateKey, ed25519.PrivateKeySize)
 	}
-	if len(*privateKey) != ed25519.PrivateKeySize {
-		return nil, fmt.Errorf("%wan Ed25519 private key is %d bytes, got %d", jose_errors.ErrInvalidPrivateKey, ed25519.PrivateKeySize, len(*privateKey))
+	if err := CheckEd25519PrivateKey(*privateKey); err != nil {
+		return nil, err
 	}
 	jwk := map[string]any{}
 
@@ -276,8 +266,8 @@ func EdDSAPublicKeyFromJwk(jwk map[string]any) (*ed25519.PublicKey, error) {
 		return nil, fmt.Errorf("error extracting 'x' parameter from jwk: %w", err)
 	}
 
-	if len(xBytes) != ed25519.PublicKeySize {
-		return nil, fmt.Errorf("%wthe 'x' parameter of an Ed25519 jwk is %d bytes, got %d", jose_errors.ErrInvalidPublicKey, ed25519.PublicKeySize, len(xBytes))
+	if err := CheckEd25519PublicKey(xBytes, jose_errors.ErrInvalidPublicKey); err != nil {
+		return nil, err
 	}
 
 	return model.Pointer(ed25519.PublicKey(xBytes)), nil
@@ -301,9 +291,9 @@ func EdDSAPrivateKeyFromJwk(jwk map[string]any) (*ed25519.PrivateKey, error) {
 	if len(dBytes) != ed25519.SeedSize {
 		return nil, fmt.Errorf("%wthe 'd' parameter of an Ed25519 jwk is %d bytes, got %d", jose_errors.ErrInvalidPrivateKey, ed25519.SeedSize, len(dBytes))
 	}
-	private := ed25519.NewKeyFromSeed(dBytes)
-	if !bytes.Equal(private[ed25519.SeedSize:], xBytes) {
-		return nil, fmt.Errorf("%wthe 'x' parameter of an Ed25519 jwk is not the public key of its 'd'", jose_errors.ErrInvalidPrivateKey)
+	private := ed25519.PrivateKey(append(dBytes[:ed25519.SeedSize:ed25519.SeedSize], xBytes...))
+	if err := CheckEd25519PrivateKey(private); err != nil {
+		return nil, err
 	}
 	return model.Pointer(private), nil
 }
@@ -315,11 +305,13 @@ func EdDSAPrivateKeyFromJwk(jwk map[string]any) (*ed25519.PrivateKey, error) {
 // 3.1 and 3.2: d is a positive integer less than n with e*d == 1
 // (mod lambda(n)). "d" must be in [1, n-1]. With "p" and "q", the key must pass
 // rsa.PrivateKey.Validate, and "dp", "dq" and "qi" must equal
-// the CRT values crypto/rsa computes from p, q and d. With no primes, lambda(n)
-// is unknown, so crypto/rsa must sign 32 random 32-byte messages with the key
-// under PKCS #1 v1.5 and verify each signature under n and e. A wrong d passes
-// only if every one of those signatures happens to come out right. A refusal
-// for "n" or "e" carries ErrInvalidPrivateKey and wraps the public key error.
+// the CRT values crypto/rsa computes from p, q and d. With no primes, p and q
+// are recovered from n, e and d by NIST SP 800-56B Rev. 2 Appendix C.1, and
+// the key must then pass rsa.PrivateKey.Validate. The key returned carries
+// them and its CRT values. A key with no primes whose modulus is not two
+// primes, or whose modulus is over MaximumRSAModulusBits, is refused. A
+// refusal for "n" or "e" carries ErrInvalidPrivateKey and wraps the public key
+// error.
 func RSAPrivateKeyFromJwk(jwk map[string]any) (*rsa.PrivateKey, error) {
 	publicKey, err := RSAPublicKeyFromJwk(jwk)
 	if err != nil {
@@ -347,14 +339,13 @@ func RSAPrivateKeyFromJwk(jwk map[string]any) (*rsa.PrivateKey, error) {
 		PublicKey: *publicKey,
 		D:         new(big.Int).SetBytes(dBytes),
 	}
-	if privateKey.D.Sign() <= 0 || privateKey.D.Cmp(privateKey.N) >= 0 {
-		return nil, fmt.Errorf("%wthe 'd' of an RSA jwk is a positive integer less than n", jose_errors.ErrInvalidPrivateKey)
-	}
 	if !pPresent {
-		if err := checkRSAPrivateExponent(&privateKey); err != nil {
+		completed, err := completeRSAPrivateKey(&privateKey)
+		if err != nil {
 			return nil, err
 		}
-		return &privateKey, nil
+		completed.Precompute()
+		return completed, nil
 	}
 
 	members := map[string]*big.Int{}
@@ -367,15 +358,16 @@ func RSAPrivateKeyFromJwk(jwk map[string]any) (*rsa.PrivateKey, error) {
 	}
 
 	privateKey.Primes = []*big.Int{members["p"], members["q"]}
-	if err := privateKey.Validate(); err != nil {
-		return nil, fmt.Errorf("%wthe members of an RSA jwk are not one key: %w", jose_errors.ErrInvalidPrivateKey, err)
+	completed, err := completeRSAPrivateKey(&privateKey)
+	if err != nil {
+		return nil, err
 	}
-	privateKey.Precompute()
-	if members["dp"].Cmp(privateKey.Precomputed.Dp) != 0 || members["dq"].Cmp(privateKey.Precomputed.Dq) != 0 || members["qi"].Cmp(privateKey.Precomputed.Qinv) != 0 {
+	completed.Precompute()
+	if members["dp"].Cmp(completed.Precomputed.Dp) != 0 || members["dq"].Cmp(completed.Precomputed.Dq) != 0 || members["qi"].Cmp(completed.Precomputed.Qinv) != 0 {
 		return nil, fmt.Errorf("%wthe 'dp', 'dq' and 'qi' of an RSA jwk are not the CRT values of its 'p', 'q' and 'd'", jose_errors.ErrInvalidPrivateKey)
 	}
 
-	return &privateKey, nil
+	return completed, nil
 }
 
 func extractBase64urlUInt(jwk map[string]any, name string) ([]byte, error) {
@@ -383,29 +375,13 @@ func extractBase64urlUInt(jwk map[string]any, name string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(value) == 0 {
+		return nil, fmt.Errorf("%wthe %q member is a Base64urlUInt, which RFC 7518 section 2 encodes in at least one octet", jose_errors.ErrMalformedClaim, name)
+	}
 	if len(value) > 1 && value[0] == 0 {
 		return nil, fmt.Errorf("%wthe %q member is a Base64urlUInt, which RFC 7518 section 2 encodes in the minimum number of octets", jose_errors.ErrMalformedClaim, name)
 	}
 	return value, nil
-}
-
-const rsaPrivateExponentRounds = 32
-
-func checkRSAPrivateExponent(privateKey *rsa.PrivateKey) error {
-	message := make([]byte, 32)
-	for i := 0; i < rsaPrivateExponentRounds; i++ {
-		if _, err := io.ReadFull(rand.Reader, message); err != nil {
-			return fmt.Errorf("%wfailed to read a random message to check the 'd' of an RSA jwk: %w", jose_errors.ErrInvalidPrivateKey, err)
-		}
-		signature, err := rsa.SignPKCS1v15(nil, privateKey, crypto.Hash(0), message)
-		if err != nil {
-			return fmt.Errorf("%wthe 'd' of an RSA jwk does not sign under its 'n' and 'e': %w", jose_errors.ErrInvalidPrivateKey, err)
-		}
-		if err := rsa.VerifyPKCS1v15(&privateKey.PublicKey, crypto.Hash(0), message, signature); err != nil {
-			return fmt.Errorf("%wthe 'd' of an RSA jwk is not the private exponent of its 'n' and 'e': %w", jose_errors.ErrInvalidPrivateKey, err)
-		}
-	}
-	return nil
 }
 
 // RSAPublicKeyFromJwk reads the jwk of an RSA public key.
@@ -414,6 +390,8 @@ func checkRSAPrivateExponent(privateKey *rsa.PrivateKey) error {
 // section 3.1 makes it at least 3 and coprime to lambda(n), which is even, so
 // e is odd. crypto/rsa refuses an exponent
 // above 2^31-1, so an "e" outside that range is refused rather than truncated.
+// RFC 3447 section 3.1 makes n a product of primes, so an "n" of zero is
+// refused.
 func RSAPublicKeyFromJwk(jwk map[string]any) (*rsa.PublicKey, error) {
 	nBytes, err := extractBase64urlUInt(jwk, "n")
 	if err != nil {
@@ -426,14 +404,18 @@ func RSAPublicKeyFromJwk(jwk map[string]any) (*rsa.PublicKey, error) {
 	}
 
 	e := new(big.Int).SetBytes(eBytes)
-	if e.Cmp(big.NewInt(3)) < 0 || e.Cmp(big.NewInt(1<<31-1)) > 0 || e.Bit(0) == 0 {
+	if e.BitLen() > 31 {
 		return nil, fmt.Errorf("%wthe 'e' of an RSA jwk is an odd integer from 3 to 2^31-1", jose_errors.ErrInvalidPublicKey)
 	}
 
-	return &rsa.PublicKey{
+	publicKey := &rsa.PublicKey{
 		N: new(big.Int).SetBytes(nBytes),
 		E: int(e.Int64()),
-	}, nil
+	}
+	if err := checkRSAPublicKey(publicKey, jose_errors.ErrInvalidPublicKey); err != nil {
+		return nil, err
+	}
+	return publicKey, nil
 }
 
 func JwkFromRSAPublicKey(publicKey *rsa.PublicKey) (map[string]any, error) {
@@ -451,13 +433,6 @@ func JwkFromRSAPublicKey(publicKey *rsa.PublicKey) (map[string]any, error) {
 	return withThumbprint(jwk)
 }
 
-func checkRSAPublicKey(publicKey *rsa.PublicKey, class error) error {
-	if publicKey == nil || publicKey.N == nil || publicKey.N.Sign() <= 0 || publicKey.E < 1 {
-		return fmt.Errorf("%wan RSA key needs a positive modulus and exponent", class)
-	}
-	return nil
-}
-
 // JwkFromRSAPrivateKey builds the jwk of an RSA private key with either no
 // primes or exactly two.
 //
@@ -466,7 +441,9 @@ func checkRSAPublicKey(publicKey *rsa.PublicKey, class error) error {
 // "p", "q", "dp", "dq" and "qi", which that section says producers SHOULD
 // include. Section 6.3.2.7 says a consumer without multi-prime support MUST NOT
 // use a key carrying "oth". The readers here have none, so a key with more than
-// two primes is refused rather than produced.
+// two primes is refused rather than produced. A key RSAPrivateKeyFromJwk would
+// refuse, such as one whose d does not invert e, is refused rather than
+// produced.
 func JwkFromRSAPrivateKey(privateKey *rsa.PrivateKey) (map[string]any, error) {
 	if privateKey == nil {
 		return nil, fmt.Errorf("%wan RSA key needs a positive modulus and exponent", jose_errors.ErrInvalidPrivateKey)
@@ -474,8 +451,11 @@ func JwkFromRSAPrivateKey(privateKey *rsa.PrivateKey) (map[string]any, error) {
 	if err := checkRSAPublicKey(&privateKey.PublicKey, jose_errors.ErrInvalidPrivateKey); err != nil {
 		return nil, err
 	}
-	if privateKey.D == nil || privateKey.D.Sign() <= 0 || privateKey.D.Cmp(privateKey.N) >= 0 {
-		return nil, fmt.Errorf("%wan RSA private key needs d with 0 < d < n", jose_errors.ErrInvalidPrivateKey)
+	if len(privateKey.Primes) != 0 && len(privateKey.Primes) != 2 {
+		return nil, fmt.Errorf("%wan RSA private key has no primes or exactly two", jose_errors.ErrInvalidPrivateKey)
+	}
+	if _, err := completeRSAPrivateKey(privateKey); err != nil {
+		return nil, err
 	}
 
 	jwk, err := JwkFromRSAPublicKey(&privateKey.PublicKey)
@@ -488,16 +468,7 @@ func JwkFromRSAPrivateKey(privateKey *rsa.PrivateKey) (map[string]any, error) {
 		return jwk, nil
 	}
 
-	if len(privateKey.Primes) != 2 || privateKey.Primes[0] == nil || privateKey.Primes[1] == nil {
-		return nil, fmt.Errorf("%wan RSA private key has no primes or exactly two", jose_errors.ErrInvalidPrivateKey)
-	}
-	if privateKey.Primes[0].Sign() <= 0 || privateKey.Primes[1].Sign() <= 0 {
-		return nil, fmt.Errorf("%wthe primes of an RSA private key must be positive", jose_errors.ErrInvalidPrivateKey)
-	}
 	precomputed := rsa.PrivateKey{PublicKey: privateKey.PublicKey, D: privateKey.D, Primes: privateKey.Primes}
-	if err := precomputed.Validate(); err != nil {
-		return nil, fmt.Errorf("%wthe RSA private key is inconsistent: %w", jose_errors.ErrInvalidPrivateKey, err)
-	}
 	precomputed.Precompute()
 
 	jwk["p"] = encode(privateKey.Primes[0])

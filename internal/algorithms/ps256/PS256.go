@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/keycopy"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
 	"io"
@@ -45,12 +46,13 @@ func NewSignerFromPrivateKey(privateKey crypto.PrivateKey) (*Signer, error) {
 	if !ok {
 		return nil, fmt.Errorf("%wshould be instance of *rsa.PrivateKey", joseerror.ErrInvalidPrivateKey)
 	}
-	if err := common.CheckRSAPrivateKey(rsaPrivateKey); err != nil {
+	completed, err := common.CompleteRSAPrivateKey(rsaPrivateKey)
+	if err != nil {
 		return nil, err
 	}
 	return &Signer{
 		alg:        jwa.PS256,
-		privateKey: rsaPrivateKey,
+		privateKey: completed,
 	}, nil
 }
 
@@ -64,7 +66,7 @@ func NewValidator(publicKey crypto.PublicKey) (*Validator, error) {
 	}
 	return &Validator{
 		alg:       jwa.PS256,
-		publicKey: rsaPublicKey,
+		publicKey: keycopy.RSAPublicKey(rsaPublicKey),
 	}, nil
 }
 
@@ -73,10 +75,15 @@ func (signer *Signer) Alg() jwa.Algorithm {
 }
 
 func (signer *Signer) Public() crypto.PublicKey {
-	return signer.privateKey.Public()
+	return keycopy.RSAPublicKey(&signer.privateKey.PublicKey)
 }
 
-func (signer *Signer) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error) {
+// Sign signs the signing input with RSASSA-PSS, as RFC 7518 section 3.5
+// defines. PSS is randomised, so a nil random falls back to crypto/rand.Reader.
+func (signer *Signer) Sign(random io.Reader, digest []byte, opts crypto.SignerOpts) (signature []byte, err error) {
+	if random == nil {
+		random = rand.Reader
+	}
 	if opts != nil && opts.HashFunc() > 0 && opts.HashFunc() != crypto.SHA256 {
 		return nil, fmt.Errorf("%winvalid hash function provided for specified signer", joseerror.ErrSigningError)
 	}
@@ -90,7 +97,7 @@ func (signer *Signer) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts
 		copy(hashedDigest, digest)
 	}
 
-	signature, err = common.RsaPSSSign(rand, *signer.privateKey, hashedDigest[:], crypto.SHA256, len(hashedDigest))
+	signature, err = common.RsaPSSSign(random, *signer.privateKey, hashedDigest[:], crypto.SHA256, len(hashedDigest))
 	if err != nil {
 		return nil, err
 	}
@@ -118,5 +125,5 @@ func (validator *Validator) ValidateSignature(digest, signature []byte) (bool, e
 }
 
 func (validator *Validator) Public() crypto.PublicKey {
-	return validator.publicKey
+	return keycopy.RSAPublicKey(validator.publicKey)
 }
