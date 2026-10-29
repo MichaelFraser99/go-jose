@@ -1,14 +1,21 @@
 package jws
 
 import (
+	"context"
+	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
+	"encoding/base64"
+	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
 	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
+	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
+	"github.com/MichaelFraser99/go-jose/model"
 )
 
 func TestGetValidatorFromJwk_ARefusedAlgIsEchoedQuotedAndBounded(t *testing.T) {
@@ -46,5 +53,27 @@ func TestGetValidatorFromJwk_ARefusedAlgIsEchoedQuotedAndBounded(t *testing.T) {
 				t.Errorf("expected the error to contain %q, got %q", test.mustHave, err.Error())
 			}
 		})
+	}
+}
+
+func TestVerify_AnAlgTheOptionsDoNotAllowIsEchoedInDoubleQuotes(t *testing.T) {
+	signer, err := GetSigner(jwa.ES256, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"ES256"}`))
+	input := head + "." + base64.RawURLEncoding.EncodeToString([]byte(`{}`))
+	signature, err := signer.Sign(rand.Reader, []byte(input), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := input + "." + base64.RawURLEncoding.EncodeToString(signature)
+
+	_, _, err = Verify(context.Background(), token, func() ([]crypto.PublicKey, error) { return []crypto.PublicKey{signer.Public()}, nil }, &model.JoseOptions{AllowedSigningAlgorithms: []jwa.Algorithm{jwa.RS256}})
+	if !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) {
+		t.Fatalf("[JoseOptions.AllowedSigningAlgorithms] an alg not allowed must be refused with ErrUnsupportedAlgorithm, got %v", err)
+	}
+	if !strings.Contains(err.Error(), strconv.Quote("ES256")) || strings.Contains(err.Error(), "'ES256'") {
+		t.Errorf("a header value echoed in an error is double quoted, as every other header refusal does, got %q", err.Error())
 	}
 }

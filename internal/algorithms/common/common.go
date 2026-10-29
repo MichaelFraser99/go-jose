@@ -209,7 +209,7 @@ func JwkFromEdDSAPublicKey(publicKey *ed25519.PublicKey) (map[string]any, error)
 
 	jwk["x"] = string(b64X)
 	jwk["kty"] = "OKP"
-	jwk["crv"] = "Ed25519" //Ed448 not supported - prevailing opinion amongst the crypto peeps is there is no point
+	jwk["crv"] = "Ed25519"
 	return withThumbprint(jwk)
 }
 
@@ -237,7 +237,7 @@ func JwkFromEdDSAPrivateKey(privateKey *ed25519.PrivateKey) (map[string]any, err
 	jwk["x"] = string(b64X)
 	jwk["d"] = string(b64D)
 	jwk["kty"] = "OKP"
-	jwk["crv"] = "Ed25519" //Ed448 not supported - prevailing opinion amongst the crypto peeps is there is no point
+	jwk["crv"] = "Ed25519"
 	return withThumbprint(jwk)
 }
 
@@ -327,7 +327,7 @@ func RSAPrivateKeyFromJwk(jwk map[string]any) (*rsa.PrivateKey, error) {
 		return nil, fmt.Errorf("%wan RSA jwk with more than two primes is not supported", jose_errors.ErrInvalidPrivateKey)
 	}
 
-	pPresent := jsonutils.KeyPresent(jwk, "p") //if one additional value is present, they all must be
+	pPresent := jsonutils.KeyPresent(jwk, "p")
 	for _, v := range []string{"q", "dp", "dq", "qi"} {
 		present := jsonutils.KeyPresent(jwk, v)
 		if present != pPresent {

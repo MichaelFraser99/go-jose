@@ -68,6 +68,14 @@ A recipient MUST validate an `x5c` chain per RFC 5280, and RFC 5280 path validat
 
 A zero-valued field and a `nil` `*JoseOptions` must mean the same thing. `UseTokenProvidedKeys` is the example: it is off when unset and off when no options are passed. In v0.10.0 a `nil` options pointer turned it on while a constructed struct turned it off, so setting any unrelated option silently changed which keys verified a token. Keep new fields in the same shape, so that the zero value is the behaviour the documentation describes.
 
+### Never ask a caller's ML-DSA key for its parameters
+
+`crypto/mldsa` panics when `Parameters()` is called on a zero-value `*mldsa.PrivateKey` or `*mldsa.PublicKey`, and a zero-value private key reports the all-zero seed, which is the published RFC 9964 example key. So `common.UsableMLDSAPrivateKey` and `common.UsableMLDSAPublicKey` rebuild a key for the parameter set the algorithm names, and require the rebuilt key to match. Route every new ML-DSA entry point through them.
+
+### `go.mod` retracts v0.10.1, and every release must keep that line
+
+The tag v0.10.1 points at the wrong commit and stays only because the Go proxy has it. The `retract` directive in `go.mod` warns users off it. The Go toolchain reads retractions from the `go.mod` of the latest release only, so a release whose `go.mod` drops the line un-retracts v0.10.1. Do not remove it.
+
 ### A token's own keys are not trusted by default
 
 A `jwk`, `jku`, `x5c` or `x5u` header names a key the token's signer chose. RFC 7515 section 10.3 requires the origin of a key to be authenticated. `x5c` and `x5u` are authenticated by chain validation against `X509Roots`, so setting roots is their opt-in. `jwk` and `jku` carry nothing that authenticates them, so they need `UseTokenProvidedKeys`. Setting one switch must never admit the other kind of source. Any new key source must name what authenticates it and be gated on that.
