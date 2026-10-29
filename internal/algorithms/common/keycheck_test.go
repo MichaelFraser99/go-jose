@@ -295,6 +295,9 @@ func TestRecoverRSAPrimes_FollowsSP80056BAppendixC1(t *testing.T) {
 		"a g whose root of 1 shows only at the last square is used": {d: 7, random: &chosenRandom{values: []byte{3}, then: 1}, found: true, clause: "SP 800-56B Rev. 2 C.1 steps 3e and 3f"},
 		"100 values of g that reveal nothing find no primes":        {d: 7, random: &chosenRandom{then: 1}, wantReads: 100, clause: "SP 800-56B Rev. 2 C.1 steps 3 and 4"},
 		"an odd de-1 finds no primes and draws no g":                {d: 6, random: &chosenRandom{then: 16}, wantReads: 0, clause: "SP 800-56B Rev. 2 C.1 step 1"},
+		"a d that does not invert e is refused after one g":         {d: 3, random: &chosenRandom{then: 2}, wantReads: 1, clause: "SP 800-56B Rev. 2 C.1 step 3d, g^(de-1) = 1 for every g coprime to n"},
+		"a g of 0 is not taken as a factor of n":                    {d: 7, random: &chosenRandom{values: []byte{0, 3}, then: 1}, found: true, clause: "SP 800-56B Rev. 2 C.1 step 3c, gcd(0, n) is n itself"},
+		"a g that shares a factor with n yields that factor":        {d: 7, random: &chosenRandom{values: []byte{5}, then: 2}, found: true, clause: "SP 800-56B Rev. 2 C.1, gcd(g, n) is a prime of n"},
 	}
 
 	for name, test := range tests {

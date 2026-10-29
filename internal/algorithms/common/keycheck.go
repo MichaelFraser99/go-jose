@@ -122,10 +122,16 @@ func recoverRSAPrimes(random io.Reader, n *big.Int, e int, d *big.Int) ([]*big.I
 	}
 	t := m.TrailingZeroBits()
 	r := new(big.Int).Rsh(m, t)
+tries:
 	for i := 0; i < rsaPrimeRecoveryTries; i++ {
 		g, err := rand.Int(random, n)
 		if err != nil {
 			return nil, fmt.Errorf("%wfailed to read a random value to recover the primes of an RSA private key: %w", jose_errors.ErrInvalidPrivateKey, err)
+		}
+		if shared := new(big.Int).GCD(nil, nil, g, n); shared.Cmp(n) == 0 {
+			continue
+		} else if shared.Cmp(one) > 0 {
+			return []*big.Int{shared, new(big.Int).Div(n, shared)}, nil
 		}
 		blinding, err := rand.Int(rand.Reader, rsaRecoveryBlindingBound)
 		if err != nil {
@@ -142,10 +148,11 @@ func recoverRSAPrimes(random io.Reader, n *big.Int, e int, d *big.Int) ([]*big.I
 				return []*big.Int{p, new(big.Int).Div(n, p)}, nil
 			}
 			if x.Cmp(nMinusOne) == 0 {
-				break
+				continue tries
 			}
 			y = x
 		}
+		return nil, errRSAPrimesNotFound
 	}
 	return nil, errRSAPrimesNotFound
 }
