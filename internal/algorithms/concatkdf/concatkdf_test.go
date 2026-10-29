@@ -10,7 +10,10 @@ import (
 var rfc7518AppendixCZ = []byte{158, 86, 217, 29, 129, 113, 53, 211, 114, 131, 66, 131, 191, 132, 38, 156, 251, 49, 110, 163, 218, 128, 106, 72, 246, 218, 167, 121, 140, 254, 144, 196}
 
 func TestDerive_ReproducesRFC7518AppendixC(t *testing.T) {
-	got := Derive(rfc7518AppendixCZ, 128, []byte("A128GCM"), []byte("Alice"), []byte("Bob"))
+	got, err := Derive(rfc7518AppendixCZ, 128, []byte("A128GCM"), []byte("Alice"), []byte("Bob"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if want := "VqqN6vgjbSBcIijNcacQGg"; base64.RawURLEncoding.EncodeToString(got) != want {
 		t.Errorf("[RFC 7518 C] the derived key must be %s, got %s", want, base64.RawURLEncoding.EncodeToString(got))
 	}
@@ -30,20 +33,35 @@ func TestDerive_AKeyLongerThanOneHashTakesTheNextRound(t *testing.T) {
 		return h[:]
 	}
 	want := append(round(1), round(2)...)
-	if got := Derive(rfc7518AppendixCZ, 512, []byte("A256CBC-HS512"), nil, nil); !bytes.Equal(got, want) {
+	if got, err := Derive(rfc7518AppendixCZ, 512, []byte("A256CBC-HS512"), nil, nil); err != nil || !bytes.Equal(got, want) {
 		t.Errorf("[NIST SP 800-56A 5.8.1.1] a 512-bit key is hash rounds 1 and 2 concatenated\n got %x\nwant %x", got, want)
 	}
 }
 
 func TestDerive_TruncatesToTheKeyLength(t *testing.T) {
 	for _, bits := range []int{128, 192, 256, 384, 512} {
-		if got := Derive(rfc7518AppendixCZ, bits, []byte("x"), nil, nil); len(got) != bits/8 {
+		if got, err := Derive(rfc7518AppendixCZ, bits, []byte("x"), nil, nil); err != nil || len(got) != bits/8 {
 			t.Errorf("[NIST SP 800-56A 5.8.1.1] keydatalen %d gives %d octets, got %d", bits, bits/8, len(got))
 		}
 	}
-	short := Derive(rfc7518AppendixCZ, 192, []byte("A192KW"), nil, nil)
-	long := Derive(rfc7518AppendixCZ, 256, []byte("A192KW"), nil, nil)
+	short, err := Derive(rfc7518AppendixCZ, 192, []byte("A192KW"), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	long, err := Derive(rfc7518AppendixCZ, 256, []byte("A192KW"), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if bytes.Equal(short, long[:24]) {
 		t.Error("[RFC 7518 4.6.2] keydatalen is in SuppPubInfo, so a 192-bit key is not a prefix of a 256-bit one")
+	}
+}
+
+func TestDerive_RefusesAKeyLengthThatIsNotWholeOctets(t *testing.T) {
+	for _, bits := range []int{0, -8, -1 << 40, 1, 7, 100, 129} {
+		got, err := Derive(rfc7518AppendixCZ, bits, []byte("A128GCM"), nil, nil)
+		if err == nil || got != nil {
+			t.Errorf("[RFC 7518 4.6.2] keydatalen is the bit length of a key of whole octets, so %d must be refused rather than rounded or panic, got %d octets", bits, len(got))
+		}
 	}
 }

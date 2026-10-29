@@ -6,13 +6,18 @@ package concatkdf
 import (
 	"crypto/sha256"
 	"encoding/binary"
+	"fmt"
 )
 
 // Derive returns keyDataLenBits bits derived from the shared secret z. The
 // OtherInfo is AlgorithmID, PartyUInfo and PartyVInfo, each prefixed with its
 // 32-bit big-endian length, then keyDataLenBits as SuppPubInfo, with an empty
-// SuppPrivInfo, as RFC 7518 section 4.6.2 lays it out.
-func Derive(z []byte, keyDataLenBits int, algorithmID, partyUInfo, partyVInfo []byte) []byte {
+// SuppPrivInfo, as RFC 7518 section 4.6.2 lays it out. keyDataLenBits must be a
+// positive multiple of 8, as every JWE key length is.
+func Derive(z []byte, keyDataLenBits int, algorithmID, partyUInfo, partyVInfo []byte) ([]byte, error) {
+	if keyDataLenBits <= 0 || keyDataLenBits%8 != 0 {
+		return nil, fmt.Errorf("a derived key is a positive whole number of octets, got %d bits", keyDataLenBits)
+	}
 	info := otherInfo(keyDataLenBits, algorithmID, partyUInfo, partyVInfo)
 	size := keyDataLenBits / 8
 	out := make([]byte, 0, size+sha256.Size)
@@ -25,7 +30,7 @@ func Derive(z []byte, keyDataLenBits int, algorithmID, partyUInfo, partyVInfo []
 		h.Write(info)
 		out = h.Sum(out)
 	}
-	return out[:size]
+	return out[:size], nil
 }
 
 func otherInfo(keyDataLenBits int, algorithmID, partyUInfo, partyVInfo []byte) []byte {

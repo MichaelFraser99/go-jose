@@ -2,7 +2,9 @@ package cbchmac
 
 import (
 	"bytes"
+	"crypto/aes"
 	"crypto/cipher"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"testing"
@@ -105,7 +107,7 @@ func TestOpen_RefusesWhatOnlyTheKeyHolderCouldTagWithTheSameError(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	block, err := newBlock(key[16:])
+	block, err := aes.NewCipher(key[16:])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +135,7 @@ func TestOpen_RefusesWhatOnlyTheKeyHolderCouldTagWithTheSameError(t *testing.T) 
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			tag := authenticate(key[:16], sha256Hash, 16, nil, tc.iv, tc.ciphertext)
+			tag := authenticate(key[:16], sha256.New, 16, nil, tc.iv, tc.ciphertext)
 			got, err := aead.Open(nil, tc.iv, append(bytes.Clone(tc.ciphertext), tag...), nil)
 			if !errors.Is(err, ErrOpen) || got != nil {
 				t.Errorf("[RFC 7518 5.2.2.2, RFC 7516 11.5] %s under a valid tag must give the same ErrOpen as a bad tag, so nothing past the tag is an oracle, got %x and %v", name, got, err)

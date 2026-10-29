@@ -29,8 +29,6 @@ type aead struct {
 	tagLen int
 }
 
-var sha256Hash = sha256.New
-
 // New returns the AEAD that RFC 7518 section 5.2 defines for a key of 32, 48 or
 // 64 octets: A128CBC-HS256, A192CBC-HS384 or A256CBC-HS512. The first half of
 // the key is the MAC key and the second half the encryption key, and the tag is
@@ -39,7 +37,7 @@ func New(key []byte) (cipher.AEAD, error) {
 	var h func() hash.Hash
 	switch len(key) {
 	case 32:
-		h = sha256Hash
+		h = sha256.New
 	case 48:
 		h = sha512.New384
 	case 64:
@@ -48,7 +46,7 @@ func New(key []byte) (cipher.AEAD, error) {
 		return nil, fmt.Errorf("an AES_CBC_HMAC_SHA2 key is 32, 48 or 64 octets, got %d", len(key))
 	}
 	half := len(key) / 2
-	block, err := newBlock(key[half:])
+	block, err := aes.NewCipher(key[half:])
 	if err != nil {
 		return nil, err
 	}
@@ -58,10 +56,6 @@ func New(key []byte) (cipher.AEAD, error) {
 		hash:   h,
 		tagLen: half,
 	}, nil
-}
-
-func newBlock(key []byte) (cipher.Block, error) {
-	return aes.NewCipher(key)
 }
 
 func (a *aead) NonceSize() int { return ivSize }
