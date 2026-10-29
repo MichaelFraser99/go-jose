@@ -252,10 +252,10 @@ func signWithCryptoSigner(signer crypto.Signer, alg jwa.Algorithm, signingInput 
 	}
 	switch alg {
 	case jwa.ES256, jwa.ES384, jwa.ES512:
-		if err := checkSignerKey(signer, alg); err != nil {
-			return nil, err
+		public, ok := signer.Public().(*ecdsa.PublicKey)
+		if _, err := jws.GetValidator(alg, public); !ok || err != nil {
+			return nil, fmt.Errorf("%w%s cannot be signed with this key, as an %s validator refuses its public key", joseerror.ErrInvalidPrivateKey, alg, alg)
 		}
-		public := signer.Public().(*ecdsa.PublicKey)
 		der, err := signer.Sign(rand.Reader, digest, hash)
 		if err != nil {
 			return nil, err
@@ -286,7 +286,7 @@ func signWithCryptoSigner(signer crypto.Signer, alg jwa.Algorithm, signingInput 
 
 func checkSignerKey(signer crypto.Signer, alg jwa.Algorithm) error {
 	if _, err := jws.GetValidator(alg, signer.Public()); err != nil {
-		return fmt.Errorf("%w%s cannot be signed with this key, as a %s validator refuses its public key: %s", joseerror.ErrInvalidPrivateKey, alg, alg, err.Error())
+		return fmt.Errorf("%w%s cannot be signed with this key, as its validator refuses the public key: %s", joseerror.ErrInvalidPrivateKey, alg, err.Error())
 	}
 	return nil
 }

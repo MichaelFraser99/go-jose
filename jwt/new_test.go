@@ -566,3 +566,37 @@ func TestValidate_AcceptsATokenSignedUnderTheDeprecatedEdDSA(t *testing.T) {
 		t.Errorf("[RFC 9864 4.4] a deprecated identifier is to be avoided by new producers, not refused by verifiers, so an EdDSA token under an Ed25519 key must validate, got %v and %v", body, err)
 	}
 }
+
+type changingPublicSigner struct {
+	key   *ecdsa.PrivateKey
+	calls *int
+}
+
+func (c changingPublicSigner) Public() crypto.PublicKey {
+	*c.calls++
+	if *c.calls == 1 {
+		return &c.key.PublicKey
+	}
+	return "not a key"
+}
+
+func (c changingPublicSigner) Sign(random io.Reader, digest []byte, opts crypto.SignerOpts) ([]byte, error) {
+	return c.key.Sign(random, digest, opts)
+}
+
+func TestNew_DoesNotPanicOnASignerWhosePublicKeyChanges(t *testing.T) {
+	calls := 0
+	signer := changingPublicSigner{key: newTestECDSAKey(t, elliptic.P256()), calls: &calls}
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("[CLAUDE.md never panic] jwt.New must not panic on a signer whose Public changes between calls, got %v", r)
+		}
+	}()
+	token, err := New(signer, map[string]any{}, map[string]any{}, Opts{Algorithm: jwa.ES256})
+	if err != nil {
+		t.Fatalf("the signer's first public key is a valid P-256 key, so the token must be signed, got %v", err)
+	}
+	if _, _, err := Validate(context.Background(), *token, newTestRetriever(&signer.key.PublicKey), nil); err != nil {
+		t.Errorf("[RFC 7518 3.4] the signature must verify under the key Public first returned, got %v", err)
+	}
+}

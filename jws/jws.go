@@ -106,7 +106,7 @@ func verify(ctx context.Context, compactSerialization string, outOfBoundsPublicK
 	signingInput := []byte(components[0] + "." + components[1])
 
 	var noKeyIdentifierErrors, sourceFailures []error
-	for i, retriever := range jwkRetrievers {
+	for _, retriever := range jwkRetrievers {
 		if keysTried == maxKeysTried {
 			return nil, nil, nil, tooManyKeys(maxKeysTried, sourceFailures)
 		}
@@ -116,8 +116,7 @@ func verify(ctx context.Context, compactSerialization string, outOfBoundsPublicK
 			continue
 		}
 		if err != nil {
-			fromCaller := outOfBoundsPublicKey != nil && i == 0
-			if !fromCaller && errors.Is(err, joseerror.ErrMalformedClaim) && !errors.Is(err, joseerror.ErrApplicationError) {
+			if header.FromCarriedSource(err) {
 				return nil, nil, nil, err
 			}
 			sourceFailures = append(sourceFailures, err)
