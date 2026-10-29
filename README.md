@@ -544,12 +544,12 @@ Every change below is a compile error or a silent behaviour change for a consume
 ### Module and API
 
 - This module now requires Go 1.27. v0.10.0 declared Go 1.21, which Go no longer supports.
-- `jwt.Validate` and `jws.VerifyCompactSerialization` take a `context.Context` first. It bounds any `jku` or `x5u` fetch.
+- `jwt.Validate` and `jws.VerifyCompactSerialization` take a `context.Context` first. It bounds any `jku` or `x5u` fetch. A nil `ctx` is refused with `ErrInvalidOptions`.
 - Every `jwa.Algorithm` constant has a new integer value. `Unknown` is now 0, so a zero `Algorithm` names no algorithm. In v0.10.0 the zero value was `ES256`, so an unset `jwt.Opts.Algorithm` or configuration field meant ES256. v0.10.0's `Unknown` was 13, which is now `EdDSA`. If you store or send an `Algorithm` as an integer, store its `String()` and read it back with `jwa.GetAlgorithm`.
 - `model.Jwks.RetrieveByKeyID` returns `[]map[string]any`, every key carrying the `kid` in set order, not one `map[string]any`. It returns an error only when no key carries the `kid`. To keep the old exactly-one meaning, check `len(keys) == 1` and use `keys[0]`.
 - `model.Jwks.Add` with `EnforceUniqueKIDs` refuses a `kid` the set already holds more than once. v0.10.0 added it.
 - `json.Marshal` of an empty `model.Jwks` writes `{"keys":[]}`. v0.10.0 wrote `{"keys":null}`.
-- Decoding JSON into `model.Jwks` refuses a document with no `keys` member, with `"keys": null`, or that is `null`, and reads `keys` only by its exact name. See [Key sets](#key-sets).
+- Decoding JSON into `model.Jwks` refuses a document with no `keys` member, with `"keys": null`, or that is `null`, and reads `keys` only by its exact name. It also refuses a `keys` member that is `null` or not an object, and a document that is not UTF-8 or holds an unpaired UTF-16 surrogate escape. See [Key sets](#key-sets).
 - Every error sentinel's message now ends in `": "`, so it composes with the text that wraps it. A match on an error string breaks. Match with `errors.Is` instead.
 - A header validation error now wraps its cause with `%w`. `errors.Is` matches the inner sentinel, such as `ErrMalformedClaim` or `ErrUnsupportedAlgorithm`, as well as `ErrMalformedToken`.
 - Header errors that echo a token value use double quotes, not single quotes, and cut the value at 64 characters. Match errors with `errors.Is`, not their text.
@@ -563,9 +563,11 @@ Every change below is a compile error or a silent behaviour change for a consume
 - RS and PS signers and validators refuse a public exponent that is even, under 3, or over 2^31 - 1, with `ErrInvalidPrivateKey` or `ErrInvalidPublicKey`.
 - An ES validator refuses a key on another curve, so `GetValidator(jwa.ES384, p256Key)` now fails with `ErrInvalidPublicKey`.
 - A nil key, or one with missing fields, is refused when the signer or validator is built, rather than panicking later.
+- Every signer and validator keeps its own copy of the key, and `Public` returns a new copy. In v0.10.0 an ES, RS or PS signer or validator used your key in place, so a later change to your key changed it. A validator built from a 2048-bit RSA key could then verify under a smaller one.
+- ES, RS and PS signers refuse a private key whose private half does not belong to its public half. An RS or PS signer refuses such a key when it is built, not at `Sign`. An RSA private key that lists no primes has them recovered from `n`, `e` and `d`, so the signer signs with them.
 - An ES signer in pre-hashed mode refuses a digest whose length is not the hash's output size with `ErrSigningError`.
 - An RS or PS signature that does not verify returns `false` with a nil error, and an ES signature of the wrong length does too. Both used to return an error wrapping `ErrInvalidSignature`. If you told a forged signature apart by its error, check the boolean.
-- `GetValidatorFromJwk` refuses a jwk with no `kty`, a `kty` that does not fit the algorithm, or an `alg` member that is not the algorithm you asked for.
+- `GetValidatorFromJwk` refuses a jwk with no `kty`, a `kty` that does not fit the algorithm, or an `alg` member that is not the algorithm you asked for. It also refuses a jwk whose `use` is present and not `"sig"`, or whose `key_ops` is present and lacks `"verify"`. To use such a key, read it with `jwk.PublicFromJwk` and pass it to `GetValidator`.
 
 ### `jwt.New`
 
@@ -575,14 +577,18 @@ Every change below is a compile error or a silent behaviour change for a consume
 - `jwt.New` expects a `crypto.Signer` from outside this library to follow Go's `crypto.Signer` contract. For ES256, ES384 and ES512 that means ASN.1 DER output, which `New` converts to R||S. A signer that already returns raw R||S is now refused with `ErrSigningError`. Earlier versions passed its output through unchanged, so such a signer worked. Make it return DER, or make it a `model.Signer`.
 - `jwt.New` refuses a `crypto.Signer` from outside this library for HS256, HS384 and HS512 with `ErrInvalidPrivateKey`. Earlier versions passed it the whole signing input. Build an HMAC signer with `jws.GetSigner` instead.
 - `jwt.New` refuses `EdDSA` with `ErrUnsupportedAlgorithm`, whether `Opts.Algorithm` or the head's `alg` names it. v0.10.0 signed an `EdDSA` token with an `ed25519.PrivateKey`. Name `jwa.Ed25519` instead. A verifier that does not yet know `Ed25519` refuses the token, so make sure that your verifiers support it first.
+- `jwt.New` refuses a nil signer or a nil key with `ErrInvalidPrivateKey`. v0.10.0 panicked.
+- `jwt.New` refuses every key that `GetSignerFromPrivateKey` refuses, such as an RSA key under 2048 bits, and checks the public key of a `crypto.Signer` from outside this library. v0.10.0 signed with such keys, and this library then refused the token.
+- `jwt.New` refuses an algorithm with no name, such as `jwa.Algorithm(999)`, with `ErrUnsupportedAlgorithm`. v0.10.0 wrote `"alg":""`.
+- `jwt.New` refuses a head that `jwt.Validate` would refuse for its shape: a `kid` that is not a string, a `jku` or `x5u` that is not an `https` URL, a malformed `x5c`, `x5t`, `x5t#S256` or `jwk`, a `typ` or `cty` that is not a string, a `b64` that is not a boolean or is `false`, and a `crit` that breaks RFC 7515 section 4.1.11. It also refuses a `b64` that `crit` does not name, as RFC 7797 section 6 requires.
 - `jwt.New` no longer writes `alg` and `typ` into the head map you pass.
 
 ### Verifying a token
 
 - `JoseOptions.UseTokenProvidedKeys` is off unless set, including when `opts` is `nil`, and covers only `jwk` and `jku`. v0.10.0 used a `jwk` header key when `opts` was `nil`. Pass `UseTokenProvidedKeys: true` to keep using it.
 - A `jwk` header key whose `use` is present and not `"sig"`, or whose `key_ops` is present and lacks `"verify"`, no longer verifies a token. The same rule applies to `jku` keys. Set `JoseOptions.IgnoreKeyUse` to accept such a key.
-- `jku` and `x5u` can now supply a key. They are fetched with the client you set in `JoseOptions.HttpClient`. v0.10.0 passed no client, so neither header could be fetched, and a token naming one failed with `ErrApplicationError` unless your own key verified it first. With no client, both are now ignored.
-- `x5c` and `x5u` now work, but only when `JoseOptions.X509Roots` is set. `x5u` also needs `HttpClient`. v0.10.0 refused every token that carried `x5c`, because it could not read the JSON array, and never fetched `x5u`. A token with a well-formed `x5c` now verifies under your retriever's key when no roots are set. A chain must also pass the usage and encoding checks in [x5c and x5u need trust anchors](#x5c-and-x5u-need-trust-anchors). If your issuer gives signing certificates `serverAuth`, `clientAuth` or another purpose, list it in `X509ExtKeyUsages`.
+- `jku` and `x5u` can now supply a key. They are fetched with the client you set in `JoseOptions.HttpClient`. v0.10.0 passed no client, so neither header could be fetched, and a token naming one failed with `ErrApplicationError` unless your own key verified it first. With no client, both are now ignored. A fetch that fails gives way to the next key source. See [jku and x5u need a client](#jku-and-x5u-need-a-client).
+- `x5c` and `x5u` now work, but only when `JoseOptions.X509Roots` is set. `x5u` also needs `HttpClient`. v0.10.0 refused every token that carried `x5c`, because it could not read the JSON array, and never fetched `x5u`. A token with a well-formed `x5c` now verifies under your retriever's key when no roots are set. A chain must also be in order, hold at most 16 certificates, and pass the usage and encoding checks in [x5c and x5u need trust anchors](#x5c-and-x5u-need-trust-anchors). If your issuer gives signing certificates `serverAuth`, `clientAuth` or another purpose, list it in `X509ExtKeyUsages`.
 - An `alg` that `AllowedSigningAlgorithms` does not allow is refused before any key is sought, with an error that matches `ErrUnsupportedAlgorithm` and `ErrMalformedToken`. v0.10.0 refused it with `ErrInvalidSignature`.
 - A token whose `alg` is `EdDSA` now verifies under an Ed25519 key. v0.10.0 refused it with `ErrInvalidSignature`.
 - A `crit` header naming an extension you have not declared in `UnderstoodCriticalHeaders` is refused.
@@ -590,7 +596,8 @@ Every change below is a compile error or a silent behaviour change for a consume
 - A protected header or JWT claims set that is not valid UTF-8 is refused. Previously each invalid byte became U+FFFD.
 - A protected header or JWT claims set with a string that holds an unpaired UTF-16 surrogate escape, such as `"\ud800"`, is refused. Previously the escape became U+FFFD. A U+FFFD that is in the signed bytes, raw or as `\ufffd`, is still accepted.
 - A JWT claims set of `null` is refused. `jwt.Validate` and `jws.VerifyCompactSerialization` previously returned a nil body and no error.
-- A `b64` header of `false` is refused, even when `UnderstoodCriticalHeaders` names `b64`.
+- A `b64` header of `false` is refused, even when `UnderstoodCriticalHeaders` names `b64`. A `b64` that is not a JSON boolean is refused with `ErrMalformedClaim`.
+- A `typ` or `cty` header that is not a string is refused with `ErrMalformedClaim`, as RFC 7515 sections 4.1.9 and 4.1.10 require.
 - A token whose `cty` is `JWT` is refused by `jws.VerifyCompactSerialization` and `jwt.Validate` with a message naming nested JWTs. Media-type parameters on the `cty` are ignored.
 - A token's signature is checked against at most `JoseOptions.MaxKeysTried` keys, 100 by default, across every source. A token that would need more is refused with `ErrTooManyKeys`. If your retriever returns more than 100 keys that suit one `alg`, raise the limit.
 
@@ -598,20 +605,23 @@ Every change below is a compile error or a silent behaviour change for a consume
 
 - Every `kid` that `PublicJwk` and `PrivateJwk` produce has changed. It is now the key's RFC 7638 thumbprint, which other implementations compute the same way. The old value was a SHA-256 over the encoded public members with no `kty`, so keys of different types could share one. An Ed25519 jwk now carries a `kid` too. Re-derive any `kid` you stored or pinned.
 - `PublicJwk` and `PrivateJwk` refuse a key they cannot encode, rather than panic or produce a malformed jwk.
-- An `OKP` jwk is read only when it is a well-formed Ed25519 key.
+- An `OKP` jwk is read only when it is a well-formed Ed25519 key, whose `x` is the canonical encoding of a point.
+- A jwk with no `kty` is refused with `ErrInvalidPublicKey` or `ErrInvalidPrivateKey`. v0.10.0 returned an error that matched no sentinel.
 - `PublicFromJwk`, `PrivateFromJwk`, `PublicJwk`, `PrivateJwk` and `Thumbprint` handle `AKP` keys. v0.10.0 refused every `AKP` jwk.
 - `PublicFromJwk` and `PrivateFromJwk` refuse an EC jwk whose `x` or `y` is not the full coordinate size of its curve, or whose point is not on the curve. A producer that strips leading zero octets breaks RFC 7518 section 6.2.1.2, and its keys are now refused.
 - `PrivateFromJwk` refuses an EC jwk with no `d`. It used to return a key that panicked when used.
-- `PrivateFromJwk` refuses an EC or RSA jwk whose private members do not belong to its public members.
+- `PrivateFromJwk` refuses an EC or RSA jwk whose private members do not belong to its public members. An RSA jwk with no primes has them recovered, as NIST SP 800-56B Rev. 2 Appendix C.1 describes. So the key it returns carries `p` and `q`, a `d` that does not undo `e` is refused, and a modulus that is not the product of two primes is refused. Such a key, written again with `PrivateJwk`, now carries `p`, `q`, `dp`, `dq` and `qi`.
+- `PublicJwk` and `PrivateJwk` refuse every key that `PublicFromJwk` and `PrivateFromJwk` refuse, such as an EC key whose `d` is not the private key of its point, or an RSA key whose `e` is even.
 - An EC jwk with an unsupported `crv` is now refused with `ErrUnsupportedAlgorithm`. Before, the error matched no sentinel. The error text for an unsupported `kty` or `crv` no longer repeats the value.
 - `PublicFromJwk` and `PrivateFromJwk` refuse an RSA integer member with a leading zero octet, such as `e: "AAEAAQ"`, with `ErrMalformedClaim`. RFC 7518 section 2 requires the minimum number of octets. A producer that copies a DER integer, sign octet included, into `n` makes such a member. Have it strip the leading zero octet.
-- `PublicFromJwk` and `PrivateFromJwk` refuse an RSA `e` that is even, below 3 or above 2^31-1. An `e` of more than 8 octets used to be read as its low 64 bits.
+- `PublicFromJwk` and `PrivateFromJwk` refuse an RSA `e` that is even, below 3 or above 2^31-1. An `e` of more than 8 octets used to be read as its low 64 bits. They also refuse an RSA integer member with no octets, an `n` of zero, and a private key with no primes whose modulus is over 8192 bits.
 - `PrivateFromJwk` reports a bad `n` or `e` in an RSA private jwk with `ErrInvalidPrivateKey`. The error still matches the class of the inner fault, such as `ErrInvalidPublicKey` for a refused `e`.
 
 ### `jwt.Validate`
 
 - `jwt.Validate` refuses a token at the instant its `exp` names, and judges a fractional `iat`, `nbf` or `exp` without dropping the fraction. Earlier versions cut the current time and each claim to whole seconds. So they accepted a token for up to a second past `exp`, and up to a second before a fractional `nbf` or `iat`.
 - `jwt.Validate` refuses an `iss`, `sub`, `jti` or `aud` of the wrong JSON type with `ErrMalformedClaim`.
+- `jwt.Validate` refuses a token that does not have three segments with `ErrMalformedToken`, and one of five segments, a JWE, with `ErrUnsupportedAlgorithm`. v0.10.0 returned errors that matched no sentinel.
 - A time-claim refusal now matches `ErrMalformedClaim`, `ErrExpired` or `ErrNotYetValid`, and its message has changed. If you match on the old text, such as `exp claim is before current time`, match with `errors.Is` instead.
 
 ### New in 0.11.0
