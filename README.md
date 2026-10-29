@@ -206,6 +206,7 @@ Both apply the same rules to the token:
 - A JSON string in the protected header must not hold an unpaired UTF-16 surrogate escape, such as `"\ud800"`. RFC 8259 section 8.2 calls the behaviour of a receiver of such a string unpredictable. Go would turn it into U+FFFD, so different signed bytes would give the same value. `VerifyCompactSerialization` holds the payload to the same rule.
 - An `alg` this library has no validator for is refused with `ErrUnsupportedAlgorithm` before any key is sought, so no `jku` or `x5u` is fetched for it.
 - A `b64` header of `false` is refused with `ErrMissingCriticalClaim`, even when you name `b64` in `UnderstoodCriticalHeaders`. RFC 7797 section 3 says such a payload is not base64url-encoded, and this library always decodes it. A `b64` header that is not a JSON boolean is refused with `ErrMalformedClaim`, as RFC 7797 section 3 requires.
+- A `typ` or `cty` header that is not a string is refused with `ErrMalformedClaim`, whether or not you set `AcceptedTypes`. RFC 7515 sections 4.1.9 and 4.1.10 define each as a media type, which is a string.
 
 One message can still have more than one valid token. ECDSA signatures are malleable: for an `ES256`, `ES384` or `ES512` token, anyone can replace the signature's `S` with `n - S` and get a second token that verifies. This needs no key. So do not key a replay or deduplication cache on the raw token string. Key it on a claim such as `jti` instead.
 
@@ -447,6 +448,21 @@ A `crypto.Signer` from elsewhere, such as an `*ecdsa.PrivateKey`, an `*rsa.Priva
 - For Ed25519, the key must be an Ed25519 key.
 - For ML-DSA-44, ML-DSA-65 and ML-DSA-87, the key must be an ML-DSA key of that parameter set. `New` passes the whole signing input with a zero hash, so `crypto/mldsa` signs it with an empty context.
 - A key that does not suit the algorithm, and any HS algorithm, is refused with `ErrInvalidPrivateKey`.
+- `New` passes an `*ecdsa.PrivateKey`, `*rsa.PrivateKey`, `ed25519.PrivateKey` or `*ed25519.PrivateKey` to `GetSignerFromPrivateKey`, and refuses each key that `GetSignerFromPrivateKey` refuses. So an RS or PS key needs a modulus of 2048 to 8192 bits. For any other `crypto.Signer`, `New` checks the public key that `Public` returns, the same way a validator does.
+- `New` refuses a nil signer, or a nil pointer, with `ErrInvalidPrivateKey`. It does not panic.
+- `New` refuses an `alg` outside `jwa`, such as `jwa.Algorithm(999)`, with `ErrUnsupportedAlgorithm`. RFC 7515 section 4.1.1 says `alg` must be present and understood.
+- `New` checks the header it will sign with the same rules `Validate` applies, and returns the same errors. So it does not sign a header that its own `Validate` refuses for its shape:
+  - `jku` and `x5u` must be HTTPS URLs. RFC 7515 sections 4.1.2 and 4.1.5 require TLS.
+  - `jwk` must be a JSON object (section 4.1.3).
+  - `kid`, `typ` and `cty` must be strings (sections 4.1.4, 4.1.9 and 4.1.10).
+  - `x5c` must be a non-empty array of base64 DER certificates (section 4.1.6).
+  - `x5t` and `x5t#S256` must be base64url (sections 4.1.7 and 4.1.8).
+  - `crit` must be a non-empty array of distinct names. Each name must be in the header, and must not be a parameter that RFC 7515 defines (section 4.1.11).
+  - `b64` must be a JSON boolean (RFC 7797 section 3).
+
+  A fault is `ErrMalformedClaim`. A `crit` name that the header does not hold is `ErrMissingCriticalClaim`.
+- `New` refuses a `b64` of `false` with `ErrMissingCriticalClaim`, because it always encodes the payload.
+- `New` refuses a `b64` that `crit` does not name with `ErrMissingCriticalClaim`. RFC 7797 section 6 says `crit` MUST include `b64` when `b64` is used. To sign with `"b64": true`, also set `"crit": ["b64"]`. A verifier must then name `b64` in `UnderstoodCriticalHeaders`.
 
 The second validates a jwt and returns the decoded head and body:
 
@@ -462,7 +478,7 @@ The retriever supplies key material of your own. Pass nil only when you have tur
 | --- | --- | --- |
 | `iss`, `sub`, `jti` | Must be a string (RFC 7519 sections 4.1.1, 4.1.2 and 4.1.7) | `ErrMalformedClaim` |
 | `aud` | Must be a string or an array of strings (RFC 7519 section 4.1.3) | `ErrMalformedClaim` |
-| `iat`, `nbf`, `exp` | Must be a JSON number, a NumericDate (RFC 7519 section 2). A fractional value keeps its fraction | `ErrMalformedClaim` |
+| `iat`, `nbf`, `exp` | Must be a JSON number, a NumericDate (RFC 7519 section 2). A fractional value keeps its fraction, and is compared as float64 seconds, to within a microsecond | `ErrMalformedClaim` |
 | `exp` | The current time must be before `exp` (RFC 7519 section 4.1.4). A token is expired at the instant `exp` names | `ErrExpired` |
 | `nbf` | The current time must be at or after `nbf` (RFC 7519 section 4.1.5) | `ErrNotYetValid` |
 | `iat` | Must not be after the current time | `ErrNotYetValid` |
@@ -471,7 +487,9 @@ The `iat` rule is this library's own. RFC 7519 section 4.1.6 sets no acceptance 
 
 `JoseOptions.ClockSkewLeeway` widens the window the three time claims are judged against: `nbf` and `iat` may be up to the leeway in the future, and a token stays valid until the leeway has passed after `exp`.
 
-A value too large for any clock, such as an `nbf` of `1e19`, is judged as a time far in the future. It is not converted to an integer, so the result is the same on every CPU.
+A value too large for any clock, such as an `nbf` of `1e19`, is judged as a time far in the future. It is not converted to an integer, so the result is the same on every CPU. A number outside the float64 range, such as `1e400`, is different: the JSON decoder refuses the token with `ErrMalformedToken` before any claim is read. RFC 8259 section 6 lets a recipient limit the range of numbers.
+
+`Validate` refuses a token that does not have three segments with `ErrMalformedToken`. A token of five segments is a JWE, which this library does not support, so it is refused with `ErrUnsupportedAlgorithm`.
 
 To check the audience, name this recipient in `JoseOptions.ExpectedAudience`:
 
