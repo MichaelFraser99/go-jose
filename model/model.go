@@ -8,6 +8,7 @@ import (
 	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
+	"io"
 	"net/http"
 	"time"
 )
@@ -47,11 +48,23 @@ type JoseOptions struct {
 	// unique, so a key set a peer publishes may hold thousands of keys under one
 	// kid, each costing a signature verification. A token that would need more is
 	// refused with ErrTooManyKeys. A key that cannot be used with the token's alg
-	// costs no verification and does not count. Zero or less means 100.
+	// costs no verification and does not count. jwe.Decrypt applies the same
+	// bound to the decrypters of the token's alg. Zero or less means 100.
 	MaxKeysTried int
 
 	// AllowedSigningAlgorithms defines the list of acceptable algorithms for token signature verification. If not specified, all algorithms are permitted
 	AllowedSigningAlgorithms []jwa.Algorithm
+
+	// AllowedKeyManagementAlgorithms lists the 'alg' values a JWE may name. With
+	// none named, every key management algorithm this library implements is
+	// permitted. A JWE naming another is refused with ErrUnsupportedAlgorithm.
+	AllowedKeyManagementAlgorithms []jwa.Algorithm
+
+	// AllowedContentEncryptionAlgorithms lists the 'enc' values a JWE may name.
+	// With none named, every content encryption algorithm this library
+	// implements is permitted. A JWE naming another is refused with
+	// ErrUnsupportedAlgorithm.
+	AllowedContentEncryptionAlgorithms []jwa.Encryption
 
 	// ClockSkewLeeway widens the window the iat, nbf and exp claims are judged against, to allow for clock skew between the issuer and this verifier. A value of zero or less grants none. Defaults to 0
 	ClockSkewLeeway time.Duration
@@ -263,6 +276,38 @@ type Signer interface {
 type Validator interface {
 	ValidateSignature(digest, signature []byte) (bool, error)
 	Public() crypto.PublicKey
+}
+
+// Encrypter determines the Content Encryption Key of a JWE and encrypts it for
+// the recipient, as RFC 7516 section 5.1 steps 1 to 5 describe.
+//
+// WrapKey returns a CEK of the length enc requires and the JWE Encrypted Key,
+// which is empty for "dir". An algorithm that defines header parameters of its
+// own, such as "epk" (RFC 7518 section 4.6.1), writes them into header, which
+// becomes the JWE Protected Header.
+type Encrypter interface {
+	Alg() jwa.Algorithm
+	Public() crypto.PublicKey
+	WrapKey(rand io.Reader, enc jwa.Encryption, header map[string]any) (cek, encryptedKey []byte, err error)
+}
+
+// Decrypter recovers the Content Encryption Key of a JWE from its JWE Encrypted
+// Key, as RFC 7516 section 5.2 steps 9 and 10 describe. It is a crypto.Decrypter:
+// Decrypt takes the JWE Encrypted Key as msg and a DecrypterOpts, and returns the
+// CEK. An RSA key held outside this process, such as in a hardware module, can
+// decrypt through jwe.GetDecrypter.
+type Decrypter interface {
+	Alg() jwa.Algorithm
+	crypto.Decrypter
+}
+
+// DecrypterOpts carries what a Decrypter needs beyond the JWE Encrypted Key:
+// the JWE Protected Header, which holds the parameters of algorithms such as
+// ECDH-ES, and the content encryption algorithm, whose key length some
+// algorithms derive a key for.
+type DecrypterOpts struct {
+	Header map[string]any
+	Enc    jwa.Encryption
 }
 
 // Opts configures key generation for new signers.

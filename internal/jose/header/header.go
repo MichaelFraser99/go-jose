@@ -18,15 +18,14 @@ import (
 	"net/http"
 )
 
-// ValidateHeader performs standard JOSE header validation upon the decoded protected header portion of a given JOSE object.
+// ValidateHeader performs standard JOSE header validation upon the decoded protected header portion of a JWS.
 //
 // On success, a series of Retriever functions are returned which will yield key(s) for validation purposes.
 // On failure, an error object is returned
-func ValidateHeader(ctx context.Context, header map[string]any, client *http.Client, mode model.Mode, opts *model.JoseOptions) ([]model.Retriever, error) {
+func ValidateHeader(ctx context.Context, header map[string]any, client *http.Client, opts *model.JoseOptions) ([]model.Retriever, error) {
 	if opts == nil {
 		opts = &model.JoseOptions{}
 	}
-	//todo: as different considerations must be made between JWS/JWE (think how JWE needs to be aware of the zip parameter if included in the header for further processing, should we return an "additional info" struct?
 	//todo: we haven't allowed for the StringOrURI stipulation some keys have - go back through JWS and JWE and adjust as appropriate
 	alg, err := jsonutils.RetrieveClaim(header, "alg", jsonutils.ValidateAlg)
 	if err != nil {
@@ -45,30 +44,12 @@ func ValidateHeader(ctx context.Context, header map[string]any, client *http.Cli
 		return nil, err
 	}
 
-	if mode == model.JWE {
-		_, err = jsonutils.RetrieveClaim(header, "enc", jsonutils.ValidateAlg)
-		if err != nil {
-			return nil, err
-		} //todo: do something with value
-
-		_, err = jsonutils.RetrieveClaim[string](header, "zip") //todo: we can do a validator for zip options this implementation understands
-		if err != nil && !errors.Is(err, joseerror.ErrMissingClaim) {
-			return nil, err
-		} //todo: do something with value
-
-	}
-
-	params, err := readHeaderShape(header)
+	params, err := readHeaderShape(header, model.JWS)
 	if err != nil {
 		return nil, err
 	}
 
-	critValidators := []jsonutils.Validator[[]any]{jsonutils.UnderstoodCriticalValues(opts.UnderstoodCriticalHeaders)}
-	if mode == model.JWE {
-		critValidators = append(critValidators, jsonutils.ValidateNoBannedCriticalJWEValues)
-	}
-
-	_, err = jsonutils.RetrieveClaim[[]any](header, "crit", critValidators...)
+	_, err = jsonutils.RetrieveClaim[[]any](header, "crit", jsonutils.UnderstoodCriticalValues(opts.UnderstoodCriticalHeaders))
 	if err != nil && !errors.Is(err, joseerror.ErrMissingClaim) {
 		return nil, err
 	}
@@ -88,6 +69,84 @@ func ValidateHeader(ctx context.Context, header map[string]any, client *http.Cli
 	}
 
 	return jwkRetrievers, nil
+}
+
+// KeyManagementAlgorithms are the JWE "alg" values this library implements.
+var KeyManagementAlgorithms = []jwa.Algorithm{
+	jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512,
+	jwa.A128KW, jwa.A192KW, jwa.A256KW,
+	jwa.Dir,
+}
+
+// ValidateJWEHeader checks a decoded JWE Protected Header, as RFC 7516 section
+// 5.2 step 5 requires, and returns the alg and enc it names.
+//
+// "alg" must name an algorithm in KeyManagementAlgorithms and "enc" a content
+// encryption algorithm this library implements (RFC 7516 sections 4.1.1 and
+// 4.1.2), each within the caller's allow-list if one is set, else
+// ErrUnsupportedAlgorithm. "zip" is refused with ErrUnsupportedAlgorithm, since
+// section 4.1.3 requires it to be processed and this library does not
+// decompress. The parameters RFC 7516 shares with RFC 7515 have the shapes
+// CheckHeaderShape describes, except that "b64" (RFC 7797, JWS only) is not
+// read, and "crit" may name no parameter RFC 7516 or RFC 7518 defines for JWE
+// (RFC 7516 section 4.1.13). AcceptedTypes, RequireKeyIdentifier and
+// UnderstoodCriticalHeaders apply as they do to a JWS, except that "b64" in
+// UnderstoodCriticalHeaders is ignored, as RFC 7797 defines it for JWS only.
+func ValidateJWEHeader(header map[string]any, opts *model.JoseOptions) (jwa.Algorithm, jwa.Encryption, error) {
+	if opts == nil {
+		opts = &model.JoseOptions{}
+	}
+	algName, err := jsonutils.RetrieveClaim[string](header, "alg")
+	if err != nil {
+		return jwa.Unknown, jwa.UnknownEncryption, err
+	}
+	alg := jwa.GetAlgorithm(*algName)
+	if !slices.Contains(KeyManagementAlgorithms, alg) {
+		return jwa.Unknown, jwa.UnknownEncryption, fmt.Errorf("%w%s is not a key management algorithm this library implements", joseerror.ErrUnsupportedAlgorithm, jsonutils.QuoteBounded(*algName))
+	}
+	if len(opts.AllowedKeyManagementAlgorithms) > 0 && !slices.Contains(opts.AllowedKeyManagementAlgorithms, alg) {
+		return jwa.Unknown, jwa.UnknownEncryption, fmt.Errorf("%w%s is not permitted by application-level constraints", joseerror.ErrUnsupportedAlgorithm, jsonutils.QuoteBounded(*algName))
+	}
+
+	encName, err := jsonutils.RetrieveClaim[string](header, "enc")
+	if err != nil {
+		return jwa.Unknown, jwa.UnknownEncryption, err
+	}
+	enc := jwa.GetEncryption(*encName)
+	if enc == jwa.UnknownEncryption {
+		return jwa.Unknown, jwa.UnknownEncryption, fmt.Errorf("%w%s is not a content encryption algorithm this library implements", joseerror.ErrUnsupportedAlgorithm, jsonutils.QuoteBounded(*encName))
+	}
+	if len(opts.AllowedContentEncryptionAlgorithms) > 0 && !slices.Contains(opts.AllowedContentEncryptionAlgorithms, enc) {
+		return jwa.Unknown, jwa.UnknownEncryption, fmt.Errorf("%w%s is not permitted by application-level constraints", joseerror.ErrUnsupportedAlgorithm, jsonutils.QuoteBounded(*encName))
+	}
+
+	if _, present := header["zip"]; present {
+		return jwa.Unknown, jwa.UnknownEncryption, fmt.Errorf("%wthe 'zip' header names a compression this library does not apply", joseerror.ErrUnsupportedAlgorithm)
+	}
+
+	if err := validateExpectedType(header, opts.AcceptedTypes); err != nil {
+		return jwa.Unknown, jwa.UnknownEncryption, err
+	}
+	if err := validateKeyIdentifierRequirement(header, opts.RequireKeyIdentifier); err != nil {
+		return jwa.Unknown, jwa.UnknownEncryption, err
+	}
+	if _, err := readHeaderShape(header, model.JWE); err != nil {
+		return jwa.Unknown, jwa.UnknownEncryption, err
+	}
+	understood := slices.DeleteFunc(slices.Clone(opts.UnderstoodCriticalHeaders), func(name string) bool { return name == "b64" })
+	_, err = jsonutils.RetrieveClaim[[]any](header, "crit", jsonutils.UnderstoodCriticalValues(understood))
+	if err != nil && !errors.Is(err, joseerror.ErrMissingClaim) {
+		return jwa.Unknown, jwa.UnknownEncryption, err
+	}
+	return alg, enc, nil
+}
+
+// CheckJWEHeaderShape checks the shape of a JWE Protected Header a producer is
+// about to emit, as ValidateJWEHeader checks it on receipt, without its
+// allow-lists or expectations.
+func CheckJWEHeaderShape(header map[string]any) error {
+	_, err := readHeaderShape(header, model.JWE)
+	return err
 }
 
 type carriedSourceError struct {
@@ -138,11 +197,11 @@ type headerShape struct {
 // ErrMissingCriticalClaim, since this library handles only a base64url-encoded
 // payload.
 func CheckHeaderShape(header map[string]any) error {
-	_, err := readHeaderShape(header)
+	_, err := readHeaderShape(header, model.JWS)
 	return err
 }
 
-func readHeaderShape(header map[string]any) (headerShape, error) {
+func readHeaderShape(header map[string]any, mode model.Mode) (headerShape, error) {
 	var params headerShape
 	var err error
 
@@ -193,7 +252,7 @@ func readHeaderShape(header map[string]any) (headerShape, error) {
 		}
 	}
 
-	if b64, present := header["b64"]; present {
+	if b64, present := header["b64"]; present && mode == model.JWS {
 		encoded, ok := b64.(bool)
 		if !ok {
 			return headerShape{}, fmt.Errorf("%wthe 'b64' header must be a JSON boolean", joseerror.ErrMalformedClaim)
@@ -203,7 +262,11 @@ func readHeaderShape(header map[string]any) (headerShape, error) {
 		}
 	}
 
-	_, err = jsonutils.RetrieveClaim[[]any](header, "crit", jsonutils.ValidateNonEmptySlice, jsonutils.ValidateNoDuplicateSliceValues, jsonutils.ValidateNoBannedCriticalValues, jsonutils.ValidateCriticalValuesPresent)
+	banned := jsonutils.ValidateNoBannedCriticalValues
+	if mode == model.JWE {
+		banned = jsonutils.ValidateNoBannedCriticalJWEValues
+	}
+	_, err = jsonutils.RetrieveClaim[[]any](header, "crit", jsonutils.ValidateNonEmptySlice, jsonutils.ValidateNoDuplicateSliceValues, banned, jsonutils.ValidateCriticalValuesPresent)
 	if err != nil && !errors.Is(err, joseerror.ErrMissingClaim) {
 		return headerShape{}, err
 	}

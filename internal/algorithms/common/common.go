@@ -13,6 +13,8 @@ import (
 	"hash"
 	"io"
 	"math/big"
+	"reflect"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -583,3 +585,15 @@ func withThumbprint(jwk map[string]any) (map[string]any, error) {
 	jwk["kid"] = kid
 	return jwk, nil
 }
+
+// IsNil reports whether value is nil, or holds a nil pointer, map, slice,
+// func, channel or interface, any of which panics when a method reads it.
+func IsNil(value any) bool {
+	if value == nil {
+		return true
+	}
+	v := reflect.ValueOf(value)
+	return slices.Contains(nilableKinds, v.Kind()) && v.IsNil()
+}
+
+var nilableKinds = []reflect.Kind{reflect.Pointer, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan, reflect.Interface}

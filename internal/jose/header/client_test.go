@@ -25,7 +25,7 @@ func TestValidateHeader_WithoutAClientTheRemoteHeadersYieldNoRetriever(t *testin
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			retrievers, err := ValidateHeader(context.Background(), jsonDecodedHeader(t, test.head), nil, model.JWS, test.opts)
+			retrievers, err := ValidateHeader(context.Background(), jsonDecodedHeader(t, test.head), nil, test.opts)
 			if err != nil {
 				t.Fatalf("[JoseOptions.HttpClient] a well-formed header must not be refused merely because no client is configured, got %v", err)
 			}

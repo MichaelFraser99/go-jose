@@ -15,12 +15,13 @@ import (
 	jose_errors "github.com/MichaelFraser99/go-jose/joseerror"
 )
 
-// MinimumRSAModulusBits is the smallest modulus the RS and PS algorithms
-// accept: RFC 7518 sections 3.3 and 3.5 make a key of 2048 bits or larger a MUST.
+// MinimumRSAModulusBits is the smallest modulus the RS, PS and RSA-OAEP
+// algorithms accept: RFC 7518 sections 3.3, 3.5 and 4.3 make a key of 2048 bits
+// or larger a MUST.
 const MinimumRSAModulusBits = 2048
 
-// MaximumRSAModulusBits is the largest modulus the RS and PS algorithms
-// accept. It bounds the work a peer-chosen key can demand of a verifier, and
+// MaximumRSAModulusBits is the largest modulus the RS, PS and RSA-OAEP
+// algorithms accept. It bounds the work a peer-chosen key can demand of a verifier, and
 // matches the default cap crypto/tls applies to a peer's RSA key.
 const MaximumRSAModulusBits = 8192
 

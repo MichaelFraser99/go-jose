@@ -4,9 +4,9 @@ This file gives guidance to Claude Code (claude.ai/code) when it works in this r
 
 ## Overview
 
-A zero-dependency Go implementation of the JOSE standards: JWS (RFC 7515), JWK (RFC 7517), JWA (RFC 7518) and JWT (RFC 7519). It is a library, not a service.
+A zero-dependency Go implementation of the JOSE standards: JWS (RFC 7515), JWE (RFC 7516), JWK (RFC 7517), JWA (RFC 7518) and JWT (RFC 7519). It is a library, not a service.
 
-JWE (RFC 7516) is **not** implemented. The `jwe` package exists but exports nothing: its body is commented out and it has no tests. Do not describe this library as supporting JWE.
+JWE is the Compact Serialization only, with the RSA-OAEP family, AES Key Wrap and `dir` for key management and all six RFC 7518 section 5 content encryption algorithms. `RSA1_5` is left out on purpose (RFC 8725 section 3.2). A `dir` key is a `jwe.DirectKey` bound to one `enc` (RFC 8725 section 3.1), and `jwe.Decrypt` returns the decrypter that succeeded so a caller never has to trust `kid`. ECDH-ES, AES GCM key wrap, PBES2, `zip`, nested JWTs and HPKE are planned under issue #72 and not yet implemented.
 
 ## Commands
 
@@ -28,10 +28,10 @@ A godoc comment that names an RFC clause earns its place. One that recounts a fi
 ## Layout
 
 - **`jwa/`** — algorithm identifiers. `Algorithm` is an int whose zero value is `Unknown`.
-- **`jws/`**, **`jwt/`**, **`jwk/`** — the public API (`jwe/` is an empty stub). There is **no root package**: `go-jose` itself holds only `e2e_test.go`. Import the subpackage.
+- **`jws/`**, **`jwe/`**, **`jwt/`**, **`jwk/`** — the public API. There is **no root package**: `go-jose` itself holds only `e2e_test.go`. Import the subpackage.
 - **`model/`** — exported types shared across packages, including `JoseOptions`.
 - **`joseerror/`** — the error sentinels. Each carries a message prefix, so wrap with `%w` followed immediately by the rest of the message and no space.
-- **`internal/algorithms/<alg>/`** — one package per algorithm, each with `NewSigner` and `NewValidator`.
+- **`internal/algorithms/<alg>/`** — one package per algorithm. A signature algorithm has `NewSigner` and `NewValidator`. A JWE key management algorithm (`rsaoaep`, `keywrap`, `direct`) has `NewEncrypter` and `NewDecrypter`. `contentenc` builds the AEAD for an `enc`, and `aeskw`, `concatkdf` and `cbchmac` are the primitives the standard library lacks.
 - **`internal/algorithms/common/`** — shared key handling, jwk production and jwk reading.
 - **`internal/jose/`** — header validation, jwk parsing, x5 certificate handling, JSON utilities.
 - **`internal/httputils/`** — the one place this library makes an outbound request.
@@ -79,6 +79,14 @@ The tag v0.10.1 points at the wrong commit and stays only because the Go proxy h
 ### A token's own keys are not trusted by default
 
 A `jwk`, `jku`, `x5c` or `x5u` header names a key the token's signer chose. RFC 7515 section 10.3 requires the origin of a key to be authenticated. `x5c` and `x5u` are authenticated by chain validation against `X509Roots`, so setting roots is their opt-in. `jwk` and `jku` carry nothing that authenticates them, so they need `UseTokenProvidedKeys`. Setting one switch must never admit the other kind of source. Any new key source must name what authenticates it and be gated on that.
+
+### Every JWE decryption failure must look the same
+
+RFC 7516 section 11.5 requires a recipient not to reveal which step of decryption failed. `jwe.Decrypt` therefore never returns early once it has a candidate decrypter. If a decrypter fails, or returns a CEK of the wrong length, `Decrypt` uses a random CEK in its place and carries on to the tag check, then to the next decrypter. Every failure that depends on a key is `ErrDecryptionFailed` with one fixed message. The only other `ErrDecryptionFailed` message says that no decrypter implements the token's `alg`, which is public. Do not wrap a decrypter's own error into it, and do not add a check that returns between `Decrypt` on the key and `Open` on the content. Faults in the public structure of the token, such as an IV of the wrong length, are checked first and may be `ErrMalformedToken`.
+
+### A JWE header's key parameters name the recipient's public key
+
+In a JWS, `jku`, `jwk`, `x5u` and `x5c` name the key that verifies. In a JWE they name the public key the sender encrypted to, which cannot decrypt. So `jwe.Decrypt` never fetches or reads them, and the caller's decrypters are the only keys. Do not route a JWE header through `header.ValidateHeader`, which builds retrievers for them. `header.ValidateJWEHeader` is the JWE path.
 
 ## Conventions
 
