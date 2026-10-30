@@ -515,11 +515,11 @@ The `jwe` package encrypts and decrypts the JWE Compact Serialization of RFC 751
 | --- | --- | --- |
 | `RSA-OAEP`, `RSA-OAEP-256`, `RSA-OAEP-384`, `RSA-OAEP-512` | `*rsa.PublicKey` | `*rsa.PrivateKey`, or a `crypto.Decrypter` with an `*rsa.PublicKey` |
 | `A128KW`, `A192KW`, `A256KW` | `[]byte` of 16, 24 or 32 octets | the same `[]byte` |
-| `dir` | `[]byte` that is the content encryption key | the same `[]byte` |
+| `dir` | `jwe.DirectKey{Key: secret, Enc: enc}` | the same `jwe.DirectKey` |
 
 An RSA key must have a modulus of 2048 to 8192 bits. RFC 7518 section 4.3 makes 2048 bits a MUST. `RSA-OAEP-384` and `RSA-OAEP-512` are not in RFC 7518. The IANA "JSON Web Signature and Encryption Algorithms" registry defines them, with SHA-384 and SHA-512 for both OAEP and MGF1.
 
-A `dir` key can be 16, 24, 32, 48 or 64 octets. `Encrypt` refuses an `enc` whose key length is different.
+A `dir` key is bound to one `enc`, as RFC 8725 section 3.1 requires of every key. `Key` must be the length that `Enc` requires. `Encrypt` refuses any other `enc`, and `Decrypt` cannot decrypt a token with any other `enc`. Without this binding, a 32-octet key could decrypt both `A128CBC-HS256` and `A256GCM` tokens, and the token would choose.
 
 CAUTION: Do not encrypt more than 2^32 tokens under one `dir` key with an AES GCM `enc`. RFC 7518 section 8.4 makes this limit a MUST. With `dir`, every token uses the shared key and a random IV, and this library does not count the tokens. The other algorithms make a new key for each token.
 
@@ -542,14 +542,21 @@ Each call makes a new random content encryption key and a new random initializat
 
 ```go
 decrypter, err := jwe.GetDecrypter(jwa.RSAOAEP256, recipientPrivateKey)
-head, plaintext, err := jwe.Decrypt(ctx, token, []model.Decrypter{decrypter}, opts)
+head, plaintext, used, err := jwe.Decrypt(ctx, token, []model.Decrypter{decrypter}, opts)
 ```
 
-`Decrypt` tries each decrypter whose `Alg` is the token's `alg`. It returns the plaintext from the first decrypter that decrypts the token.
+`Decrypt` tries each decrypter whose `Alg` is the token's `alg`. It returns the plaintext from the first decrypter that decrypts the token, and that decrypter as `used`. An empty plaintext is an empty slice, not `nil`.
 
 Every failure to decrypt is the same `ErrDecryptionFailed`, with the same message. If a decrypter returns an error, or a key of the wrong length, `Decrypt` uses a random key in its place. The decryption then fails at the authentication tag, as a changed token does. RFC 7516 section 11.5 describes this defence. Thus the error does not tell an attacker which step failed.
 
-`Decrypt` does not tell you which decrypter succeeded. It also does not compare the `kid` header with that decrypter. With a shared key (`A128KW` to `A256KW`, or `dir`), the key identifies the sender. A sender who holds one of your keys can put the `kid` of a different key in the header. If you use `kid` to identify the sender, select the decrypter by `kid` first. Then give `Decrypt` only that decrypter.
+`Decrypt` does not compare the `kid` header with the decrypter that succeeded. With a shared key (`A128KW` to `A256KW`, or `dir`), the key identifies the sender. A sender who holds one of your keys can put the `kid` of a different key in the header. To identify the sender, compare `used` with the decrypters that you gave. Do not use `kid` for this.
+
+```go
+head, plaintext, used, err := jwe.Decrypt(ctx, token, []model.Decrypter{tenantA, tenantB}, opts)
+if err == nil && used != tenantA {
+	// the token was not encrypted with tenant A's key
+}
+```
 
 A header can name a key with `jku`, `jwk`, `x5u` or `x5c`. In a JWE, that key is the public key of the recipient, and a public key cannot decrypt. Thus `Decrypt` does not fetch or read these keys. Only the decrypters that you give are used.
 
@@ -560,6 +567,8 @@ These `JoseOptions` apply to `Decrypt`:
 - `AcceptedTypes`, `RequireKeyIdentifier` and `UnderstoodCriticalHeaders` apply as they do to a JWS. The exception is `b64`: RFC 7797 defines it for JWS only, so a JWE `crit` that names `b64` is refused.
 
 `AllowedSigningAlgorithms` does not apply to a JWE.
+
+The encrypted key of an `A128KW`, `A192KW` or `A256KW` token must be 8 octets longer than the key of its `enc`, and that of a `dir` token must be empty. `Decrypt` refuses any other length with `ErrMalformedToken`, before any decrypter is tried. Thus a token cannot make each decrypter unwrap a large encrypted key.
 
 `Decrypt` refuses a token with a `zip` header. RFC 7516 section 4.1.3 requires a recipient to decompress, and this library does not. A `crit` header must not name a parameter that RFC 7516 or RFC 7518 defines for JWE, such as `enc` or `epk`.
 
@@ -606,13 +615,15 @@ When a header check echoes a value from the token in its error, the value is quo
 
 Nothing that you use changes. These are new:
 
-- The `jwe` package, with `GetEncrypter`, `GetDecrypter`, `Encrypt` and `Decrypt`. See [Encrypting and decrypting](#encrypting-and-decrypting).
+- The `jwe` package, with `GetEncrypter`, `GetDecrypter`, `Encrypt`, `Decrypt` and `DirectKey`. See [Encrypting and decrypting](#encrypting-and-decrypting).
 - `model.Encrypter`, `model.Decrypter` and `model.DecrypterOpts`.
 - `jwa.Encryption` with `jwa.GetEncryption`, and the `alg` constants `jwa.RSAOAEP` to `jwa.Dir`. The integer values of the existing `jwa.Algorithm` constants do not change.
 - `JoseOptions` fields: `AllowedKeyManagementAlgorithms` and `AllowedContentEncryptionAlgorithms`.
 - The error sentinel `ErrEncryptionError`. `ErrDecryptionFailed` now has a use.
 
 A JWE `alg` cannot sign. `jws.GetSigner`, `jws.GetValidator` and `jwt.New` refuse one with `ErrUnsupportedAlgorithm`.
+
+`jwa.GetAlgorithm` now resolves the JWE names, such as `"RSA-OAEP"` and `"dir"`. If your code reads `jwa.GetAlgorithm(name) != jwa.Unknown` as "a signature algorithm", that test is no longer correct. Ask for a signer or validator instead: both refuse a JWE `alg`.
 
 ## Upgrading from 0.10.x
 

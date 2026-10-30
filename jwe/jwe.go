@@ -10,10 +10,10 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"reflect"
 	"slices"
 	"strings"
 
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/contentenc"
 	"github.com/MichaelFraser99/go-jose/internal/jose/header"
 	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
@@ -39,7 +39,7 @@ func Encrypt(encrypter model.Encrypter, enc jwa.Encryption, plaintext []byte, he
 }
 
 func encrypt(random io.Reader, encrypter model.Encrypter, enc jwa.Encryption, plaintext []byte, head map[string]any) (string, error) {
-	if isNil(encrypter) {
+	if common.IsNil(encrypter) {
 		return "", fmt.Errorf("%wan encrypter is required, got none", joseerror.ErrInvalidPublicKey)
 	}
 	alg := encrypter.Alg()
@@ -117,7 +117,8 @@ func checkProducerHeader(headBytes []byte) error {
 }
 
 // Decrypt decrypts a JWE Compact Serialization, following RFC 7516 section 5.2,
-// and returns its JWE Protected Header and plaintext.
+// and returns its JWE Protected Header, its plaintext, and the decrypter that
+// decrypted it. An empty plaintext is an empty, non-nil slice.
 //
 // A token of other than five parts, or with a part that is not base64url, is
 // refused with ErrMalformedToken (section 7.1). A fault in the header is
@@ -136,8 +137,9 @@ func checkProducerHeader(headBytes []byte) error {
 //     as they do there. "b64" (RFC 7797) is a JWS parameter and is not read.
 //
 // The Initialization Vector and Authentication Tag must be the lengths enc
-// defines, and the JWE Encrypted Key of a dir JWE must be empty (section 5.2
-// step 10), else ErrMalformedToken.
+// defines. The JWE Encrypted Key of a dir JWE must be empty, and that of an
+// A128KW, A192KW or A256KW JWE must be 8 octets longer than enc's key (section
+// 5.2 step 10, RFC 3394 section 2.2.1). Any other length is ErrMalformedToken.
 //
 // Only the decrypters passed are tried. A "jku", "jwk", "x5u" or "x5c" in the
 // header names the recipient's public key, which cannot decrypt, so none is
@@ -147,40 +149,41 @@ func checkProducerHeader(headBytes []byte) error {
 // place, as RFC 7516 section 11.5 advises, so every failure to decrypt is the
 // one ErrDecryptionFailed. A nil ctx or decrypter is ErrInvalidOptions. ctx is
 // checked before each decrypter is tried, and its error returned once it ends.
+// Each decrypter is given its own copy of the header and the encrypted key.
 //
-// Decrypt does not report which decrypter succeeded, and does not compare the
-// header's "kid" with it. With a shared key, such as A256KW or dir, the key is
-// what identifies the sender, and any holder of any key passed can set "kid" to
-// another's. To tie a token to one key, choose the decrypter by "kid" yourself
-// and pass only that one.
-func Decrypt(ctx context.Context, compactSerialization string, decrypters []model.Decrypter, opts *model.JoseOptions) (protectedHeader map[string]any, plaintext []byte, err error) {
+// Decrypt does not compare the header's "kid" with the decrypter that
+// succeeded. With a shared key, such as A256KW or dir, the key is what
+// identifies the sender, and any holder of any key passed can set "kid" to
+// another's. To know which sender a token came from, use the decrypter Decrypt
+// returns, not the "kid".
+func Decrypt(ctx context.Context, compactSerialization string, decrypters []model.Decrypter, opts *model.JoseOptions) (protectedHeader map[string]any, plaintext []byte, decrypter model.Decrypter, err error) {
 	if ctx == nil {
-		return nil, nil, fmt.Errorf("%wthe context passed is nil", joseerror.ErrInvalidOptions)
+		return nil, nil, nil, fmt.Errorf("%wthe context passed is nil", joseerror.ErrInvalidOptions)
 	}
-	for _, decrypter := range decrypters {
-		if isNil(decrypter) {
-			return nil, nil, fmt.Errorf("%wa decrypter passed is nil", joseerror.ErrInvalidOptions)
+	for _, candidate := range decrypters {
+		if common.IsNil(candidate) {
+			return nil, nil, nil, fmt.Errorf("%wa decrypter passed is nil", joseerror.ErrInvalidOptions)
 		}
 	}
 
 	components := strings.SplitN(compactSerialization, ".", 6)
 	if len(components) != 5 {
-		return nil, nil, fmt.Errorf("%wa JWE Compact Serialization has exactly five parts", joseerror.ErrMalformedToken)
+		return nil, nil, nil, fmt.Errorf("%wa JWE Compact Serialization has exactly five parts", joseerror.ErrMalformedToken)
 	}
 	protectedHeader, err = jsonutils.DecodeBase64urlMap(components[0])
 	if err != nil {
-		return nil, nil, fmt.Errorf("%werror processing protected header: %v", joseerror.ErrMalformedToken, err)
+		return nil, nil, nil, fmt.Errorf("%werror processing protected header: %v", joseerror.ErrMalformedToken, err)
 	}
 	alg, enc, err := header.ValidateJWEHeader(protectedHeader, opts)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%werror validating header: %w", joseerror.ErrMalformedToken, err)
+		return nil, nil, nil, fmt.Errorf("%werror validating header: %w", joseerror.ErrMalformedToken, err)
 	}
 
 	var parts [4][]byte
 	for i, name := range []string{"encrypted key", "initialization vector", "ciphertext", "authentication tag"} {
 		parts[i], err = jsonutils.DecodeBase64url(components[i+1])
 		if err != nil {
-			return nil, nil, fmt.Errorf("%werror decoding the %s: %v", joseerror.ErrMalformedToken, name, err)
+			return nil, nil, nil, fmt.Errorf("%werror decoding the %s: %v", joseerror.ErrMalformedToken, name, err)
 		}
 	}
 	encryptedKey, iv, ciphertext, tag := parts[0], parts[1], parts[2], parts[3]
@@ -188,63 +191,69 @@ func Decrypt(ctx context.Context, compactSerialization string, decrypters []mode
 	size := contentenc.KeySize(enc)
 	shape, err := contentenc.New(enc, make([]byte, size))
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w%s", joseerror.ErrDecryptionFailed, err.Error())
+		return nil, nil, nil, fmt.Errorf("%w%s", joseerror.ErrDecryptionFailed, err.Error())
 	}
 	if len(iv) != shape.NonceSize() {
-		return nil, nil, fmt.Errorf("%w%s requires an initialization vector of %d octets, got %d", joseerror.ErrMalformedToken, enc, shape.NonceSize(), len(iv))
+		return nil, nil, nil, fmt.Errorf("%w%s requires an initialization vector of %d octets, got %d", joseerror.ErrMalformedToken, enc, shape.NonceSize(), len(iv))
 	}
 	if len(tag) != shape.Overhead() {
-		return nil, nil, fmt.Errorf("%w%s requires an authentication tag of %d octets, got %d", joseerror.ErrMalformedToken, enc, shape.Overhead(), len(tag))
+		return nil, nil, nil, fmt.Errorf("%w%s requires an authentication tag of %d octets, got %d", joseerror.ErrMalformedToken, enc, shape.Overhead(), len(tag))
 	}
-	if alg == jwa.Dir && len(encryptedKey) != 0 {
-		return nil, nil, fmt.Errorf("%wthe JWE Encrypted Key of a dir JWE must be empty (RFC 7516 section 5.2 step 10)", joseerror.ErrMalformedToken)
+	if want, fixed := encryptedKeySize(alg, size); fixed && len(encryptedKey) != want {
+		return nil, nil, nil, fmt.Errorf("%wa %s JWE with %s has an encrypted key of %d octets, got %d (RFC 7516 section 5.2 step 10)", joseerror.ErrMalformedToken, alg, enc, want, len(encryptedKey))
 	}
 
 	var candidates []model.Decrypter
-	for _, decrypter := range decrypters {
-		if decrypter.Alg() == alg {
-			candidates = append(candidates, decrypter)
+	for _, candidate := range decrypters {
+		if candidate.Alg() == alg {
+			candidates = append(candidates, candidate)
 		}
 	}
 	if len(candidates) == 0 {
-		return nil, nil, fmt.Errorf("%wno decrypter given implements %s", joseerror.ErrDecryptionFailed, alg)
+		return nil, nil, nil, fmt.Errorf("%wno decrypter given implements %s", joseerror.ErrDecryptionFailed, alg)
 	}
 	maxKeysTried := defaultMaxKeysTried
 	if opts != nil && opts.MaxKeysTried > 0 {
 		maxKeysTried = opts.MaxKeysTried
 	}
 	if len(candidates) > maxKeysTried {
-		return nil, nil, fmt.Errorf("%w%d decrypters implement %s, more than the %d MaxKeysTried allows", joseerror.ErrTooManyKeys, len(candidates), alg, maxKeysTried)
+		return nil, nil, nil, fmt.Errorf("%w%d decrypters implement %s, more than the %d MaxKeysTried allows", joseerror.ErrTooManyKeys, len(candidates), alg, maxKeysTried)
 	}
 
 	aad := []byte(components[0])
 	sealed := append(slices.Clip(ciphertext), tag...)
-	for _, decrypter := range candidates {
+	for _, candidate := range candidates {
 		if err := ctx.Err(); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
-		cek, err := decrypter.Decrypt(rand.Reader, encryptedKey, model.DecrypterOpts{Header: maps.Clone(protectedHeader), Enc: enc})
-		if err != nil || len(cek) != size {
-			cek = make([]byte, size)
-			if _, err := io.ReadFull(rand.Reader, cek); err != nil {
-				return nil, nil, fmt.Errorf("%wgenerating a random content encryption key: %s", joseerror.ErrDecryptionFailed, err.Error())
-			}
+		cek := make([]byte, size)
+		if _, err := io.ReadFull(rand.Reader, cek); err != nil {
+			return nil, nil, nil, fmt.Errorf("%wgenerating a random content encryption key: %s", joseerror.ErrDecryptionFailed, err.Error())
+		}
+		ownHeader, _ := jsonutils.DecodeBase64urlMap(components[0])
+		recovered, err := candidate.Decrypt(rand.Reader, slices.Clone(encryptedKey), model.DecrypterOpts{Header: ownHeader, Enc: enc})
+		if err == nil && len(recovered) == size {
+			copy(cek, recovered)
 		}
 		aead, err := contentenc.New(enc, cek)
 		if err != nil {
-			return nil, nil, fmt.Errorf("%w%s", joseerror.ErrDecryptionFailed, err.Error())
+			return nil, nil, nil, fmt.Errorf("%w%s", joseerror.ErrDecryptionFailed, err.Error())
 		}
-		if plaintext, err := aead.Open(nil, iv, sealed, aad); err == nil {
-			return protectedHeader, plaintext, nil
+		if plaintext, err := aead.Open(make([]byte, 0, len(ciphertext)), iv, sealed, aad); err == nil {
+			return protectedHeader, plaintext, candidate, nil
 		}
 	}
-	return nil, nil, fmt.Errorf("%wno decrypter given could decrypt the token", joseerror.ErrDecryptionFailed)
+	return nil, nil, nil, fmt.Errorf("%wno decrypter given could decrypt the token", joseerror.ErrDecryptionFailed)
 }
 
-func isNil(value any) bool {
-	if value == nil {
-		return true
+func encryptedKeySize(alg jwa.Algorithm, cekSize int) (int, bool) {
+	switch alg {
+	case jwa.A128KW, jwa.A192KW, jwa.A256KW:
+		return cekSize + 8, true
+	case jwa.Dir:
+		return 0, true
+	case jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512:
+	case jwa.ES256, jwa.ES384, jwa.ES512, jwa.RS256, jwa.RS384, jwa.RS512, jwa.PS256, jwa.PS384, jwa.PS512, jwa.HS256, jwa.HS384, jwa.HS512, jwa.EdDSA, jwa.Ed25519, jwa.MLDSA44, jwa.MLDSA65, jwa.MLDSA87, jwa.Unknown:
 	}
-	v := reflect.ValueOf(value)
-	return v.Kind() == reflect.Pointer && v.IsNil()
+	return 0, false
 }

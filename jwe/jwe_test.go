@@ -16,6 +16,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/contentenc"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
 	"github.com/MichaelFraser99/go-jose/model"
@@ -57,9 +58,11 @@ type keyPair struct {
 
 func pairFor(t *testing.T, alg jwa.Algorithm, enc jwa.Encryption) keyPair {
 	t.Helper()
-	sharedKeySizes := map[jwa.Algorithm]int{jwa.A128KW: 16, jwa.A192KW: 24, jwa.A256KW: 32, jwa.Dir: cekSizes[enc]}
+	sharedKeySizes := map[jwa.Algorithm]int{jwa.A128KW: 16, jwa.A192KW: 24, jwa.A256KW: 32}
 	var public, private any
-	if size, shared := sharedKeySizes[alg]; shared {
+	if alg == jwa.Dir {
+		public = DirectKey{Key: randomBytes(t, cekSizes[enc]), Enc: enc}
+	} else if size, shared := sharedKeySizes[alg]; shared {
 		public = randomBytes(t, size)
 	} else {
 		public, private = &testRSAKey(t).PublicKey, testRSAKey(t)
@@ -90,9 +93,12 @@ func TestEncrypt_RoundTripsEveryAlgAndEnc(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					head, got, err := Decrypt(context.Background(), token, []model.Decrypter{pair.decrypter}, nil)
+					head, got, used, err := Decrypt(context.Background(), token, []model.Decrypter{pair.decrypter}, nil)
 					if err != nil {
 						t.Fatalf("[RFC 7516 5.2] decrypting what Encrypt produced: %s", err)
+					}
+					if got == nil || !bytes.Equal(got, plaintext) || used != pair.decrypter {
+						t.Errorf("[RFC 7516 5.2] want %d octets back, as a non-nil slice, from the one decrypter given; got %d (nil: %v) from %v", len(plaintext), len(got), got == nil, used)
 					}
 					if !bytes.Equal(got, plaintext) {
 						t.Errorf("[RFC 7516 5.2] want %d octets back, got %d", len(plaintext), len(got))
@@ -175,7 +181,7 @@ func TestDecrypt_RefusesATokenWithAnyOctetChanged(t *testing.T) {
 						tampered := original
 						tampered[part] = bytes.Clone(original[part])
 						tampered[part][offset] ^= 0x01
-						_, plaintext, err := Decrypt(context.Background(), encodeParts(tampered), []model.Decrypter{pair.decrypter}, nil)
+						_, plaintext, _, err := Decrypt(context.Background(), encodeParts(tampered), []model.Decrypter{pair.decrypter}, nil)
 						if !errors.Is(err, joseerror.ErrDecryptionFailed) || plaintext != nil {
 							t.Errorf("[RFC 7516 5.2 step 16] a %s changed at octet %d must fail as ErrDecryptionFailed, got %v", name, offset, err)
 						}
@@ -201,7 +207,7 @@ func TestDecrypt_AHeaderChangedToOtherValidJSONFailsTheTag(t *testing.T) {
 					t.Fatal("the kid was not found in the header")
 				}
 				parts[0] = changed
-				_, plaintext, err := Decrypt(context.Background(), encodeParts(parts), []model.Decrypter{pair.decrypter}, nil)
+				_, plaintext, _, err := Decrypt(context.Background(), encodeParts(parts), []model.Decrypter{pair.decrypter}, nil)
 				if !errors.Is(err, joseerror.ErrDecryptionFailed) || plaintext != nil {
 					t.Errorf("[RFC 7516 5.2 steps 14 and 16] the header is the AAD, so changing its kid must fail as ErrDecryptionFailed, got %v", err)
 				}
@@ -220,7 +226,7 @@ func TestEncrypt_RefusesAZipAnEncrypterAdds(t *testing.T) {
 
 func TestDecrypt_AJWECritMayNotNameB64EvenWhenUnderstood(t *testing.T) {
 	cek := randomBytes(t, 16)
-	encrypter, err := GetEncrypter(jwa.Dir, cek)
+	encrypter, err := GetEncrypter(jwa.Dir, DirectKey{Key: cek, Enc: jwa.A128GCM})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +234,7 @@ func TestDecrypt_AJWECritMayNotNameB64EvenWhenUnderstood(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, plaintext, err := Decrypt(context.Background(), token, []model.Decrypter{scriptedDecrypter{alg: jwa.Dir, cek: cek}}, &model.JoseOptions{UnderstoodCriticalHeaders: []string{"b64"}})
+	_, plaintext, _, err := Decrypt(context.Background(), token, []model.Decrypter{scriptedDecrypter{alg: jwa.Dir, cek: cek}}, &model.JoseOptions{UnderstoodCriticalHeaders: []string{"b64"}})
 	if !errors.Is(err, joseerror.ErrMissingCriticalClaim) || plaintext != nil {
 		t.Errorf("[RFC 7797 3] b64 is defined for JWS only, so a JWE recipient does not understand it, got %v", err)
 	}
@@ -239,7 +245,7 @@ func TestDecrypt_ATokenOfOnlyDotsIsRefusedWithoutSplittingItAll(t *testing.T) {
 	var stats runtime.MemStats
 	runtime.ReadMemStats(&stats)
 	before := stats.TotalAlloc
-	_, _, err := Decrypt(context.Background(), token, nil, nil)
+	_, _, _, err := Decrypt(context.Background(), token, nil, nil)
 	runtime.ReadMemStats(&stats)
 	if !errors.Is(err, joseerror.ErrMalformedToken) {
 		t.Fatalf("[RFC 7516 7.1] want ErrMalformedToken, got %v", err)
@@ -270,8 +276,8 @@ func TestDecrypt_EveryFailureToDecryptIsTheSameError(t *testing.T) {
 			}
 			parts := decodedParts(t, token)
 			parts[4][0] ^= 1
-			_, _, wrongKeyErr := Decrypt(context.Background(), token, []model.Decrypter{wrongKey}, nil)
-			_, _, wrongTagErr := Decrypt(context.Background(), encodeParts(parts), []model.Decrypter{pair.decrypter}, nil)
+			_, _, _, wrongKeyErr := Decrypt(context.Background(), token, []model.Decrypter{wrongKey}, nil)
+			_, _, _, wrongTagErr := Decrypt(context.Background(), encodeParts(parts), []model.Decrypter{pair.decrypter}, nil)
 			if !errors.Is(wrongKeyErr, joseerror.ErrDecryptionFailed) || wrongKeyErr == nil || wrongTagErr == nil || wrongKeyErr.Error() != wrongTagErr.Error() {
 				t.Errorf("[RFC 7516 11.5] a wrong key and a wrong tag must be indistinguishable, got %q and %q", wrongKeyErr, wrongTagErr)
 			}
@@ -301,7 +307,7 @@ func (s scriptedDecrypter) Decrypt(_ io.Reader, _ []byte, opts crypto.DecrypterO
 
 func dirToken(t *testing.T, enc jwa.Encryption, cek []byte) string {
 	t.Helper()
-	encrypter, err := GetEncrypter(jwa.Dir, cek)
+	encrypter, err := GetEncrypter(jwa.Dir, DirectKey{Key: cek, Enc: enc})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,7 +323,7 @@ func TestDecrypt_ADecrypterThatFailsOrReturnsTheWrongLengthIsGivenARandomCEK(t *
 	token := dirToken(t, jwa.A128CBCHS256, cek)
 	parts := decodedParts(t, token)
 	parts[4][0] ^= 1
-	_, _, wrongTag := Decrypt(context.Background(), encodeParts(parts), []model.Decrypter{scriptedDecrypter{alg: jwa.Dir, cek: cek}}, nil)
+	_, _, _, wrongTag := Decrypt(context.Background(), encodeParts(parts), []model.Decrypter{scriptedDecrypter{alg: jwa.Dir, cek: cek}}, nil)
 	for name, decrypter := range map[string]scriptedDecrypter{
 		"an error":                             {alg: jwa.Dir, err: errors.New("hardware module unavailable")},
 		"a CEK one octet short":                {alg: jwa.Dir, cek: cek[:31]},
@@ -327,11 +333,11 @@ func TestDecrypt_ADecrypterThatFailsOrReturnsTheWrongLengthIsGivenARandomCEK(t *
 		"a CEK whose encryption half is right": {alg: jwa.Dir, cek: append(make([]byte, 16), cek[16:]...)},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, plaintext, err := Decrypt(context.Background(), token, []model.Decrypter{decrypter}, nil)
+			_, plaintext, _, err := Decrypt(context.Background(), token, []model.Decrypter{decrypter}, nil)
 			if !errors.Is(err, joseerror.ErrDecryptionFailed) || plaintext != nil || err.Error() != wrongTag.Error() {
 				t.Errorf("[RFC 7516 11.5] want the error a changed tag gives, %q, with no plaintext, got %v", wrongTag, err)
 			}
-			_, plaintext, err = Decrypt(context.Background(), token, []model.Decrypter{decrypter, scriptedDecrypter{alg: jwa.Dir, cek: cek}}, nil)
+			_, plaintext, _, err = Decrypt(context.Background(), token, []model.Decrypter{decrypter, scriptedDecrypter{alg: jwa.Dir, cek: cek}}, nil)
 			if err != nil || string(plaintext) != "secret" {
 				t.Errorf("[RFC 7516 11.5] a failing decrypter must not stop the next being tried, got %q and %v", plaintext, err)
 			}
@@ -349,7 +355,7 @@ func TestDecrypt_TriesEachDecrypterOfTheTokensAlgInTurn(t *testing.T) {
 		scriptedDecrypter{alg: jwa.Dir, err: errors.New("no"), calls: &wrongCalls},
 		scriptedDecrypter{alg: jwa.Dir, cek: cek, calls: &rightCalls},
 	}
-	_, plaintext, err := Decrypt(context.Background(), token, decrypters, nil)
+	_, plaintext, _, err := Decrypt(context.Background(), token, decrypters, nil)
 	if err != nil || string(plaintext) != "secret" {
 		t.Fatalf("[RFC 7516 5.2 step 16] want the plaintext from the third dir decrypter, got %q and %v", plaintext, err)
 	}
@@ -360,7 +366,7 @@ func TestDecrypt_TriesEachDecrypterOfTheTokensAlgInTurn(t *testing.T) {
 
 func TestDecrypt_PassesTheDecrypterTheHeaderAndEnc(t *testing.T) {
 	cek := randomBytes(t, 16)
-	encrypter, err := GetEncrypter(jwa.Dir, cek)
+	encrypter, err := GetEncrypter(jwa.Dir, DirectKey{Key: cek, Enc: jwa.A128GCM})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,7 +375,7 @@ func TestDecrypt_PassesTheDecrypterTheHeaderAndEnc(t *testing.T) {
 		t.Fatal(err)
 	}
 	var seen model.DecrypterOpts
-	head, _, err := Decrypt(context.Background(), token, []model.Decrypter{scriptedDecrypter{alg: jwa.Dir, cek: cek, seen: &seen}}, nil)
+	head, _, _, err := Decrypt(context.Background(), token, []model.Decrypter{scriptedDecrypter{alg: jwa.Dir, cek: cek, seen: &seen}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -402,33 +408,44 @@ func TestDecrypt_RefusesAMalformedToken(t *testing.T) {
 		return strings.Join(changed, ".")
 	}
 	tests := map[string]string{
-		"three parts, a JWS":                    strings.Join(segments[:3], "."),
-		"four parts":                            strings.Join(segments[:4], "."),
-		"six parts":                             kwToken + ".",
-		"an empty string":                       "",
-		"a padded header":                       withSegment(0, segments[0]+"="),
-		"a header that is not JSON":             withSegment(0, base64.RawURLEncoding.EncodeToString([]byte("{"))),
-		"a header that is a JSON array":         withSegment(0, base64.RawURLEncoding.EncodeToString([]byte("[]"))),
-		"an encrypted key with a padding octet": withSegment(1, segments[1]+"="),
-		"an IV that is not base64url":           withSegment(2, "!!!!"),
-		"a ciphertext with a space":             withSegment(3, segments[3][:2]+" "+segments[3][2:]),
-		"a tag with non-zero pad bits":          withSegment(4, segments[4][:len(segments[4])-1]+"B"),
-		"an IV one octet short":                 withPart(kwParts, 2, kwParts[2][:11]),
-		"an IV one octet long":                  withPart(kwParts, 2, append(bytes.Clone(kwParts[2]), 0)),
-		"an empty IV":                           withPart(kwParts, 2, nil),
-		"a tag one octet short":                 withPart(kwParts, 4, kwParts[4][:15]),
-		"an empty tag":                          withPart(kwParts, 4, nil),
-		"a dir token with an encrypted key":     withPart(dirParts, 1, []byte{0}),
+		"three parts, a JWS":                      strings.Join(segments[:3], "."),
+		"four parts":                              strings.Join(segments[:4], "."),
+		"six parts":                               kwToken + ".",
+		"an empty string":                         "",
+		"a padded header":                         withSegment(0, segments[0]+"="),
+		"a header that is not JSON":               withSegment(0, base64.RawURLEncoding.EncodeToString([]byte("{"))),
+		"a header that is a JSON array":           withSegment(0, base64.RawURLEncoding.EncodeToString([]byte("[]"))),
+		"an encrypted key with a padding octet":   withSegment(1, segments[1]+"="),
+		"an IV that is not base64url":             withSegment(2, "!!!!"),
+		"a ciphertext with a space":               withSegment(3, segments[3][:2]+" "+segments[3][2:]),
+		"a tag with non-zero pad bits":            withSegment(4, segments[4][:len(segments[4])-1]+"B"),
+		"an IV one octet short":                   withPart(kwParts, 2, kwParts[2][:11]),
+		"an IV one octet long":                    withPart(kwParts, 2, append(bytes.Clone(kwParts[2]), 0)),
+		"an empty IV":                             withPart(kwParts, 2, nil),
+		"a tag one octet short":                   withPart(kwParts, 4, kwParts[4][:15]),
+		"a tag one octet long":                    withPart(kwParts, 4, append(bytes.Clone(kwParts[4]), 0)),
+		"a ciphertext octet moved into the tag":   withPart(withPartsOf(kwParts, 3, kwParts[3][:len(kwParts[3])-1]), 4, append(kwParts[3][len(kwParts[3])-1:len(kwParts[3]):len(kwParts[3])], kwParts[4]...)),
+		"an A128KW encrypted key one block short": withPart(kwParts, 1, kwParts[1][:16]),
+		"an A128KW encrypted key one block long":  withPart(kwParts, 1, append(bytes.Clone(kwParts[1]), make([]byte, 8)...)),
+		"an A128KW encrypted key of 1 MiB":        withPart(kwParts, 1, make([]byte, 1<<20)),
+		"an empty A128KW encrypted key":           withPart(kwParts, 1, nil),
+		"an empty tag":                            withPart(kwParts, 4, nil),
+		"a dir token with an encrypted key":       withPart(dirParts, 1, []byte{0}),
 	}
 	decrypters := []model.Decrypter{pair.decrypter, scriptedDecrypter{alg: jwa.Dir, cek: cek}}
 	for name, token := range tests {
 		t.Run(name, func(t *testing.T) {
-			_, plaintext, err := Decrypt(context.Background(), token, decrypters, nil)
-			if !errors.Is(err, joseerror.ErrMalformedToken) || plaintext != nil {
-				t.Errorf("[RFC 7516 5.2 steps 1 to 10] want ErrMalformedToken, got %v", err)
+			head, plaintext, used, err := Decrypt(context.Background(), token, decrypters, nil)
+			if !errors.Is(err, joseerror.ErrMalformedToken) || head != nil || plaintext != nil || used != nil {
+				t.Errorf("[RFC 7516 5.2 steps 1 to 10] want ErrMalformedToken and nothing else, got %v, %v, %v and %v", head, plaintext, used, err)
 			}
 		})
 	}
+}
+
+func withPartsOf(parts [5][]byte, i int, value []byte) [5][]byte {
+	parts[i] = value
+	return parts
 }
 
 func headerToken(t *testing.T, head map[string]any) string {
@@ -477,7 +494,7 @@ func TestDecrypt_ChecksTheHeader(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, plaintext, err := Decrypt(context.Background(), headerToken(t, tt.head), []model.Decrypter{decrypter}, tt.opts)
+			_, plaintext, _, err := Decrypt(context.Background(), headerToken(t, tt.head), []model.Decrypter{decrypter}, tt.opts)
 			if !errors.Is(err, joseerror.ErrMalformedToken) || plaintext != nil {
 				t.Fatalf("[RFC 7516 5.2 step 5] want ErrMalformedToken, got %v", err)
 			}
@@ -493,11 +510,11 @@ func TestDecrypt_ChecksTheHeader(t *testing.T) {
 
 func TestDecrypt_AcceptsWhatTheHeaderRulesAllow(t *testing.T) {
 	cek := randomBytes(t, 16)
-	encrypter, err := GetEncrypter(jwa.Dir, cek)
+	encrypter, err := GetEncrypter(jwa.Dir, DirectKey{Key: cek, Enc: jwa.A128GCM})
 	if err != nil {
 		t.Fatal(err)
 	}
-	decrypter, err := GetDecrypter(jwa.Dir, cek)
+	decrypter, err := GetDecrypter(jwa.Dir, DirectKey{Key: cek, Enc: jwa.A128GCM})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -519,7 +536,7 @@ func TestDecrypt_AcceptsWhatTheHeaderRulesAllow(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, _, err := Decrypt(context.Background(), token, []model.Decrypter{decrypter}, tt.opts); err != nil {
+			if _, _, _, err := Decrypt(context.Background(), token, []model.Decrypter{decrypter}, tt.opts); err != nil {
 				t.Errorf("[RFC 7516 4.1] want the token accepted, got %v", err)
 			}
 		})
@@ -529,7 +546,7 @@ func TestDecrypt_AcceptsWhatTheHeaderRulesAllow(t *testing.T) {
 func TestDecrypt_RefusesBadOptions(t *testing.T) {
 	cek := randomBytes(t, 16)
 	token := dirToken(t, jwa.A128GCM, cek)
-	good, err := GetDecrypter(jwa.Dir, cek)
+	good, err := GetDecrypter(jwa.Dir, DirectKey{Key: cek, Enc: jwa.A128GCM})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -555,7 +572,7 @@ func TestDecrypt_RefusesBadOptions(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, plaintext, err := Decrypt(tt.ctx, token, tt.decrypters, tt.opts)
+			_, plaintext, _, err := Decrypt(tt.ctx, token, tt.decrypters, tt.opts)
 			if !errors.Is(err, tt.want) || plaintext != nil || !strings.Contains(err.Error(), tt.mentions) {
 				t.Errorf("want %v naming %q, got %v", tt.want, tt.mentions, err)
 			}
@@ -572,13 +589,13 @@ func TestDecrypt_MaxKeysTriedDefaultsTo100(t *testing.T) {
 	for len(hundred) < 100 {
 		hundred = append(hundred, wrong)
 	}
-	if _, _, err := Decrypt(context.Background(), token, hundred, &model.JoseOptions{}); err != nil {
+	if _, _, _, err := Decrypt(context.Background(), token, hundred, &model.JoseOptions{}); err != nil {
 		t.Errorf("100 decrypters are within the default, got %v", err)
 	}
-	if _, _, err := Decrypt(context.Background(), token, append(hundred, wrong), nil); !errors.Is(err, joseerror.ErrTooManyKeys) {
+	if _, _, _, err := Decrypt(context.Background(), token, append(hundred, wrong), nil); !errors.Is(err, joseerror.ErrTooManyKeys) {
 		t.Errorf("101 decrypters exceed the default, want ErrTooManyKeys, got %v", err)
 	}
-	if _, _, err := Decrypt(context.Background(), token, append(hundred, wrong), &model.JoseOptions{MaxKeysTried: -1}); !errors.Is(err, joseerror.ErrTooManyKeys) {
+	if _, _, _, err := Decrypt(context.Background(), token, append(hundred, wrong), &model.JoseOptions{MaxKeysTried: -1}); !errors.Is(err, joseerror.ErrTooManyKeys) {
 		t.Errorf("a negative MaxKeysTried means the default, want ErrTooManyKeys, got %v", err)
 	}
 }
@@ -675,7 +692,7 @@ func TestEncrypt_AcceptsAHeadThatNamesTheAlgAndEncInUse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := Decrypt(context.Background(), token, []model.Decrypter{pair.decrypter}, nil); err != nil {
+	if _, _, _, err := Decrypt(context.Background(), token, []model.Decrypter{pair.decrypter}, nil); err != nil {
 		t.Error(err)
 	}
 }
@@ -715,5 +732,175 @@ func TestEncrypt_RefusesAFailingRandomSource(t *testing.T) {
 				t.Errorf("want ErrEncryptionError once the random source runs dry, got %v", err)
 			}
 		})
+	}
+}
+
+func zeroCEKToken(t *testing.T, alg jwa.Algorithm, enc jwa.Encryption, encryptedKey []byte) string {
+	t.Helper()
+	head, err := json.Marshal(map[string]any{"alg": alg.String(), "enc": enc.String()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encodedHead := base64.RawURLEncoding.EncodeToString(head)
+	aead, err := contentenc.New(enc, make([]byte, cekSizes[enc]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	iv := make([]byte, aead.NonceSize())
+	sealed := aead.Seal(nil, iv, []byte(`{"sub":"admin"}`), []byte(encodedHead))
+	return encodeParts([5][]byte{head, encryptedKey, iv, sealed[:len(sealed)-aead.Overhead()], sealed[len(sealed)-aead.Overhead():]})
+}
+
+func TestDecrypt_AForgedTokenUnderAnAllZeroCEKDoesNotDecrypt(t *testing.T) {
+	rsaDecrypter := pairFor(t, jwa.RSAOAEP, jwa.A128GCM).decrypter
+	for _, enc := range allEncryptions {
+		for _, alg := range []jwa.Algorithm{jwa.A128KW, jwa.A256KW, jwa.RSAOAEP} {
+			t.Run(alg.String()+"/"+enc.String(), func(t *testing.T) {
+				decrypter := rsaDecrypter
+				encryptedKey := make([]byte, 256)
+				if alg != jwa.RSAOAEP {
+					decrypter = pairFor(t, alg, enc).decrypter
+					encryptedKey = make([]byte, cekSizes[enc]+8)
+				}
+				_, plaintext, used, err := Decrypt(context.Background(), zeroCEKToken(t, alg, enc, encryptedKey), []model.Decrypter{decrypter}, nil)
+				if !errors.Is(err, joseerror.ErrDecryptionFailed) || plaintext != nil || used != nil {
+					t.Errorf("[RFC 7516 11.5] a failed key decryption must be replaced by a random CEK, not one an attacker can predict, got %q and %v", plaintext, err)
+				}
+			})
+		}
+	}
+}
+
+type decrypterFunc func() []byte
+
+func (f decrypterFunc) Alg() jwa.Algorithm       { return jwa.Dir }
+func (f decrypterFunc) Public() crypto.PublicKey { return nil }
+func (f decrypterFunc) Decrypt(io.Reader, []byte, crypto.DecrypterOpts) ([]byte, error) {
+	return f(), nil
+}
+
+type decrypterMap map[string][]byte
+
+func (m decrypterMap) Alg() jwa.Algorithm       { return jwa.Dir }
+func (m decrypterMap) Public() crypto.PublicKey { return nil }
+func (m decrypterMap) Decrypt(io.Reader, []byte, crypto.DecrypterOpts) ([]byte, error) {
+	return m["cek"], nil
+}
+
+type encrypterFunc func() jwa.Algorithm
+
+func (f encrypterFunc) Alg() jwa.Algorithm       { return f() }
+func (f encrypterFunc) Public() crypto.PublicKey { return nil }
+func (f encrypterFunc) WrapKey(io.Reader, jwa.Encryption, map[string]any) ([]byte, []byte, error) {
+	return nil, nil, nil
+}
+
+func TestEncryptAndDecrypt_RefuseANilOfEveryKind(t *testing.T) {
+	token := dirToken(t, jwa.A128GCM, randomBytes(t, 16))
+	var nilFunc decrypterFunc
+	var nilMap decrypterMap
+	for name, decrypter := range map[string]model.Decrypter{"a nil func": nilFunc, "a nil map": nilMap} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, _, err := Decrypt(context.Background(), token, []model.Decrypter{decrypter}, nil); !errors.Is(err, joseerror.ErrInvalidOptions) {
+				t.Errorf("want ErrInvalidOptions rather than a panic, got %v", err)
+			}
+		})
+	}
+	var nilEncrypter encrypterFunc
+	if token, err := Encrypt(nilEncrypter, jwa.A128GCM, []byte("p"), nil); !errors.Is(err, joseerror.ErrInvalidPublicKey) || token != "" {
+		t.Errorf("want ErrInvalidPublicKey rather than a panic, got %v", err)
+	}
+}
+
+func TestDecrypt_ReturnsTheDecrypterThatSucceeded(t *testing.T) {
+	cek := randomBytes(t, 16)
+	token := dirToken(t, jwa.A128GCM, cek)
+	first := scriptedDecrypter{alg: jwa.Dir, cek: make([]byte, 16)}
+	second, err := GetDecrypter(jwa.Dir, DirectKey{Key: cek, Enc: jwa.A128GCM})
+	if err != nil {
+		t.Fatal(err)
+	}
+	third, err := GetDecrypter(jwa.Dir, DirectKey{Key: cek, Enc: jwa.A128GCM})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, used, err := Decrypt(context.Background(), token, []model.Decrypter{first, second, third}, nil)
+	if err != nil || used != second {
+		t.Errorf("want the second decrypter, the first that decrypts, got %v and %v", used, err)
+	}
+}
+
+type tamperingDecrypter struct{}
+
+func (d tamperingDecrypter) Alg() jwa.Algorithm       { return jwa.A128KW }
+func (d tamperingDecrypter) Public() crypto.PublicKey { return nil }
+func (d tamperingDecrypter) Decrypt(_ io.Reader, msg []byte, opts crypto.DecrypterOpts) ([]byte, error) {
+	header := opts.(model.DecrypterOpts).Header
+	header["jwk"].(map[string]any)["kty"] = "changed"
+	header["kid"] = "changed"
+	for i := range msg {
+		msg[i] = 0
+	}
+	return nil, errors.New("not this one")
+}
+
+func TestDecrypt_EachDecrypterGetsItsOwnCopyOfTheHeaderAndEncryptedKey(t *testing.T) {
+	pair := pairFor(t, jwa.A128KW, jwa.A128GCM)
+	token, err := Encrypt(pair.encrypter, jwa.A128GCM, []byte("p"), map[string]any{"kid": "k", "jwk": map[string]any{"kty": "oct"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, plaintext, used, err := Decrypt(context.Background(), token, []model.Decrypter{tamperingDecrypter{}, pair.decrypter}, nil)
+	if err != nil || string(plaintext) != "p" || used != pair.decrypter {
+		t.Fatalf("a decrypter writing into what it was given must not stop the next decrypting, got %v", err)
+	}
+	if head["kid"] != "k" || head["jwk"].(map[string]any)["kty"] != "oct" {
+		t.Errorf("a decrypter must not be able to change the header Decrypt returns, got %v", head)
+	}
+}
+
+func TestDecrypt_MaxKeysTriedCountsOnlyTheTokensAlg(t *testing.T) {
+	cek := randomBytes(t, 16)
+	token := dirToken(t, jwa.A128GCM, cek)
+	right, err := GetDecrypter(jwa.Dir, DirectKey{Key: cek, Enc: jwa.A128GCM})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := pairFor(t, jwa.A128KW, jwa.A128GCM).decrypter
+	for name, opts := range map[string]*model.JoseOptions{
+		"a bound of 1 with a decrypter of another alg": {MaxKeysTried: 1},
+		"a negative bound, which means the default":    {MaxKeysTried: -1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, used, err := Decrypt(context.Background(), token, []model.Decrypter{other, other, right}, opts); err != nil || used != right {
+				t.Errorf("want the dir decrypter to decrypt, got %v and %v", used, err)
+			}
+		})
+	}
+}
+
+type cancellingDecrypter struct {
+	cancel context.CancelFunc
+	calls  *int
+}
+
+func (c cancellingDecrypter) Alg() jwa.Algorithm       { return jwa.Dir }
+func (c cancellingDecrypter) Public() crypto.PublicKey { return nil }
+func (c cancellingDecrypter) Decrypt(io.Reader, []byte, crypto.DecrypterOpts) ([]byte, error) {
+	*c.calls++
+	c.cancel()
+	return nil, errors.New("cancelled")
+}
+
+func TestDecrypt_StopsWhenTheContextEndsDuringADecrypter(t *testing.T) {
+	cek := randomBytes(t, 16)
+	token := dirToken(t, jwa.A128GCM, cek)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var cancelling, after int
+	decrypters := []model.Decrypter{cancellingDecrypter{cancel: cancel, calls: &cancelling}, scriptedDecrypter{alg: jwa.Dir, cek: cek, calls: &after}}
+	_, plaintext, used, err := Decrypt(ctx, token, decrypters, nil)
+	if !errors.Is(err, context.Canceled) || plaintext != nil || used != nil || cancelling != 1 || after != 0 {
+		t.Errorf("want context.Canceled with no further decrypter tried, got %v after %d and %d calls", err, cancelling, after)
 	}
 }

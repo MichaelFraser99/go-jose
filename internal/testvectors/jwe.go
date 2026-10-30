@@ -97,10 +97,10 @@ type jweFile struct {
 	} `json:"rfc8037_a6"`
 }
 
-// JWEExamples returns the JWE examples in the order RFC7516-A.1, RFC7516-A.3,
-// then RFC7520-5.2 through RFC7520-5.9. RFC 7516 A.2 and RFC 7520 5.1 use
-// RSA1_5 and are left out, as are RFC 7520 5.10 to 5.13, which have no
-// Compact Serialization.
+// JWEExamples returns the JWE examples in the order RFC7516-A.1 to
+// RFC7516-A.3, then RFC7520-5.1 to RFC7520-5.9. RFC7516-A.2 and RFC7520-5.1
+// use RSA1_5. RFC 7520 5.10 to 5.13 have no Compact Serialization and are
+// left out.
 //
 // ProtectedHeaderJSON is the header as the RFC prints it: byte-exact for
 // RFC 7516, and with RFC 7520's display whitespace kept, so it equals the

@@ -46,9 +46,18 @@ func recipientKey(t *testing.T, example testvectors.JWEExample) any {
 	return key
 }
 
+func exampleKey(t *testing.T, example testvectors.JWEExample) any {
+	t.Helper()
+	key := recipientKey(t, example)
+	if example.Alg == "dir" {
+		return DirectKey{Key: key.([]byte), Enc: jwa.GetEncryption(example.Enc)}
+	}
+	return key
+}
+
 func exampleDecrypter(t *testing.T, example testvectors.JWEExample) model.Decrypter {
 	t.Helper()
-	decrypter, err := GetDecrypter(jwa.GetAlgorithm(example.Alg), recipientKey(t, example))
+	decrypter, err := GetDecrypter(jwa.GetAlgorithm(example.Alg), exampleKey(t, example))
 	if err != nil {
 		t.Fatalf("building a %s decrypter for %s: %s", example.Alg, example.ID, err)
 	}
@@ -60,7 +69,7 @@ func TestDecrypt_RecoversThePlaintextOfEachRFCExample(t *testing.T) {
 	for _, id := range []string{"RFC7516-A.1", "RFC7516-A.3", "RFC7520-5.2", "RFC7520-5.6", "RFC7520-5.8"} {
 		t.Run(id, func(t *testing.T) {
 			example := byID[id]
-			head, plaintext, err := Decrypt(context.Background(), example.Compact, []model.Decrypter{exampleDecrypter(t, example)}, nil)
+			head, plaintext, _, err := Decrypt(context.Background(), example.Compact, []model.Decrypter{exampleDecrypter(t, example)}, nil)
 			if err != nil {
 				t.Fatalf("[RFC 7516 5.2] %s must decrypt, got %s", id, err)
 			}
@@ -115,7 +124,7 @@ func TestEncrypter_WrapsTheCEKAsEachRFCExampleDoes(t *testing.T) {
 	for _, id := range []string{"RFC7516-A.3", "RFC7520-5.6", "RFC7520-5.8"} {
 		t.Run(id, func(t *testing.T) {
 			example := byID[id]
-			encrypter, err := GetEncrypter(jwa.GetAlgorithm(example.Alg), recipientKey(t, example))
+			encrypter, err := GetEncrypter(jwa.GetAlgorithm(example.Alg), exampleKey(t, example))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -139,9 +148,34 @@ func TestDecrypt_RefusesEachRFCExampleThisLibraryDoesNotImplement(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, plaintext, err := Decrypt(context.Background(), example.Compact, []model.Decrypter{decrypter}, nil)
+			_, plaintext, _, err := Decrypt(context.Background(), example.Compact, []model.Decrypter{decrypter}, nil)
 			if !errors.Is(err, joseerror.ErrMalformedToken) || !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || plaintext != nil {
 				t.Errorf("[RFC 7516 5.2 step 5] %s names an alg or zip this library does not implement, so want ErrUnsupportedAlgorithm, got %v", id, err)
+			}
+		})
+	}
+}
+
+func TestDecrypt_RefusesTheRFCsRSA1_5ExamplesEvenWithTheRightKey(t *testing.T) {
+	byID := examples(t)
+	for _, id := range []string{"RFC7516-A.2", "RFC7520-5.1"} {
+		t.Run(id, func(t *testing.T) {
+			example := byID[id]
+			key := recipientKey(t, example)
+			decrypters := []model.Decrypter{}
+			for _, alg := range []jwa.Algorithm{jwa.RSAOAEP, jwa.RSAOAEP256} {
+				decrypter, err := GetDecrypter(alg, key)
+				if err != nil {
+					t.Fatal(err)
+				}
+				decrypters = append(decrypters, decrypter)
+			}
+			_, plaintext, used, err := Decrypt(context.Background(), example.Compact, decrypters, nil)
+			if !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || plaintext != nil || used != nil {
+				t.Errorf("[RFC 8725 3.2] RSA1_5 is not implemented, so want ErrUnsupportedAlgorithm before any key is used, got %v", err)
+			}
+			if decrypter, err := GetDecrypter(jwa.GetAlgorithm(example.Alg), key); !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || decrypter != nil {
+				t.Errorf("[RFC 8725 3.2] want no RSA1_5 decrypter, got %v", err)
 			}
 		})
 	}

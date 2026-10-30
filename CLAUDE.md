@@ -6,7 +6,7 @@ This file gives guidance to Claude Code (claude.ai/code) when it works in this r
 
 A zero-dependency Go implementation of the JOSE standards: JWS (RFC 7515), JWE (RFC 7516), JWK (RFC 7517), JWA (RFC 7518) and JWT (RFC 7519). It is a library, not a service.
 
-JWE is the Compact Serialization only, with the RSA-OAEP family, AES Key Wrap and `dir` for key management and all six RFC 7518 section 5 content encryption algorithms. `RSA1_5` is left out on purpose (RFC 8725 section 3.2). ECDH-ES, AES GCM key wrap, PBES2, `zip`, nested JWTs and HPKE are planned under issue #72 and not yet implemented.
+JWE is the Compact Serialization only, with the RSA-OAEP family, AES Key Wrap and `dir` for key management and all six RFC 7518 section 5 content encryption algorithms. `RSA1_5` is left out on purpose (RFC 8725 section 3.2). A `dir` key is a `jwe.DirectKey` bound to one `enc` (RFC 8725 section 3.1), and `jwe.Decrypt` returns the decrypter that succeeded so a caller never has to trust `kid`. ECDH-ES, AES GCM key wrap, PBES2, `zip`, nested JWTs and HPKE are planned under issue #72 and not yet implemented.
 
 ## Commands
 
