@@ -20,6 +20,11 @@ import (
 // A128KW, A192KW and A256KW, key is the shared key of 16, 24 or 32 octets
 // (section 4.4). For dir, key is the shared CEK itself (section 4.5). A shared
 // key is a []byte, or what Public returns for one, and is copied.
+//
+// With dir and an AES GCM enc, every token is encrypted under the one shared
+// key with a random IV. RFC 7518 section 8.4 says AES GCM MUST NOT be used with
+// the same key more than 2^32 times. This library does not count, so a caller
+// encrypting more tokens than that under one dir key must change the key.
 func GetEncrypter(alg jwa.Algorithm, key crypto.PublicKey) (model.Encrypter, error) {
 	var e model.Encrypter
 	var err error

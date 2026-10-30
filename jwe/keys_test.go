@@ -180,34 +180,46 @@ func TestGetDecrypter_ASharedKeyFromPublicDecrypts(t *testing.T) {
 }
 
 func TestGetEncrypterAndGetDecrypter_KeepTheirOwnCopyOfASharedKey(t *testing.T) {
+	sizes := map[jwa.Algorithm]int{jwa.A128KW: 16, jwa.A192KW: 24, jwa.A256KW: 32, jwa.Dir: 16}
+	changes := map[string]func(encrypterInput, decrypterInput []byte, encrypter model.Encrypter, decrypter model.Decrypter){
+		"the encrypter's input": func(e, _ []byte, _ model.Encrypter, _ model.Decrypter) { e[0] ^= 0xff },
+		"the decrypter's input": func(_, d []byte, _ model.Encrypter, _ model.Decrypter) { d[0] ^= 0xff },
+		"what the encrypter's Public returned": func(_, _ []byte, e model.Encrypter, _ model.Decrypter) {
+			reflect.ValueOf(e.Public()).Bytes()[0] ^= 0xff
+		},
+		"what the decrypter's Public returned": func(_, _ []byte, _ model.Encrypter, d model.Decrypter) {
+			reflect.ValueOf(d.Public()).Bytes()[0] ^= 0xff
+		},
+		"a CEK the encrypter returned": func(_, _ []byte, e model.Encrypter, _ model.Decrypter) {
+			if cek, _, err := e.WrapKey(rand.Reader, jwa.A128GCM, map[string]any{}); err == nil {
+				cek[0] ^= 0xff
+			}
+		},
+		"a CEK the decrypter returned": func(_, _ []byte, _ model.Encrypter, d model.Decrypter) {
+			if cek, err := d.Decrypt(nil, nil, nil); err == nil {
+				cek[0] ^= 0xff
+			}
+		},
+	}
 	for _, alg := range []jwa.Algorithm{jwa.A128KW, jwa.A192KW, jwa.A256KW, jwa.Dir} {
-		t.Run(alg.String(), func(t *testing.T) {
-			size := map[jwa.Algorithm]int{jwa.A128KW: 16, jwa.A192KW: 24, jwa.A256KW: 32, jwa.Dir: 16}[alg]
-			given := randomBytes(t, size)
-			encrypter, err := GetEncrypter(alg, given)
-			if err != nil {
-				t.Fatal(err)
-			}
-			givenToDecrypter := bytes.Clone(given)
-			decrypter, err := GetDecrypter(alg, givenToDecrypter)
-			if err != nil {
-				t.Fatal(err)
-			}
-			given[0] ^= 0xff
-			givenToDecrypter[0] ^= 0xff
-			if cek, _, err := encrypter.WrapKey(rand.Reader, jwa.A128GCM, map[string]any{}); err == nil {
-				cek[2] ^= 0xff
-			}
-			reflect.ValueOf(encrypter.Public()).Bytes()[1] ^= 0xff
-			reflect.ValueOf(decrypter.Public()).Bytes()[1] ^= 0xff
-			token, err := Encrypt(encrypter, jwa.A128GCM, []byte("p"), nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, _, err := Decrypt(context.Background(), token, []model.Decrypter{decrypter}, nil); err != nil {
-				t.Errorf("changing the caller's key after construction or the bytes Public returned must not change the key in use, got %v", err)
-			}
-		})
+		for name, change := range changes {
+			t.Run(alg.String()+"/"+name, func(t *testing.T) {
+				original := randomBytes(t, sizes[alg])
+				encrypterInput, decrypterInput := bytes.Clone(original), bytes.Clone(original)
+				encrypter, err := GetEncrypter(alg, encrypterInput)
+				if err != nil {
+					t.Fatal(err)
+				}
+				decrypter, err := GetDecrypter(alg, decrypterInput)
+				if err != nil {
+					t.Fatal(err)
+				}
+				change(encrypterInput, decrypterInput, encrypter, decrypter)
+				if !bytes.Equal(reflect.ValueOf(encrypter.Public()).Bytes(), original) || !bytes.Equal(reflect.ValueOf(decrypter.Public()).Bytes(), original) {
+					t.Errorf("changing %s must not change the key either side holds", name)
+				}
+			})
+		}
 	}
 }
 

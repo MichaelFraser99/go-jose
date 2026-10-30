@@ -90,7 +90,8 @@ var KeyManagementAlgorithms = []jwa.Algorithm{
 // CheckHeaderShape describes, except that "b64" (RFC 7797, JWS only) is not
 // read, and "crit" may name no parameter RFC 7516 or RFC 7518 defines for JWE
 // (RFC 7516 section 4.1.13). AcceptedTypes, RequireKeyIdentifier and
-// UnderstoodCriticalHeaders apply as they do to a JWS.
+// UnderstoodCriticalHeaders apply as they do to a JWS, except that "b64" in
+// UnderstoodCriticalHeaders is ignored, as RFC 7797 defines it for JWS only.
 func ValidateJWEHeader(header map[string]any, opts *model.JoseOptions) (jwa.Algorithm, jwa.Encryption, error) {
 	if opts == nil {
 		opts = &model.JoseOptions{}
@@ -132,7 +133,8 @@ func ValidateJWEHeader(header map[string]any, opts *model.JoseOptions) (jwa.Algo
 	if _, err := readHeaderShape(header, model.JWE); err != nil {
 		return jwa.Unknown, jwa.UnknownEncryption, err
 	}
-	_, err = jsonutils.RetrieveClaim[[]any](header, "crit", jsonutils.UnderstoodCriticalValues(opts.UnderstoodCriticalHeaders))
+	understood := slices.DeleteFunc(slices.Clone(opts.UnderstoodCriticalHeaders), func(name string) bool { return name == "b64" })
+	_, err = jsonutils.RetrieveClaim[[]any](header, "crit", jsonutils.UnderstoodCriticalValues(understood))
 	if err != nil && !errors.Is(err, joseerror.ErrMissingClaim) {
 		return jwa.Unknown, jwa.UnknownEncryption, err
 	}

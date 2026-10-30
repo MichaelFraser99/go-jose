@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"errors"
+	"io"
 	"math/big"
 	"testing"
 
@@ -95,5 +96,23 @@ func TestNewDecrypter_KeepsItsOwnCopyOfACryptoDecryptersPublicKey(t *testing.T) 
 	shared.N.Set(other.N)
 	if !key.PublicKey.Equal(decrypter.Public()) {
 		t.Error("changing the public key a crypto.Decrypter shares must not change the decrypter's")
+	}
+}
+
+type pointerDecrypter struct {
+	key *rsa.PrivateKey
+}
+
+func (p *pointerDecrypter) Public() crypto.PublicKey { return p.key.Public() }
+
+func (p *pointerDecrypter) Decrypt(random io.Reader, msg []byte, opts crypto.DecrypterOpts) ([]byte, error) {
+	return p.key.Decrypt(random, msg, opts)
+}
+
+func TestNewDecrypter_RefusesATypedNilCryptoDecrypter(t *testing.T) {
+	var key *pointerDecrypter
+	decrypter, err := NewDecrypter(jwa.RSAOAEP, key)
+	if !errors.Is(err, joseerror.ErrInvalidPrivateKey) || decrypter != nil {
+		t.Errorf("want ErrInvalidPrivateKey and no decrypter rather than a panic, got %v", err)
 	}
 }

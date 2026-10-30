@@ -56,7 +56,7 @@ func encrypt(random io.Reader, encrypter model.Encrypter, enc jwa.Encryption, pl
 	}
 	for name, value := range map[string]string{"alg": alg.String(), "enc": enc.String()} {
 		if named, found := h[name]; found && named != value {
-			return "", fmt.Errorf("%wthe '%s' header names %s but the token uses %s", joseerror.ErrUnsupportedAlgorithm, name, jsonutils.QuoteBounded(fmt.Sprint(named)), value)
+			return "", fmt.Errorf("%wthe '%s' header must be the string %q", joseerror.ErrUnsupportedAlgorithm, name, value)
 		}
 	}
 	if _, found := h["zip"]; found {
@@ -71,6 +71,9 @@ func encrypt(random io.Reader, encrypter model.Encrypter, enc jwa.Encryption, pl
 	}
 	if h["alg"] != alg.String() || h["enc"] != enc.String() {
 		return "", fmt.Errorf("%wthe encrypter rewrote the 'alg' or 'enc' header", joseerror.ErrEncryptionError)
+	}
+	if _, found := h["zip"]; found {
+		return "", fmt.Errorf("%wthe encrypter added a 'zip' header to plaintext that was not compressed", joseerror.ErrEncryptionError)
 	}
 	if alg == jwa.Dir && len(encryptedKey) != 0 {
 		return "", fmt.Errorf("%wthe JWE Encrypted Key of a dir JWE is empty (RFC 7516 section 5.1 step 5)", joseerror.ErrEncryptionError)
@@ -144,6 +147,12 @@ func checkProducerHeader(headBytes []byte) error {
 // place, as RFC 7516 section 11.5 advises, so every failure to decrypt is the
 // one ErrDecryptionFailed. A nil ctx or decrypter is ErrInvalidOptions. ctx is
 // checked before each decrypter is tried, and its error returned once it ends.
+//
+// Decrypt does not report which decrypter succeeded, and does not compare the
+// header's "kid" with it. With a shared key, such as A256KW or dir, the key is
+// what identifies the sender, and any holder of any key passed can set "kid" to
+// another's. To tie a token to one key, choose the decrypter by "kid" yourself
+// and pass only that one.
 func Decrypt(ctx context.Context, compactSerialization string, decrypters []model.Decrypter, opts *model.JoseOptions) (protectedHeader map[string]any, plaintext []byte, err error) {
 	if ctx == nil {
 		return nil, nil, fmt.Errorf("%wthe context passed is nil", joseerror.ErrInvalidOptions)
@@ -154,9 +163,9 @@ func Decrypt(ctx context.Context, compactSerialization string, decrypters []mode
 		}
 	}
 
-	components := strings.Split(compactSerialization, ".")
+	components := strings.SplitN(compactSerialization, ".", 6)
 	if len(components) != 5 {
-		return nil, nil, fmt.Errorf("%wa JWE Compact Serialization has five parts, got %d", joseerror.ErrMalformedToken, len(components))
+		return nil, nil, fmt.Errorf("%wa JWE Compact Serialization has exactly five parts", joseerror.ErrMalformedToken)
 	}
 	protectedHeader, err = jsonutils.DecodeBase64urlMap(components[0])
 	if err != nil {

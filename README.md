@@ -521,6 +521,8 @@ An RSA key must have a modulus of 2048 to 8192 bits. RFC 7518 section 4.3 makes 
 
 A `dir` key can be 16, 24, 32, 48 or 64 octets. `Encrypt` refuses an `enc` whose key length is different.
 
+CAUTION: Do not encrypt more than 2^32 tokens under one `dir` key with an AES GCM `enc`. RFC 7518 section 8.4 makes this limit a MUST. With `dir`, every token uses the shared key and a random IV, and this library does not count the tokens. The other algorithms make a new key for each token.
+
 The `enc` values are `A128CBC-HS256`, `A192CBC-HS384`, `A256CBC-HS512`, `A128GCM`, `A192GCM` and `A256GCM`, from RFC 7518 section 5. In Go they are `jwa.A128CBCHS256` to `jwa.A256GCM`, of type `jwa.Encryption`.
 
 This library does not implement `RSA1_5`, and it will not. RFC 8725 section 3.2 advises against it because of padding oracle attacks. `ECDH-ES`, `A128GCMKW` to `A256GCMKW`, `PBES2` and `zip` are not implemented yet.
@@ -547,13 +549,15 @@ head, plaintext, err := jwe.Decrypt(ctx, token, []model.Decrypter{decrypter}, op
 
 Every failure to decrypt is the same `ErrDecryptionFailed`, with the same message. If a decrypter returns an error, or a key of the wrong length, `Decrypt` uses a random key in its place. The decryption then fails at the authentication tag, as a changed token does. RFC 7516 section 11.5 describes this defence. Thus the error does not tell an attacker which step failed.
 
+`Decrypt` does not tell you which decrypter succeeded. It also does not compare the `kid` header with that decrypter. With a shared key (`A128KW` to `A256KW`, or `dir`), the key identifies the sender. A sender who holds one of your keys can put the `kid` of a different key in the header. If you use `kid` to identify the sender, select the decrypter by `kid` first. Then give `Decrypt` only that decrypter.
+
 A header can name a key with `jku`, `jwk`, `x5u` or `x5c`. In a JWE, that key is the public key of the recipient, and a public key cannot decrypt. Thus `Decrypt` does not fetch or read these keys. Only the decrypters that you give are used.
 
 These `JoseOptions` apply to `Decrypt`:
 
 - `AllowedKeyManagementAlgorithms` and `AllowedContentEncryptionAlgorithms` limit the `alg` and `enc` values that a token can name. If a list is empty, all values that this library implements are permitted.
 - `MaxKeysTried` limits the number of decrypters of the token's `alg`. The default is 100.
-- `AcceptedTypes`, `RequireKeyIdentifier` and `UnderstoodCriticalHeaders` apply as they do to a JWS.
+- `AcceptedTypes`, `RequireKeyIdentifier` and `UnderstoodCriticalHeaders` apply as they do to a JWS. The exception is `b64`: RFC 7797 defines it for JWS only, so a JWE `crit` that names `b64` is refused.
 
 `AllowedSigningAlgorithms` does not apply to a JWE.
 

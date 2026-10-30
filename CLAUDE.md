@@ -82,7 +82,7 @@ A `jwk`, `jku`, `x5c` or `x5u` header names a key the token's signer chose. RFC 
 
 ### Every JWE decryption failure must look the same
 
-RFC 7516 section 11.5 requires a recipient not to reveal which step of decryption failed. `jwe.Decrypt` therefore never returns early once it has a candidate decrypter. If a decrypter fails, or returns a CEK of the wrong length, `Decrypt` uses a random CEK in its place and carries on to the tag check, then to the next decrypter. The one error a caller sees is `ErrDecryptionFailed` with one fixed message. Do not wrap a decrypter's own error into it, and do not add a check that returns between `Decrypt` on the key and `Open` on the content. Faults in the public structure of the token, such as an IV of the wrong length, are checked first and may be `ErrMalformedToken`.
+RFC 7516 section 11.5 requires a recipient not to reveal which step of decryption failed. `jwe.Decrypt` therefore never returns early once it has a candidate decrypter. If a decrypter fails, or returns a CEK of the wrong length, `Decrypt` uses a random CEK in its place and carries on to the tag check, then to the next decrypter. Every failure that depends on a key is `ErrDecryptionFailed` with one fixed message. The only other `ErrDecryptionFailed` message says that no decrypter implements the token's `alg`, which is public. Do not wrap a decrypter's own error into it, and do not add a check that returns between `Decrypt` on the key and `Open` on the content. Faults in the public structure of the token, such as an IV of the wrong length, are checked first and may be `ErrMalformedToken`.
 
 ### A JWE header's key parameters name the recipient's public key
 

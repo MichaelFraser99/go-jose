@@ -10,6 +10,7 @@ import (
 	"crypto/rsa"
 	"fmt"
 	"io"
+	"reflect"
 
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/contentenc"
@@ -80,6 +81,9 @@ func NewDecrypter(alg jwa.Algorithm, privateKey crypto.PrivateKey) (*Decrypter, 
 		}
 		return &Decrypter{alg: alg, hash: hash, key: completed, publicKey: &completed.PublicKey}, nil
 	case crypto.Decrypter:
+		if value := reflect.ValueOf(key); value.Kind() == reflect.Pointer && value.IsNil() {
+			return nil, fmt.Errorf("%wthe crypto.Decrypter for %s is a nil pointer", joseerror.ErrInvalidPrivateKey, alg)
+		}
 		rsaPublicKey, ok := key.Public().(*rsa.PublicKey)
 		if !ok {
 			return nil, fmt.Errorf("%wa crypto.Decrypter for %s must have an *rsa.PublicKey", joseerror.ErrInvalidPrivateKey, alg)

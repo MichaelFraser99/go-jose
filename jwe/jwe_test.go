@@ -11,6 +11,7 @@ import (
 	"errors"
 	"io"
 	"math"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -163,6 +164,9 @@ func TestDecrypt_RefusesATokenWithAnyOctetChanged(t *testing.T) {
 			}
 			original := decodedParts(t, token)
 			for part, name := range []string{"protected header", "encrypted key", "initialization vector", "ciphertext", "authentication tag"} {
+				if part == 0 {
+					continue
+				}
 				for _, offset := range []int{0, len(original[part]) - 1} {
 					if len(original[part]) == 0 {
 						continue
@@ -172,16 +176,76 @@ func TestDecrypt_RefusesATokenWithAnyOctetChanged(t *testing.T) {
 						tampered[part] = bytes.Clone(original[part])
 						tampered[part][offset] ^= 0x01
 						_, plaintext, err := Decrypt(context.Background(), encodeParts(tampered), []model.Decrypter{pair.decrypter}, nil)
-						if err == nil || plaintext != nil {
-							t.Fatalf("[RFC 7516 5.2 step 16] a %s changed at octet %d must not decrypt", name, offset)
-						}
-						if part > 0 && !errors.Is(err, joseerror.ErrDecryptionFailed) {
-							t.Errorf("[RFC 7516 11.5] a changed %s must fail as ErrDecryptionFailed, got %v", name, err)
+						if !errors.Is(err, joseerror.ErrDecryptionFailed) || plaintext != nil {
+							t.Errorf("[RFC 7516 5.2 step 16] a %s changed at octet %d must fail as ErrDecryptionFailed, got %v", name, offset, err)
 						}
 					})
 				}
 			}
 		}
+	}
+}
+
+func TestDecrypt_AHeaderChangedToOtherValidJSONFailsTheTag(t *testing.T) {
+	for _, alg := range []jwa.Algorithm{jwa.RSAOAEP256, jwa.A256KW, jwa.Dir} {
+		for _, enc := range []jwa.Encryption{jwa.A128CBCHS256, jwa.A256GCM} {
+			t.Run(alg.String()+"/"+enc.String(), func(t *testing.T) {
+				pair := pairFor(t, alg, enc)
+				token, err := Encrypt(pair.encrypter, enc, []byte("p"), map[string]any{"kid": "sender-a"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				parts := decodedParts(t, token)
+				changed := bytes.Replace(parts[0], []byte("sender-a"), []byte("sender-b"), 1)
+				if bytes.Equal(changed, parts[0]) {
+					t.Fatal("the kid was not found in the header")
+				}
+				parts[0] = changed
+				_, plaintext, err := Decrypt(context.Background(), encodeParts(parts), []model.Decrypter{pair.decrypter}, nil)
+				if !errors.Is(err, joseerror.ErrDecryptionFailed) || plaintext != nil {
+					t.Errorf("[RFC 7516 5.2 steps 14 and 16] the header is the AAD, so changing its kid must fail as ErrDecryptionFailed, got %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestEncrypt_RefusesAZipAnEncrypterAdds(t *testing.T) {
+	kw := pairFor(t, jwa.A128KW, jwa.A128GCM).encrypter
+	token, err := Encrypt(headerRewriter{Encrypter: kw, rewrite: func(h map[string]any) { h["zip"] = "DEF" }}, jwa.A128GCM, []byte("p"), nil)
+	if !errors.Is(err, joseerror.ErrEncryptionError) || token != "" {
+		t.Errorf("[RFC 7516 4.1.3] a zip over plaintext that was not compressed must not be emitted, got %v and %q", err, token)
+	}
+}
+
+func TestDecrypt_AJWECritMayNotNameB64EvenWhenUnderstood(t *testing.T) {
+	cek := randomBytes(t, 16)
+	encrypter, err := GetEncrypter(jwa.Dir, cek)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := Encrypt(encrypter, jwa.A128GCM, []byte("p"), map[string]any{"b64": false, "crit": []any{"b64"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, plaintext, err := Decrypt(context.Background(), token, []model.Decrypter{scriptedDecrypter{alg: jwa.Dir, cek: cek}}, &model.JoseOptions{UnderstoodCriticalHeaders: []string{"b64"}})
+	if !errors.Is(err, joseerror.ErrMissingCriticalClaim) || plaintext != nil {
+		t.Errorf("[RFC 7797 3] b64 is defined for JWS only, so a JWE recipient does not understand it, got %v", err)
+	}
+}
+
+func TestDecrypt_ATokenOfOnlyDotsIsRefusedWithoutSplittingItAll(t *testing.T) {
+	token := strings.Repeat(".", 1<<20)
+	var stats runtime.MemStats
+	runtime.ReadMemStats(&stats)
+	before := stats.TotalAlloc
+	_, _, err := Decrypt(context.Background(), token, nil, nil)
+	runtime.ReadMemStats(&stats)
+	if !errors.Is(err, joseerror.ErrMalformedToken) {
+		t.Fatalf("[RFC 7516 7.1] want ErrMalformedToken, got %v", err)
+	}
+	if grew := stats.TotalAlloc - before; grew > 1<<16 {
+		t.Errorf("refusing a token of %d dots allocated %d bytes, so its parts were split before they were counted", len(token), grew)
 	}
 }
 
@@ -255,12 +319,12 @@ func TestDecrypt_ADecrypterThatFailsOrReturnsTheWrongLengthIsGivenARandomCEK(t *
 	parts[4][0] ^= 1
 	_, _, wrongTag := Decrypt(context.Background(), encodeParts(parts), []model.Decrypter{scriptedDecrypter{alg: jwa.Dir, cek: cek}}, nil)
 	for name, decrypter := range map[string]scriptedDecrypter{
-		"an error":                     {alg: jwa.Dir, err: errors.New("hardware module unavailable")},
-		"a CEK one octet short":        {alg: jwa.Dir, cek: cek[:31]},
-		"a CEK one octet long":         {alg: jwa.Dir, cek: append(bytes.Clone(cek), 0)},
-		"no CEK":                       {alg: jwa.Dir},
-		"the right CEK and an error":   {alg: jwa.Dir, cek: cek, err: errors.New("but also failed")},
-		"a CEK half of which is right": {alg: jwa.Dir, cek: append(bytes.Clone(cek[:16]), make([]byte, 16)...)},
+		"an error":                             {alg: jwa.Dir, err: errors.New("hardware module unavailable")},
+		"a CEK one octet short":                {alg: jwa.Dir, cek: cek[:31]},
+		"a CEK one octet long":                 {alg: jwa.Dir, cek: append(bytes.Clone(cek), 0)},
+		"no CEK":                               {alg: jwa.Dir},
+		"the right CEK and an error":           {alg: jwa.Dir, cek: cek, err: errors.New("but also failed")},
+		"a CEK whose encryption half is right": {alg: jwa.Dir, cek: append(make([]byte, 16), cek[16:]...)},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, plaintext, err := Decrypt(context.Background(), token, []model.Decrypter{decrypter}, nil)
@@ -561,6 +625,7 @@ func TestEncrypt_RefusesWhatItCannotEmit(t *testing.T) {
 		{name: "a head naming another alg", encrypter: kw, enc: jwa.A128GCM, head: map[string]any{"alg": "A256KW"}, want: joseerror.ErrUnsupportedAlgorithm},
 		{name: "a head naming another enc", encrypter: kw, enc: jwa.A128GCM, head: map[string]any{"enc": "A256GCM"}, want: joseerror.ErrUnsupportedAlgorithm},
 		{name: "a head with an alg that is not a string", encrypter: kw, enc: jwa.A128GCM, head: map[string]any{"alg": 1}, want: joseerror.ErrUnsupportedAlgorithm},
+		{name: "a head with the jwa constant rather than its name", encrypter: kw, enc: jwa.A128GCM, head: map[string]any{"alg": jwa.A128KW}, want: joseerror.ErrUnsupportedAlgorithm},
 		{name: "a head with zip", encrypter: kw, enc: jwa.A128GCM, head: map[string]any{"zip": "DEF"}, want: joseerror.ErrUnsupportedAlgorithm},
 		{name: "a head whose crit names an absent parameter", encrypter: kw, enc: jwa.A128GCM, head: map[string]any{"crit": []any{"exp"}}, want: joseerror.ErrMissingCriticalClaim},
 		{name: "a head whose crit names enc", encrypter: kw, enc: jwa.A128GCM, head: map[string]any{"crit": []any{"enc"}}, want: joseerror.ErrMalformedClaim},
