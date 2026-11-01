@@ -51,12 +51,6 @@ func verify(ctx context.Context, compactSerialization string, outOfBoundsPublicK
 		return nil, nil, nil, fmt.Errorf("%werror processing protected header: %v", joseerror.ErrMalformedToken, err)
 	}
 
-	if name, ok := protectedHeader["alg"].(string); ok {
-		if alg := jwa.GetAlgorithm(name); alg != jwa.Unknown && !hasValidator(alg) {
-			return nil, nil, nil, fmt.Errorf("%w%q has no validator in this library", joseerror.ErrUnsupportedAlgorithm, alg.String())
-		}
-	}
-
 	var jwkRetrievers []model.Retriever
 
 	if outOfBoundsPublicKey != nil {
@@ -71,6 +65,9 @@ func verify(ctx context.Context, compactSerialization string, outOfBoundsPublicK
 	headerJwkRetrievers, err := header.ValidateHeader(ctx, protectedHeader, client, opts)
 	if err != nil {
 		return nil, nil, nil, err
+	}
+	if alg := jwa.GetAlgorithm(protectedHeader["alg"].(string)); !hasValidator(alg) {
+		return nil, nil, nil, fmt.Errorf("%w%q has no validator in this library", joseerror.ErrUnsupportedAlgorithm, alg.String())
 	}
 
 	if payloadIsJSONObject && header.NamesNestedJWT(protectedHeader) {

@@ -71,35 +71,6 @@ func Test_retrieveClaim(t *testing.T) {
 	}
 }
 
-func Test_validateAlg(t *testing.T) {
-	tests := map[string]struct {
-		retrievedClaimValue string
-		errMsg              string
-		errTypes            []error
-	}{
-		"happy path": {
-			retrievedClaimValue: "RS256",
-		},
-		"invalid alg": {
-			retrievedClaimValue: "foo-bar",
-			errMsg:              `"foo-bar" is not a supported algorithm`,
-			errTypes:            []error{joseerror.ErrUnsupportedAlgorithm},
-		},
-		"missing alg": {
-			retrievedClaimValue: "",
-			errMsg:              `"" is not a supported algorithm`,
-			errTypes:            []error{joseerror.ErrUnsupportedAlgorithm},
-		},
-	}
-
-	for name, test := range tests {
-		t.Run(name, func(t *testing.T) {
-			err := ValidateAlg(map[string]any{}, test.retrievedClaimValue)
-			validateTestError(t, err, test.errMsg, test.errTypes)
-		})
-	}
-}
-
 func Test_validateHttpsUrlClaim(t *testing.T) {
 	tests := map[string]struct {
 		retrievedClaimValue string

@@ -44,6 +44,8 @@ func TestVerify_ErrMalformedTokenMarksOnlyAHeaderThatBreaksTheSpecification(t *t
 		{name: "an empty crit", header: map[string]any{"alg": "ES256", "crit": []any{}}, want: joseerror.ErrMalformedClaim, malformed: true, clause: "RFC 7515 4.1.11"},
 		{name: "a crit naming an absent parameter", header: map[string]any{"alg": "ES256", "crit": []any{"exp"}}, opts: &model.JoseOptions{UnderstoodCriticalHeaders: []string{"exp"}}, want: joseerror.ErrMissingCriticalClaim, malformed: true, clause: "RFC 7515 4.1.11"},
 		{name: "a kid that is not a string with an alg outside the allow-list", header: map[string]any{"alg": "ES256", "kid": 7}, opts: &model.JoseOptions{AllowedSigningAlgorithms: []jwa.Algorithm{jwa.RS256}}, want: joseerror.ErrMalformedClaim, malformed: true, clause: "RFC 7515 4.1.4"},
+		{name: "a kid that is not a string with a JWE alg, which has no validator", header: map[string]any{"alg": "dir", "kid": 5}, want: joseerror.ErrMalformedClaim, malformed: true, clause: "RFC 7515 4.1.4"},
+		{name: "a jku that is not https with a JWE alg", header: map[string]any{"alg": "RSA-OAEP", "jku": "http://x"}, want: joseerror.ErrMalformedClaim, malformed: true, clause: "RFC 7515 4.1.2"},
 		{name: "a b64 that is not a boolean", header: map[string]any{"alg": "ES256", "b64": "no", "crit": []any{"b64"}}, want: joseerror.ErrMalformedClaim, malformed: true, clause: "RFC 7797 3"},
 
 		{name: "an alg this library does not know", header: map[string]any{"alg": "foobar"}, want: joseerror.ErrUnsupportedAlgorithm, clause: "RFC 7515 5.2"},
