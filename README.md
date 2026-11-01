@@ -646,14 +646,19 @@ Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 | `ErrNoKeyIdentifierMatch` | No key could be selected. The `kid` matches nothing, a `jku` set holds no usable key that matches the header, a certificate chain does not reach a configured root, or an `x5t` thumbprint does not match the chain |
 | `ErrKeystoreError` | A `model.Jwks` lookup or addition failed, or a document decoded into `model.Jwks` is not a JWK Set |
 | `ErrApplicationError` | Key material a header named could not be obtained, decoded or used. Covers a failed `jku` or `x5u` fetch, a local decode of what one returned (an empty `x5u` body is a failed decode), and an inline `jwk` of a key type or curve this library does not support. A fetch that ran out of time also matches `context.DeadlineExceeded`, and one cancelled through `ctx` matches `context.Canceled` |
-| `ErrMalformedToken` | The token is not a well formed JOSE object |
+| `ErrMalformedToken` | The token is not a well formed JOSE object: it breaks RFC 7515 or RFC 7516. A well-formed token that your options refuse, or that names what this library does not implement, does not match it |
 | `ErrExpired` | The current time is not before the token's `exp`, allowing for `ClockSkewLeeway` |
 | `ErrNotYetValid` | The token's `nbf` or `iat` is after the current time, allowing for `ClockSkewLeeway` |
 | `ErrAudienceMismatch` | `JoseOptions.ExpectedAudience` is set and the token's `aud` names none of its values |
 | `ErrInvalidOptions` | The options passed are themselves wrong, whatever the token. A nil `ctx`, a `JoseOptions.ExpectedAudience` that holds an empty string, and a JWE allow-list that names a value this library does not implement are three cases |
 | `ErrTooManyKeys` | The signature did not verify under as many keys as `JoseOptions.MaxKeysTried` allows, and more keys or key sources remained. For a JWE, more decrypters of the token's `alg` were given than `MaxKeysTried` allows |
 
-An error can match more than one sentinel. A fault in a token's header matches `ErrMalformedToken` and also the sentinel for the fault, such as `ErrUnsupportedAlgorithm` for an `alg` outside your allow-list. Thus test the specific sentinels first and `ErrMalformedToken` last.
+An error can match more than one sentinel. A header that breaks the specification matches `ErrMalformedToken` and also the sentinel for the fault, such as `ErrMalformedClaim` for a `kid` that is not a string. A header that is well formed but refused matches only the sentinel for the reason:
+
+- your options refuse it: an `alg` or `enc` outside an allow-list, a `typ` outside `AcceptedTypes`, or no `kid` when `RequireKeyIdentifier` is set;
+- it names what this library does not implement: an unknown `alg` or `enc`, `zip`, a `crit` extension that you have not named in `UnderstoodCriticalHeaders`, or a `b64` of `false`.
+
+If a header has both kinds of fault, the error reports the fault in the specification.
 
 CAUTION: Do not send an error message to the sender of a token. A message can hold parser detail, Go type names, your configuration and text from the token. Send a fixed message, and log the error on your side.
 
@@ -670,6 +675,8 @@ When a header check echoes a value from the token in its error, the value is quo
 ## Upgrading from 0.11.x
 
 One change can break your build: `model.Mode`, `model.JWS` and `model.JWE` are removed. Nothing in the public API took them, so delete any use.
+
+One change can break your error handling: a well-formed token that your options refuse, or that names what this library does not implement, no longer matches `ErrMalformedToken`. It matches only the sentinel for the reason, such as `ErrUnsupportedAlgorithm` for an `alg` outside `AllowedSigningAlgorithms`. If you test `errors.Is(err, joseerror.ErrMalformedToken)` to catch these refusals, test the specific sentinel instead. See [Errors](#errors).
 
 These are new:
 

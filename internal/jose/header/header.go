@@ -21,17 +21,29 @@ import (
 // ValidateHeader performs standard JOSE header validation upon the decoded protected header portion of a JWS.
 //
 // On success, a series of Retriever functions are returned which will yield key(s) for validation purposes.
-// On failure, an error object is returned
+// A header that breaks RFC 7515 is refused with ErrMalformedToken wrapping the
+// reason. A header that is well formed but names what this library does not
+// implement, or what the options refuse, is refused with that reason alone.
 func ValidateHeader(ctx context.Context, header map[string]any, client *http.Client, opts *model.JoseOptions) ([]model.Retriever, error) {
 	if opts == nil {
 		opts = &model.JoseOptions{}
 	}
 	//todo: we haven't allowed for the StringOrURI stipulation some keys have - go back through JWS and JWE and adjust as appropriate
-	alg, err := jsonutils.RetrieveClaim(header, "alg", jsonutils.ValidateAlg)
+	alg, err := jsonutils.RetrieveClaim[string](header, "alg")
 	if err != nil {
-		return nil, err
+		return nil, malformed(err)
+	}
+	params, err := readHeaderShape(header, jwsMode)
+	if err != nil {
+		return nil, malformed(err)
 	}
 
+	if err := refuseUnencodedPayload(header); err != nil {
+		return nil, err
+	}
+	if jwa.GetAlgorithm(*alg) == jwa.Unknown {
+		return nil, fmt.Errorf("%w%s is not a supported algorithm", joseerror.ErrUnsupportedAlgorithm, jsonutils.QuoteBounded(*alg))
+	}
 	if len(opts.AllowedSigningAlgorithms) > 0 && !slices.Contains(opts.AllowedSigningAlgorithms, jwa.GetAlgorithm(*alg)) {
 		return nil, fmt.Errorf("%w%s is not permitted by application-level constraints", joseerror.ErrUnsupportedAlgorithm, jsonutils.QuoteBounded(*alg))
 	}
@@ -41,11 +53,6 @@ func ValidateHeader(ctx context.Context, header map[string]any, client *http.Cli
 	}
 
 	if err := validateKeyIdentifierRequirement(header, opts.RequireKeyIdentifier); err != nil {
-		return nil, err
-	}
-
-	params, err := readHeaderShape(header, jwsMode)
-	if err != nil {
 		return nil, err
 	}
 
@@ -69,6 +76,10 @@ func ValidateHeader(ctx context.Context, header map[string]any, client *http.Cli
 	}
 
 	return jwkRetrievers, nil
+}
+
+func malformed(err error) error {
+	return fmt.Errorf("%werror validating header: %w", joseerror.ErrMalformedToken, err)
 }
 
 // KeyManagementAlgorithms are the JWE "alg" values this library implements.
@@ -98,8 +109,16 @@ func ValidateJWEHeader(header map[string]any, opts *model.JoseOptions) (jwa.Algo
 	}
 	algName, err := jsonutils.RetrieveClaim[string](header, "alg")
 	if err != nil {
-		return jwa.Unknown, jwa.UnknownEncryption, err
+		return jwa.Unknown, jwa.UnknownEncryption, malformed(err)
 	}
+	encName, err := jsonutils.RetrieveClaim[string](header, "enc")
+	if err != nil {
+		return jwa.Unknown, jwa.UnknownEncryption, malformed(err)
+	}
+	if _, err := readHeaderShape(header, jweMode); err != nil {
+		return jwa.Unknown, jwa.UnknownEncryption, malformed(err)
+	}
+
 	alg := jwa.GetAlgorithm(*algName)
 	if !slices.Contains(KeyManagementAlgorithms, alg) {
 		return jwa.Unknown, jwa.UnknownEncryption, fmt.Errorf("%w%s is not a key management algorithm this library implements", joseerror.ErrUnsupportedAlgorithm, jsonutils.QuoteBounded(*algName))
@@ -108,10 +127,6 @@ func ValidateJWEHeader(header map[string]any, opts *model.JoseOptions) (jwa.Algo
 		return jwa.Unknown, jwa.UnknownEncryption, fmt.Errorf("%w%s is not permitted by application-level constraints", joseerror.ErrUnsupportedAlgorithm, jsonutils.QuoteBounded(*algName))
 	}
 
-	encName, err := jsonutils.RetrieveClaim[string](header, "enc")
-	if err != nil {
-		return jwa.Unknown, jwa.UnknownEncryption, err
-	}
 	enc := jwa.GetEncryption(*encName)
 	if enc == jwa.UnknownEncryption {
 		return jwa.Unknown, jwa.UnknownEncryption, fmt.Errorf("%w%s is not a content encryption algorithm this library implements", joseerror.ErrUnsupportedAlgorithm, jsonutils.QuoteBounded(*encName))
@@ -128,9 +143,6 @@ func ValidateJWEHeader(header map[string]any, opts *model.JoseOptions) (jwa.Algo
 		return jwa.Unknown, jwa.UnknownEncryption, err
 	}
 	if err := validateKeyIdentifierRequirement(header, opts.RequireKeyIdentifier); err != nil {
-		return jwa.Unknown, jwa.UnknownEncryption, err
-	}
-	if _, err := readHeaderShape(header, jweMode); err != nil {
 		return jwa.Unknown, jwa.UnknownEncryption, err
 	}
 	understood := slices.DeleteFunc(slices.Clone(opts.UnderstoodCriticalHeaders), func(name string) bool { return name == "b64" })
@@ -197,8 +209,17 @@ type headerShape struct {
 // ErrMissingCriticalClaim, since this library handles only a base64url-encoded
 // payload.
 func CheckHeaderShape(header map[string]any) error {
-	_, err := readHeaderShape(header, jwsMode)
-	return err
+	if _, err := readHeaderShape(header, jwsMode); err != nil {
+		return err
+	}
+	return refuseUnencodedPayload(header)
+}
+
+func refuseUnencodedPayload(header map[string]any) error {
+	if encoded, ok := header["b64"].(bool); ok && !encoded {
+		return fmt.Errorf("%wthe 'b64' header is false, and this library handles only a base64url-encoded payload", joseerror.ErrMissingCriticalClaim)
+	}
+	return nil
 }
 
 type mode int
@@ -260,12 +281,8 @@ func readHeaderShape(header map[string]any, mode mode) (headerShape, error) {
 	}
 
 	if b64, present := header["b64"]; present && mode == jwsMode {
-		encoded, ok := b64.(bool)
-		if !ok {
+		if _, ok := b64.(bool); !ok {
 			return headerShape{}, fmt.Errorf("%wthe 'b64' header must be a JSON boolean", joseerror.ErrMalformedClaim)
-		}
-		if !encoded {
-			return headerShape{}, fmt.Errorf("%wthe 'b64' header is false, and this library handles only a base64url-encoded payload", joseerror.ErrMissingCriticalClaim)
 		}
 	}
 

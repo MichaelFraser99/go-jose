@@ -17,7 +17,10 @@ import (
 
 // Verify verifies a JWS Compact Serialization as RFC 7515 section 5.2 describes
 // and returns its protected header and its payload octets. The payload is not
-// parsed: section 2 lets it be an arbitrary sequence of octets.
+// parsed: section 2 lets it be an arbitrary sequence of octets. A token that
+// breaks RFC 7515 is refused with ErrMalformedToken wrapping the reason. A
+// well-formed token refused by opts, or naming what this library does not
+// implement, is refused with that reason alone.
 func Verify(ctx context.Context, compactSerialization string, outOfBoundsPublicKey model.Retriever, opts *model.JoseOptions) (protectedHeader map[string]any, payload []byte, err error) {
 	protectedHeader, payload, _, err = verify(ctx, compactSerialization, outOfBoundsPublicKey, opts, false)
 	return protectedHeader, payload, err
@@ -50,7 +53,7 @@ func verify(ctx context.Context, compactSerialization string, outOfBoundsPublicK
 
 	if name, ok := protectedHeader["alg"].(string); ok {
 		if alg := jwa.GetAlgorithm(name); alg != jwa.Unknown && !hasValidator(alg) {
-			return nil, nil, nil, fmt.Errorf("%werror validating header: %w%q has no validator in this library", joseerror.ErrMalformedToken, joseerror.ErrUnsupportedAlgorithm, alg.String())
+			return nil, nil, nil, fmt.Errorf("%w%q has no validator in this library", joseerror.ErrUnsupportedAlgorithm, alg.String())
 		}
 	}
 
@@ -67,7 +70,7 @@ func verify(ctx context.Context, compactSerialization string, outOfBoundsPublicK
 
 	headerJwkRetrievers, err := header.ValidateHeader(ctx, protectedHeader, client, opts)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("%werror validating header: %w", joseerror.ErrMalformedToken, err)
+		return nil, nil, nil, err
 	}
 
 	if payloadIsJSONObject && header.NamesNestedJWT(protectedHeader) {
