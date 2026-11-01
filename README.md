@@ -596,7 +596,7 @@ These `JoseOptions` apply to `Decrypt`:
 
 `AllowedSigningAlgorithms` does not apply to a JWE.
 
-The encrypted key of an `A128KW`, `A192KW` or `A256KW` token must be 8 octets longer than the key of its `enc`, and that of a `dir` token must be empty. `Decrypt` refuses any other length with `ErrMalformedToken`, before any decrypter is tried. Thus a token cannot make each decrypter unwrap a large encrypted key.
+The encrypted key of an `A128KW`, `A192KW` or `A256KW` token must be 8 octets longer than the key of its `enc`, and that of a `dir` token must be empty. The encrypted key of an `RSA-OAEP` token is as long as the recipient's modulus, so it must be 256 to 1024 octets. `Decrypt` refuses any other length with `ErrMalformedToken`, before any decrypter is tried. Thus a token cannot make each decrypter process a large encrypted key.
 
 `Decrypt` has no limit on the size of a token. Each decrypter of the token's `alg` decrypts the full ciphertext. Limit the size of the request body before you call `Decrypt`.
 

@@ -139,14 +139,18 @@ func checkProducerHeader(headBytes []byte) error {
 // The Initialization Vector and Authentication Tag must be the lengths enc
 // defines. The JWE Encrypted Key of a dir JWE must be empty, and that of an
 // A128KW, A192KW or A256KW JWE must be 8 octets longer than enc's key (section
-// 5.2 step 10, RFC 3394 section 2.2.1). Any other length is ErrMalformedToken.
+// 5.2 step 10, RFC 3394 section 2.2.1). That of an RSA-OAEP JWE is as long as
+// the recipient's modulus (RFC 8017 section 7.1.2), so it must be 256 to 1024
+// octets, the moduli this library accepts. Any other length is
+// ErrMalformedToken, and is refused before any decrypter is tried.
 //
 // Only the decrypters passed are tried. A "jku", "jwk", "x5u" or "x5c" in the
 // header names the recipient's public key, which cannot decrypt, so none is
 // fetched or read. If more decrypters have the token's alg than
 // JoseOptions.MaxKeysTried allows (100 when unset), Decrypt refuses with
 // ErrTooManyKeys before it tries any. Otherwise it tries each in turn. Each
-// decrypter is given its own copy of the header and the encrypted key.
+// decrypter is given its own copy of the encrypted key, and the decrypters
+// share one copy of the header, separate from the one Decrypt returns.
 //
 // A decrypter that fails, or returns a CEK of the wrong length, is given a
 // random CEK in its place, as RFC 7516 section 11.5 advises. Every failure that
@@ -206,8 +210,8 @@ func Decrypt(ctx context.Context, compactSerialization string, decrypters []mode
 	if len(tag) != shape.Overhead() {
 		return nil, nil, nil, fmt.Errorf("%w%s requires an authentication tag of %d octets, got %d", joseerror.ErrMalformedToken, enc, shape.Overhead(), len(tag))
 	}
-	if want, fixed := encryptedKeySize(alg, size); fixed && len(encryptedKey) != want {
-		return nil, nil, nil, fmt.Errorf("%wa %s JWE with %s has an encrypted key of %d octets, got %d (RFC 7516 section 5.2 step 10)", joseerror.ErrMalformedToken, alg, enc, want, len(encryptedKey))
+	if least, most := encryptedKeySize(alg, size); len(encryptedKey) < least || len(encryptedKey) > most {
+		return nil, nil, nil, fmt.Errorf("%wa %s JWE with %s has an encrypted key of %d to %d octets, got %d (RFC 7516 section 5.2 step 10)", joseerror.ErrMalformedToken, alg, enc, least, most, len(encryptedKey))
 	}
 
 	var candidates []model.Decrypter
@@ -229,6 +233,7 @@ func Decrypt(ctx context.Context, compactSerialization string, decrypters []mode
 
 	aad := []byte(components[0])
 	sealed := append(slices.Clip(ciphertext), tag...)
+	candidateHeader, _ := jsonutils.DecodeBase64urlMap(components[0])
 	for _, candidate := range candidates {
 		if err := ctx.Err(); err != nil {
 			return nil, nil, nil, err
@@ -237,8 +242,7 @@ func Decrypt(ctx context.Context, compactSerialization string, decrypters []mode
 		if _, err := io.ReadFull(rand.Reader, cek); err != nil {
 			return nil, nil, nil, fmt.Errorf("%wgenerating a random content encryption key: %s", joseerror.ErrDecryptionFailed, err.Error())
 		}
-		ownHeader, _ := jsonutils.DecodeBase64urlMap(components[0])
-		recovered, err := candidate.Decrypt(rand.Reader, slices.Clone(encryptedKey), model.DecrypterOpts{Header: ownHeader, Enc: enc})
+		recovered, err := candidate.Decrypt(rand.Reader, slices.Clone(encryptedKey), model.DecrypterOpts{Header: candidateHeader, Enc: enc})
 		if err == nil && len(recovered) == size {
 			copy(cek, recovered)
 		} else if opts != nil && opts.OnDecrypterError != nil {
@@ -313,14 +317,13 @@ func checkOptions(opts *model.JoseOptions) error {
 	return nil
 }
 
-func encryptedKeySize(alg jwa.Algorithm, cekSize int) (int, bool) {
+func encryptedKeySize(alg jwa.Algorithm, cekSize int) (least, most int) {
 	switch alg {
 	case jwa.A128KW, jwa.A192KW, jwa.A256KW:
-		return cekSize + 8, true
-	case jwa.Dir:
-		return 0, true
+		return cekSize + 8, cekSize + 8
 	case jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512:
-	case jwa.ES256, jwa.ES384, jwa.ES512, jwa.RS256, jwa.RS384, jwa.RS512, jwa.PS256, jwa.PS384, jwa.PS512, jwa.HS256, jwa.HS384, jwa.HS512, jwa.EdDSA, jwa.Ed25519, jwa.MLDSA44, jwa.MLDSA65, jwa.MLDSA87, jwa.Unknown:
+		return common.MinimumRSAModulusBits / 8, common.MaximumRSAModulusBits / 8
+	case jwa.Dir, jwa.ES256, jwa.ES384, jwa.ES512, jwa.RS256, jwa.RS384, jwa.RS512, jwa.PS256, jwa.PS384, jwa.PS512, jwa.HS256, jwa.HS384, jwa.HS512, jwa.EdDSA, jwa.Ed25519, jwa.MLDSA44, jwa.MLDSA65, jwa.MLDSA87, jwa.Unknown:
 	}
-	return 0, false
+	return 0, 0
 }

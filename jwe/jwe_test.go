@@ -843,7 +843,7 @@ func (d tamperingDecrypter) Decrypt(_ io.Reader, msg []byte, opts crypto.Decrypt
 	return nil, errors.New("not this one")
 }
 
-func TestDecrypt_EachDecrypterGetsItsOwnCopyOfTheHeaderAndEncryptedKey(t *testing.T) {
+func TestDecrypt_ADecrypterCannotChangeTheReturnedHeaderOrAnotherDecryptersEncryptedKey(t *testing.T) {
 	pair := pairFor(t, jwa.A128KW, jwa.A128GCM)
 	token, err := Encrypt(pair.encrypter, jwa.A128GCM, []byte("p"), map[string]any{"kid": "k", "jwk": map[string]any{"kty": "oct"}})
 	if err != nil {
@@ -1001,5 +1001,55 @@ func TestEncrypt_NamesAnUnknownEncByItsValue(t *testing.T) {
 	_, err := Encrypt(pairFor(t, jwa.A128KW, jwa.A128GCM).encrypter, jwa.UnknownEncryption, []byte("p"), nil)
 	if !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || !strings.Contains(err.Error(), "jwa.Encryption(0)") {
 		t.Errorf("an enc with no name must be shown by its value, got %v", err)
+	}
+}
+
+func TestDecrypt_RefusesAnRSAEncryptedKeyNoAcceptedModulusCouldProduce(t *testing.T) {
+	pair := pairFor(t, jwa.RSAOAEP256, jwa.A128GCM)
+	token, err := Encrypt(pair.encrypter, jwa.A128GCM, []byte("p"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := decodedParts(t, token)
+	for name, encryptedKey := range map[string][]byte{
+		"255 octets, under a 2048-bit modulus":  make([]byte, 255),
+		"1025 octets, over an 8192-bit modulus": make([]byte, 1025),
+		"1 MiB":                                 make([]byte, 1<<20),
+		"empty":                                 nil,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, plaintext, used, err := Decrypt(context.Background(), encodeParts(withPartsOf(parts, 1, encryptedKey)), []model.Decrypter{pair.decrypter}, nil)
+			if !errors.Is(err, joseerror.ErrMalformedToken) || plaintext != nil || used != nil {
+				t.Errorf("[RFC 8017 7.1.2] an RSAES-OAEP ciphertext is as long as the modulus, and this library accepts 2048 to 8192 bits, so want ErrMalformedToken, got %v", err)
+			}
+		})
+	}
+}
+
+func TestDecrypt_DecodesTheHeaderOnceForAllDecrypters(t *testing.T) {
+	right := pairFor(t, jwa.A256KW, jwa.A128GCM)
+	header := map[string]any{"padding": strings.Repeat("a", 256<<10)}
+	token, err := Encrypt(right.encrypter, jwa.A128GCM, []byte("p"), header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrong := make([]model.Decrypter, 0, 50)
+	for range 49 {
+		wrong = append(wrong, pairFor(t, jwa.A256KW, jwa.A128GCM).decrypter)
+	}
+	allocated := func(decrypters []model.Decrypter) uint64 {
+		var before, after runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&before)
+		if _, _, _, err := Decrypt(context.Background(), token, decrypters, nil); err != nil {
+			t.Fatal(err)
+		}
+		runtime.ReadMemStats(&after)
+		return after.TotalAlloc - before.TotalAlloc
+	}
+	one := allocated([]model.Decrypter{right.decrypter})
+	fifty := allocated(append(wrong, right.decrypter))
+	if fifty > one+uint64(len(token))/2 {
+		t.Errorf("50 decrypters allocated %d bytes against %d for one, over a %d-octet token, so the header is being decoded once per decrypter", fifty, one, len(token))
 	}
 }
