@@ -3,7 +3,6 @@ package jwe
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"errors"
 	"reflect"
 	"slices"
@@ -32,13 +31,6 @@ func examples(t *testing.T) map[string]testvectors.JWEExample {
 
 func recipientKey(t *testing.T, example testvectors.JWEExample) any {
 	t.Helper()
-	if example.RecipientJWK["kty"] == "oct" {
-		k, err := base64.RawURLEncoding.DecodeString(example.RecipientJWK["k"].(string))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return k
-	}
 	key, err := jwk.PrivateFromJwk(example.RecipientJWK)
 	if err != nil {
 		t.Fatalf("reading the %s recipient jwk: %s", example.ID, err)
