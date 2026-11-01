@@ -533,6 +533,30 @@ func ProduceMac(h hash.Hash, digest []byte) []byte {
 	return h.Sum(nil)
 }
 
+// SecretKeyFromJwk reads the jwk of a symmetric key. RFC 7518 section 6.4.1
+// makes "k" the base64url encoding of the key value, so a "k" that is absent,
+// not a string, not strict base64url or of no octets is refused.
+func SecretKeyFromJwk(jwk map[string]any) ([]byte, error) {
+	key, err := jsonutils.ExtractAndDecodeBase64urlString(jwk, "k")
+	if err != nil {
+		return nil, fmt.Errorf("%wan oct jwk must carry 'k': %w", jose_errors.ErrInvalidPrivateKey, err)
+	}
+	if len(key) == 0 {
+		return nil, fmt.Errorf("%wthe 'k' of an oct jwk holds no octets", jose_errors.ErrInvalidPrivateKey)
+	}
+	return key, nil
+}
+
+// JwkFromSecretKey builds the jwk of a symmetric key: "kty" "oct" and "k"
+// (RFC 7518 section 6.4). It carries no "kid", as RFC 7638 section 7 says the
+// thumbprint of a symmetric key should be concealed from parties not holding it.
+func JwkFromSecretKey(key []byte) (map[string]any, error) {
+	if len(key) == 0 {
+		return nil, fmt.Errorf("%wa symmetric key holds at least one octet", jose_errors.ErrInvalidPrivateKey)
+	}
+	return map[string]any{"kty": "oct", "k": base64.RawURLEncoding.EncodeToString(key)}, nil
+}
+
 var thumbprintMembers = map[string][]string{
 	"EC":  {"crv", "kty", "x", "y"},
 	"RSA": {"e", "kty", "n"},
