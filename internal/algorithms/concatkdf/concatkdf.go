@@ -7,16 +7,26 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"math"
 )
 
 // Derive returns keyDataLenBits bits derived from the shared secret z. The
 // OtherInfo is AlgorithmID, PartyUInfo and PartyVInfo, each prefixed with its
 // 32-bit big-endian length, then keyDataLenBits as SuppPubInfo, with an empty
 // SuppPrivInfo, as RFC 7518 section 4.6.2 lays it out. keyDataLenBits must be a
-// positive multiple of 8, as every JWE key length is.
+// positive multiple of 8, as every JWE key length is, and each length must fit
+// the 32 bits RFC 7518 section 4.6.2 gives it.
 func Derive(z []byte, keyDataLenBits int, algorithmID, partyUInfo, partyVInfo []byte) ([]byte, error) {
 	if keyDataLenBits <= 0 || keyDataLenBits%8 != 0 {
 		return nil, fmt.Errorf("a derived key is a positive whole number of octets, got %d bits", keyDataLenBits)
+	}
+	if uint64(keyDataLenBits) > math.MaxUint32 {
+		return nil, fmt.Errorf("keydatalen is a 32-bit field, so %d bits cannot be derived", keyDataLenBits)
+	}
+	for _, field := range [][]byte{algorithmID, partyUInfo, partyVInfo} {
+		if uint64(len(field)) > math.MaxUint32 {
+			return nil, fmt.Errorf("an OtherInfo field length is 32 bits, so %d octets cannot be encoded", len(field))
+		}
 	}
 	info := otherInfo(keyDataLenBits, algorithmID, partyUInfo, partyVInfo)
 	size := keyDataLenBits / 8

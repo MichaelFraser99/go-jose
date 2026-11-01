@@ -16,6 +16,7 @@ var (
 	ErrDecryptionFailed     = errors.New("decryption failed: ")
 	ErrUnsupportedAlgorithm = errors.New("unsupported algorithm: ")
 	ErrSigningError         = errors.New("signing error: ")
+	ErrEncryptionError      = errors.New("encryption error: ")
 	ErrMalformedClaim       = errors.New("malformed claim: ")
 	ErrMissingCriticalClaim = errors.New("missing critical claim: ")
 	ErrMissingClaim         = errors.New("missing claim: ")

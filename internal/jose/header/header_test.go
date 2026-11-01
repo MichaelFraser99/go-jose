@@ -77,7 +77,7 @@ func TestValidateHeader(t *testing.T) {
 		keySet.Keys = append(keySet.Keys, entry)
 	}
 	jwkKeysArray = append(jwkKeysArray, rsaKey.Public())
-	jwkKeysArray = append(jwkKeysArray, rsaKey.Public()) //twice - once for RS and once for PS entry
+	jwkKeysArray = append(jwkKeysArray, rsaKey.Public())
 	keySet.Keys = append(keySet.Keys, rsaJwk)
 	keySet.Keys = append(keySet.Keys, psJwk)
 	rs256JkuKeys := jwkKeysArray[:len(jwkKeysArray)-1]
@@ -265,7 +265,7 @@ func TestValidateHeader(t *testing.T) {
 
 	for testName, test := range tests {
 		t.Run(testName, func(t *testing.T) {
-			retrievers, err := ValidateHeader(context.Background(), test.protectedHeader, test.client, model.JWS, &model.JoseOptions{X509Roots: testRoots, UseTokenProvidedKeys: true}) //todo extract mode and test for both
+			retrievers, err := ValidateHeader(context.Background(), test.protectedHeader, test.client, &model.JoseOptions{X509Roots: testRoots, UseTokenProvidedKeys: true})
 			if err != nil {
 				if test.errMsg == "" {
 					t.Fatalf("unexpected error: %v", err)

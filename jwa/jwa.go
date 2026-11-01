@@ -1,11 +1,13 @@
 package jwa
 
+// Algorithm is an "alg" value: a JWS signature algorithm (RFC 7518 section 3,
+// RFC 9864, RFC 9964) or a JWE key management algorithm (RFC 7518 section 4).
+// A signer or validator refuses a key management algorithm, and an encrypter or
+// decrypter refuses a signature algorithm.
 type Algorithm int
 
 // Unknown is the zero value, so an Algorithm a caller never set names no
 // algorithm rather than aliasing a real one.
-//
-// todo: finish this list
 const (
 	Unknown Algorithm = iota
 	ES256
@@ -36,6 +38,27 @@ const (
 	// MLDSA87 is ML-DSA with the ML-DSA-87 parameters of FIPS 204, as RFC 9964
 	// section 5 registers it.
 	MLDSA87
+	// RSAOAEP is RSAES-OAEP with SHA-1 and MGF1 with SHA-1, as RFC 7518 section
+	// 4.3 defines it.
+	RSAOAEP
+	// RSAOAEP256 is RSAES-OAEP with SHA-256 and MGF1 with SHA-256, as RFC 7518
+	// section 4.3 defines it.
+	RSAOAEP256
+	// RSAOAEP384 is RSAES-OAEP with SHA-384 and MGF1 with SHA-384, as the IANA JOSE
+	// registry records it for WebCrypto.
+	RSAOAEP384
+	// RSAOAEP512 is RSAES-OAEP with SHA-512 and MGF1 with SHA-512, as the IANA JOSE
+	// registry records it for WebCrypto.
+	RSAOAEP512
+	// A128KW is AES Key Wrap with a 128-bit key, as RFC 7518 section 4.4 defines it.
+	A128KW
+	// A192KW is AES Key Wrap with a 192-bit key, as RFC 7518 section 4.4 defines it.
+	A192KW
+	// A256KW is AES Key Wrap with a 256-bit key, as RFC 7518 section 4.4 defines it.
+	A256KW
+	// Dir is direct use of a shared symmetric key as the CEK, as RFC 7518 section
+	// 4.5 defines it.
+	Dir
 )
 
 func (a Algorithm) String() string {
@@ -76,13 +99,31 @@ func (a Algorithm) String() string {
 		return "ML-DSA-65"
 	case MLDSA87:
 		return "ML-DSA-87"
+	case RSAOAEP:
+		return "RSA-OAEP"
+	case RSAOAEP256:
+		return "RSA-OAEP-256"
+	case RSAOAEP384:
+		return "RSA-OAEP-384"
+	case RSAOAEP512:
+		return "RSA-OAEP-512"
+	case A128KW:
+		return "A128KW"
+	case A192KW:
+		return "A192KW"
+	case A256KW:
+		return "A256KW"
+	case Dir:
+		return "dir"
 	default:
 		return ""
 	}
 }
 
-// GetAlgorithm takes in a string representation of an Algorithm ("ES256" or "HS384")
-// If the provided string does not match a defined algorithm, Unknown is returned
+// GetAlgorithm returns the Algorithm a registered "alg" name identifies, such as
+// "ES256" or "RSA-OAEP-256", and Unknown for any other string. The comparison is
+// case sensitive (RFC 7515 section 4.1.1, RFC 7516 section 4.1.1). A result
+// other than Unknown may be a signature or a key management algorithm.
 func GetAlgorithm(alg string) Algorithm {
 	switch alg {
 	case "ES256":
@@ -119,6 +160,22 @@ func GetAlgorithm(alg string) Algorithm {
 		return MLDSA65
 	case "ML-DSA-87":
 		return MLDSA87
+	case "RSA-OAEP":
+		return RSAOAEP
+	case "RSA-OAEP-256":
+		return RSAOAEP256
+	case "RSA-OAEP-384":
+		return RSAOAEP384
+	case "RSA-OAEP-512":
+		return RSAOAEP512
+	case "A128KW":
+		return A128KW
+	case "A192KW":
+		return A192KW
+	case "A256KW":
+		return A256KW
+	case "dir":
+		return Dir
 	default:
 		return Unknown
 	}

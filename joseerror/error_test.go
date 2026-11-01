@@ -15,6 +15,7 @@ func sentinels() map[string]error {
 		"ErrDecryptionFailed":     ErrDecryptionFailed,
 		"ErrUnsupportedAlgorithm": ErrUnsupportedAlgorithm,
 		"ErrSigningError":         ErrSigningError,
+		"ErrEncryptionError":      ErrEncryptionError,
 		"ErrMalformedClaim":       ErrMalformedClaim,
 		"ErrMissingCriticalClaim": ErrMissingCriticalClaim,
 		"ErrMissingClaim":         ErrMissingClaim,

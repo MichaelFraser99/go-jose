@@ -1,5 +1,5 @@
 # Go Jose
-A Go implementation of the JOSE suite of specifications — JWS ([RFC 7515](https://www.rfc-editor.org/rfc/rfc7515)), JWA ([RFC 7518](https://www.rfc-editor.org/rfc/rfc7518)), JWK ([RFC 7517](https://www.rfc-editor.org/rfc/rfc7517)), and JWT ([RFC 7519](https://www.rfc-editor.org/rfc/rfc7519)).
+A Go implementation of the JOSE suite of specifications — JWS ([RFC 7515](https://www.rfc-editor.org/rfc/rfc7515)), JWE ([RFC 7516](https://www.rfc-editor.org/rfc/rfc7516), Compact Serialization only), JWA ([RFC 7518](https://www.rfc-editor.org/rfc/rfc7518)), JWK ([RFC 7517](https://www.rfc-editor.org/rfc/rfc7517)), and JWT ([RFC 7519](https://www.rfc-editor.org/rfc/rfc7519)).
 
 ## Requirements
 - Go 1.27 or higher
@@ -11,6 +11,7 @@ There is **no root package**. Import the subpackage you need:
 ```go
 import (
 	"github.com/MichaelFraser99/go-jose/jwa"        // algorithm identifiers
+	"github.com/MichaelFraser99/go-jose/jwe"        // encryption and decryption
 	"github.com/MichaelFraser99/go-jose/jwk"        // jwk conversion
 	"github.com/MichaelFraser99/go-jose/jws"        // signers and validators
 	"github.com/MichaelFraser99/go-jose/jwt"        // jwt signing and validation
@@ -25,6 +26,8 @@ go get github.com/MichaelFraser99/go-jose
 ```
 
 ## Algorithms Supported
+This section lists the signature algorithms. For the JWE algorithms, see [Encrypting and decrypting](#encrypting-and-decrypting).
+
 Currently, the module supports the following asymmetric algorithms:
 - ES256
 - ES384
@@ -393,6 +396,8 @@ func jwk.PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error)
 
 The value returned is a pointer to the respective key, such as `*ecdsa.PublicKey` or `*rsa.PublicKey`.
 
+An `oct` jwk holds a symmetric key in `k`, as RFC 7518 section 6.4.1 defines. `PrivateFromJwk` reads it as a `[]byte`, and refuses a `k` that is absent, not a string, not strict base64url or empty. `PrivateJwk` writes a `[]byte` as an `oct` jwk with no `kid`, because RFC 7638 section 7 says to conceal the thumbprint of a symmetric key. A symmetric key has no public half, so `PublicFromJwk` and `PublicJwk` refuse it with `ErrInvalidPublicKey`.
+
 An `OKP` jwk is read only when its `crv` is `Ed25519`, the one OKP subtype this library supports. RFC 8037 section 2 requires `crv`, so a jwk without a string `crv` is refused as an invalid key. Any other subtype is refused with `ErrUnsupportedAlgorithm`. Each of `x` and `d` must be 32 octets, the key sizes RFC 8032 section 5.1.5 sets for Ed25519. For a private key, `x` must be the public key of `d`. `x` must be the canonical encoding of a point, so one key has one `x` and one thumbprint.
 
 **This is a breaking change for OKP keys.** Earlier versions ignored the value of `crv`, so an `X25519` or `Ed448` key was returned as an Ed25519 key. They also accepted any length of `x` and `d`, and did not compare `x` with `d`. A key that those versions read can now be refused.
@@ -488,7 +493,7 @@ The `iat` rule is this library's own. RFC 7519 section 4.1.6 sets no acceptance 
 
 A value too large for any clock, such as an `nbf` of `1e19`, is judged as a time far in the future. It is not converted to an integer, so the result is the same on every CPU. A number outside the float64 range, such as `1e400`, is different: the JSON decoder refuses the token with `ErrMalformedToken` before any claim is read. RFC 8259 section 6 lets a recipient limit the range of numbers.
 
-`Validate` refuses a token that does not have three segments with `ErrMalformedToken`. A token of five segments is a JWE, which this library does not support, so it is refused with `ErrUnsupportedAlgorithm`.
+`Validate` refuses a token that does not have three segments with `ErrMalformedToken`. A token of five segments is a JWE. `Validate` does not decrypt, so it refuses a JWE with `ErrUnsupportedAlgorithm`. To read an encrypted token, use [`jwe.Decrypt`](#encrypting-and-decrypting).
 
 To check the audience, name this recipient in `JoseOptions.ExpectedAudience`:
 
@@ -502,6 +507,127 @@ An empty string names no recipient. If `ExpectedAudience` holds one, `Validate` 
 
 **With `ExpectedAudience` unset, this library does not meet RFC 7519 section 4.1.3.** That section says: "If the principal processing the claim does not identify itself with a value in the "aud" claim when this claim is present, then the JWT MUST be rejected." By default, `Validate` checks only the type of `aud` and accepts a token whatever it names. Set `ExpectedAudience` to meet that MUST. RFC 8725 section 3.9 also requires the check whenever one issuer issues tokens for more than one audience.
 
+## Encrypting and decrypting
+
+The `jwe` package encrypts and decrypts the JWE Compact Serialization of RFC 7516. It does not implement the JWE JSON Serialization.
+
+### Algorithms
+
+| `alg` | Key for `GetEncrypter` | Key for `GetDecrypter` |
+| --- | --- | --- |
+| `RSA-OAEP`, `RSA-OAEP-256`, `RSA-OAEP-384`, `RSA-OAEP-512` | `*rsa.PublicKey` | `*rsa.PrivateKey`, or a `crypto.Decrypter` with an `*rsa.PublicKey` |
+| `A128KW`, `A192KW`, `A256KW` | `[]byte` of 16, 24 or 32 octets | the same `[]byte` |
+| `dir` | `jwe.DirectKey{Key: secret, Enc: enc}` | the same `jwe.DirectKey` |
+
+An RSA key must have a modulus of 2048 to 8192 bits. RFC 7518 section 4.3 makes 2048 bits a MUST. `RSA-OAEP-384` and `RSA-OAEP-512` are not in RFC 7518. The IANA "JSON Web Signature and Encryption Algorithms" registry defines them, with SHA-384 and SHA-512 for both OAEP and MGF1.
+
+A `dir` key is bound to one `enc`, as RFC 8725 section 3.1 requires of every key. `Key` must be the length that `Enc` requires. `Encrypt` refuses any other `enc`, and `Decrypt` cannot decrypt a token with any other `enc`. Without this binding, a 32-octet key could decrypt both `A128CBC-HS256` and `A256GCM` tokens, and the token would choose.
+
+CAUTION: Do not encrypt more than 2^32 tokens under one `dir` key with an AES GCM `enc`. RFC 7518 section 8.4 makes this limit a MUST. With `dir`, every token uses the shared key and a random IV, and this library does not count the tokens. The other algorithms make a new key for each token.
+
+The `enc` values are `A128CBC-HS256`, `A192CBC-HS384`, `A256CBC-HS512`, `A128GCM`, `A192GCM` and `A256GCM`, from RFC 7518 section 5. In Go they are `jwa.A128CBCHS256` to `jwa.A256GCM`, of type `jwa.Encryption`.
+
+To build an encrypter or decrypter from a JWK, call `jwe.GetEncrypterFromJwk` or `jwe.GetDecrypterFromJwk`. For the `RSA-OAEP` algorithms, give an RSA JWK: the public key for an encrypter, and the private key for a decrypter. For `A128KW`, `A192KW` and `A256KW`, give an `oct` JWK whose `k` is 16, 24 or 32 octets.
+
+These functions enforce what the JWK declares about itself:
+
+- If `alg` is present, it must name the algorithm that you give.
+- If `use` is present, it must be `enc`.
+- If `key_ops` is present, it must include `wrapKey` for an encrypter and `unwrapKey` for a decrypter.
+- If `use` is present, `key_ops` must not include `sign` or `verify`, as RFC 7517 section 4.3 requires the two to agree.
+
+A refused JWK gives `ErrInvalidPublicKey` from `GetEncrypterFromJwk` and `ErrInvalidPrivateKey` from `GetDecrypterFromJwk`. A JWK cannot hold a `dir` key, because no JWK member names the `enc` that the key is bound to. For `dir`, build a `jwe.DirectKey`.
+
+CAUTION: Do not log or publish what `Public()` returns for an `A128KW`, `A192KW`, `A256KW` or `dir` encrypter or decrypter. A shared key has no public half, so `Public()` returns the secret itself, as it does for an HMAC signer.
+
+This library does not implement `RSA1_5`, and it will not. RFC 8725 section 3.2 advises against it because of padding oracle attacks. `ECDH-ES`, `A128GCMKW` to `A256GCMKW`, `PBES2` and `zip` are not implemented yet.
+
+### Encrypt
+
+```go
+encrypter, err := jwe.GetEncrypter(jwa.RSAOAEP256, recipientPublicKey)
+token, err := jwe.Encrypt(encrypter, jwa.A256GCM, plaintext, map[string]any{"kid": "recipient-key-1"})
+```
+
+`Encrypt` sets `alg` and `enc` in the header. If your header has an `alg` or `enc` that is different, `Encrypt` refuses it with `ErrUnsupportedAlgorithm`. `Encrypt` also refuses a `zip` header. RFC 8725 section 3.6 advises against compression before encryption.
+
+Each call makes a new random content encryption key and a new random initialization vector.
+
+### Decrypt
+
+```go
+decrypter, err := jwe.GetDecrypter(jwa.RSAOAEP256, recipientPrivateKey)
+head, plaintext, used, err := jwe.Decrypt(ctx, token, []model.Decrypter{decrypter}, opts)
+```
+
+`Decrypt` tries each decrypter whose `Alg` is the token's `alg`. It returns the plaintext from the first decrypter that decrypts the token, and that decrypter as `used`. An empty plaintext is an empty slice, not `nil`.
+
+If a decrypter returns an error, or a key of the wrong length, `Decrypt` uses a random key in its place. The decryption then fails at the authentication tag, as a changed token does. RFC 7516 section 11.5 describes this defence. Thus a wrong key, a changed token and a failed decrypter all give the same `ErrDecryptionFailed` with the same message, and the error does not tell an attacker which step failed.
+
+One other `ErrDecryptionFailed` message exists: if no decrypter has the token's `alg`, the message says so. This message, and the time that `Decrypt` takes, show which `alg` values you hold keys for. They show nothing about a key or the plaintext.
+
+`Decrypt` does not compare the `kid` header with the decrypter that succeeded. With a shared key (`A128KW` to `A256KW`, or `dir`), the key identifies the sender. A sender who holds one of your keys can put the `kid` of a different key in the header. To identify the sender, compare `used` with the decrypters that you gave. Do not use `kid` for this. Every decrypter from `GetDecrypter` is a pointer, so `==` is safe. If you write your own `model.Decrypter`, make it a pointer or another comparable type. Comparing two interface values that hold a struct with a slice or map field panics.
+
+```go
+head, plaintext, used, err := jwe.Decrypt(ctx, token, []model.Decrypter{tenantA, tenantB}, opts)
+if err == nil && used != tenantA {
+	// the token was not encrypted with tenant A's key
+}
+```
+
+To read the header before you decrypt, use `jwe.ParseHeader`. It makes the same checks of the token's shape and header as `Decrypt`, with the same errors. Use it to select a decrypter by `kid`, or to log a token that `Decrypt` refused:
+
+```go
+head, err := jwe.ParseHeader(token, opts)
+kid, _ := head["kid"].(string)
+decrypter, known := decryptersByKid[kid]
+```
+
+CAUTION: The header is not authenticated until `Decrypt` succeeds. Anyone can write any `kid`. Use it only to select a decrypter, and identify the sender with `used`.
+
+A header can name a key with `jku`, `jwk`, `x5u` or `x5c`. In a JWE, that key is the public key of the recipient, and a public key cannot decrypt. Thus `Decrypt` does not fetch or read these keys. Only the decrypters that you give are used.
+
+These `JoseOptions` apply to `Decrypt`:
+
+- `AllowedKeyManagementAlgorithms` and `AllowedContentEncryptionAlgorithms` limit the `alg` and `enc` values that a token can name. If a list is empty, all values that this library implements are permitted. A list that names a value this library does not implement, such as a JWS `alg`, is a configuration fault. `Decrypt` refuses every call with `ErrInvalidOptions` until you correct it.
+- `MaxKeysTried` limits the number of decrypters of the token's `alg`. The default is 100. If you give more, `Decrypt` refuses the token with `ErrTooManyKeys` before it tries any. With many keys, select one with `ParseHeader` and give `Decrypt` only that one.
+- `OnDecrypterError` receives each decrypter that fails, and its error. Use it to see a fault such as a hardware module outage, which `Decrypt` otherwise reports as the same `ErrDecryptionFailed` as a bad token. What it receives can depend on the token, so log it, and do not send it to the sender.
+- `AcceptedTypes`, `RequireKeyIdentifier` and `UnderstoodCriticalHeaders` apply as they do to a JWS. The exception is `b64`: RFC 7797 defines it for JWS only, so a JWE `crit` that names `b64` is refused.
+
+`AllowedSigningAlgorithms` does not apply to a JWE.
+
+The encrypted key of an `A128KW`, `A192KW` or `A256KW` token must be 8 octets longer than the key of its `enc`, and that of a `dir` token must be empty. The encrypted key of an `RSA-OAEP` token is as long as the recipient's modulus, so it must be 256 to 1024 octets. `Decrypt` refuses any other length with `ErrMalformedToken`, before any decrypter is tried. Thus a token cannot make each decrypter process a large encrypted key.
+
+`Decrypt` has no limit on the size of a token. Each decrypter of the token's `alg` decrypts the full ciphertext. Limit the size of the request body before you call `Decrypt`.
+
+`Decrypt` refuses a token with a `zip` header. RFC 7516 section 4.1.3 requires a recipient to decompress, and this library does not. A `crit` header must not name a parameter that RFC 7516 or RFC 7518 defines for JWE, such as `enc` or `epk`.
+
+### Keys held outside the process
+
+A `model.Decrypter` is a `crypto.Decrypter`. Thus you can give `GetDecrypter` an RSA key that is held in a hardware module, if its `crypto.Decrypter` accepts `*rsa.OAEPOptions`. `GetDecrypter` cannot test this. If the module refuses the options, every token fails with `ErrDecryptionFailed`, and `OnDecrypterError` receives the module's error.
+
+A `crypto.Decrypter` takes no context, so `ctx` cannot stop a call that is already running in the module. `Decrypt` checks `ctx` before each decrypter and after the last. To limit the time of a module call, build the decrypter for each request around a `crypto.Decrypter` that holds the request's context.
+
+### Sign, then encrypt
+
+To send a signed JWT that only the recipient can read, sign it and then encrypt the result. Set `cty` to `JWT`, as RFC 7519 section 5.2 requires of a nested JWT:
+
+```go
+signed, err := jwt.New(signer, nil, claims, jwt.Opts{})
+token, err := jwe.Encrypt(encrypter, jwa.A256GCM, []byte(*signed), map[string]any{"cty": "JWT"})
+```
+
+To read it, decrypt, then validate the plaintext as a JWT:
+
+```go
+head, plaintext, used, err := jwe.Decrypt(ctx, token, decrypters, jweOpts)
+if cty, _ := head["cty"].(string); !strings.EqualFold(cty, "JWT") {
+	// not a nested JWT
+}
+jwtHead, claims, err := jwt.Validate(ctx, string(plaintext), retriever, jwtOpts)
+```
+
+Use different `JoseOptions` for the two calls. For example, an `AcceptedTypes` of `JWT` is correct for the inner JWS but refuses the outer JWE, which has no `typ`.
 ## Errors
 Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 
@@ -510,9 +636,10 @@ Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 | `ErrInvalidPublicKey` | The public key given cannot be used for this algorithm |
 | `ErrInvalidPrivateKey` | The private key or secret given cannot be used for this algorithm |
 | `ErrInvalidSignature` | The signature does not verify against the signing input |
-| `ErrDecryptionFailed` | Reserved for JWE. Nothing returns it: the `jwe` package is a stub and exports nothing |
+| `ErrDecryptionFailed` | A JWE did not decrypt. The error is the same for a wrong key, a changed token and a decrypter that failed, as RFC 7516 section 11.5 requires. It also covers a call with no decrypter for the token's `alg` |
 | `ErrUnsupportedAlgorithm` | The algorithm named is not supported, has no validator in this library, or is not permitted by the options given |
 | `ErrSigningError` | Signing failed |
+| `ErrEncryptionError` | Encryption failed. The random source failed, or a custom `Encrypter` returned a key or header that `jwe.Encrypt` cannot use |
 | `ErrMalformedClaim` | A claim is present but its type or value is wrong. This includes a `b64` that is not a boolean, and an `x5c` or `x5u` chain that is out of order or longer than 16 certificates |
 | `ErrMissingClaim` | A required claim is absent |
 | `ErrMissingCriticalClaim` | A header named in `crit` is absent, or names an extension this library does not understand, or `b64` is `false` |
@@ -523,8 +650,12 @@ Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 | `ErrExpired` | The current time is not before the token's `exp`, allowing for `ClockSkewLeeway` |
 | `ErrNotYetValid` | The token's `nbf` or `iat` is after the current time, allowing for `ClockSkewLeeway` |
 | `ErrAudienceMismatch` | `JoseOptions.ExpectedAudience` is set and the token's `aud` names none of its values |
-| `ErrInvalidOptions` | The options passed are themselves wrong, whatever the token. A nil `ctx`, and a `JoseOptions.ExpectedAudience` that holds an empty string, are two cases |
-| `ErrTooManyKeys` | The signature did not verify under as many keys as `JoseOptions.MaxKeysTried` allows, and more keys or key sources remained |
+| `ErrInvalidOptions` | The options passed are themselves wrong, whatever the token. A nil `ctx`, a `JoseOptions.ExpectedAudience` that holds an empty string, and a JWE allow-list that names a value this library does not implement are three cases |
+| `ErrTooManyKeys` | The signature did not verify under as many keys as `JoseOptions.MaxKeysTried` allows, and more keys or key sources remained. For a JWE, more decrypters of the token's `alg` were given than `MaxKeysTried` allows |
+
+An error can match more than one sentinel. A fault in a token's header matches `ErrMalformedToken` and also the sentinel for the fault, such as `ErrUnsupportedAlgorithm` for an `alg` outside your allow-list. Thus test the specific sentinels first and `ErrMalformedToken` last.
+
+CAUTION: Do not send an error message to the sender of a token. A message can hold parser detail, Go type names, your configuration and text from the token. Send a fixed message, and log the error on your side.
 
 Each sentinel carries a prefix terminated by `": "`, so wrap one with `%w` immediately followed by the rest of the message and no space:
 
@@ -535,6 +666,27 @@ fmt.Errorf("%wshould be an instance of *ecdsa.PrivateKey", joseerror.ErrInvalidP
 That reads `invalid private key: should be an instance of *ecdsa.PrivateKey`, and `errors.Is` still matches.
 
 When a header check echoes a value from the token in its error, the value is quoted with Go escaping and cut to its first 64 characters, with `...` marking the cut. A peer cannot put a raw line break or kilobytes of text into your logs this way. This includes the error from parsing an `x5c` or `x5u` certificate.
+
+## Upgrading from 0.11.x
+
+One change can break your build: `model.Mode`, `model.JWS` and `model.JWE` are removed. Nothing in the public API took them, so delete any use.
+
+These are new:
+
+- The `jwe` package, with `GetEncrypter`, `GetDecrypter`, `GetEncrypterFromJwk`, `GetDecrypterFromJwk`, `Encrypt`, `Decrypt`, `ParseHeader` and `DirectKey`. See [Encrypting and decrypting](#encrypting-and-decrypting).
+- `oct` keys in the `jwk` package: `PrivateFromJwk` reads one as a `[]byte`, and `PrivateJwk` writes one.
+- `model.Encrypter`, `model.Decrypter` and `model.DecrypterOpts`.
+- `jwa.Encryption` with `jwa.GetEncryption`, and the `alg` constants `jwa.RSAOAEP` to `jwa.Dir`. The integer values of the existing `jwa.Algorithm` constants do not change.
+- `JoseOptions` fields: `AllowedKeyManagementAlgorithms`, `AllowedContentEncryptionAlgorithms` and `OnDecrypterError`.
+- The error sentinel `ErrEncryptionError`. `ErrDecryptionFailed` now has a use.
+
+`jwk.PublicFromJwk` refuses an `oct` jwk with `ErrInvalidPublicKey`, because a symmetric key has no public half. v0.11.0 refused it with `ErrUnsupportedAlgorithm`. If you match the old sentinel for this case, match the new one.
+
+`jwt.Validate` still refuses a JWE with `ErrUnsupportedAlgorithm`. Its message now tells you to decrypt the token with `jwe.Decrypt` first.
+
+A JWE `alg` cannot sign. `jws.GetSigner`, `jws.GetValidator` and `jwt.New` refuse one with `ErrUnsupportedAlgorithm`.
+
+`jwa.GetAlgorithm` now resolves the JWE names, such as `"RSA-OAEP"` and `"dir"`. If your code reads `jwa.GetAlgorithm(name) != jwa.Unknown` as "a signature algorithm", that test is no longer correct. Ask for a signer or validator instead: both refuse a JWE `alg`.
 
 ## Upgrading from 0.10.x
 
@@ -668,7 +820,3 @@ if errors.Is(err, joseerror.ErrInvalidSignature) {
 ### Behaviour changes documented elsewhere in this file
 
 - A validator for an HMAC algorithm can only be built from a signer.
-
-### Not implemented
-
-The `jwe` package exports nothing. JWE is not supported in this release.

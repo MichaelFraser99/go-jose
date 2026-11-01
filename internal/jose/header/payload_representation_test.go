@@ -54,7 +54,7 @@ func TestValidateHeader_RefusesAnUnencodedPayloadWhateverTheCallerUnderstands(t 
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			_, err := ValidateHeader(context.Background(), test.header, nil, model.JWS, test.opts)
+			_, err := ValidateHeader(context.Background(), test.header, nil, test.opts)
 			if test.refused != errors.Is(err, joseerror.ErrMissingCriticalClaim) {
 				t.Fatalf("[RFC 7797 3, 6, 8] header %v: refused = %t, want %t: %v", test.header, err != nil, test.refused, err)
 			}
@@ -84,7 +84,7 @@ func TestValidateHeader_RefusesAB64ThatIsNotAJSONBoolean(t *testing.T) {
 					head["crit"] = []any{"b64"}
 					opts = understood
 				}
-				_, err := ValidateHeader(context.Background(), decodedHeader(t, head), nil, model.JWS, opts)
+				_, err := ValidateHeader(context.Background(), decodedHeader(t, head), nil, opts)
 				if !errors.Is(err, joseerror.ErrMalformedClaim) {
 					t.Fatalf("[RFC 7797 3] the b64 value is a JSON boolean, so %#v must be refused with ErrMalformedClaim, got %v", value, err)
 				}

@@ -247,7 +247,8 @@ var (
 
 	ValidateNoBannedCriticalJWEValues = Validator[[]any](func(jsonInput map[string]any, critical []any) error {
 		bannedCriticalValues := []string{
-			"zip",
+			"alg", "enc", "zip", "jku", "jwk", "kid", "x5u", "x5c", "x5t", "x5t#S256", "typ", "cty", "crit",
+			"epk", "apu", "apv", "iv", "tag", "p2s", "p2c",
 		}
 		for _, claim := range critical {
 			if sClaim, ok := claim.(string); !ok {

@@ -65,3 +65,12 @@ func TestDerive_RefusesAKeyLengthThatIsNotWholeOctets(t *testing.T) {
 		}
 	}
 }
+
+func TestDerive_RefusesAKeyLengthItsSuppPubInfoCannotHold(t *testing.T) {
+	for _, bits := range []int{1 << 32, 1<<32 + 8, 1 << 40} {
+		got, err := Derive(rfc7518AppendixCZ, bits, []byte("A128GCM"), nil, nil)
+		if err == nil || got != nil {
+			t.Errorf("[RFC 7518 4.6.2] SuppPubInfo is keydatalen as a 32-bit big-endian integer, so %d bits must be refused rather than truncated, got %d octets", bits, len(got))
+		}
+	}
+}

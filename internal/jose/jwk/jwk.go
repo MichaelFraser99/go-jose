@@ -59,6 +59,8 @@ func RetrieveJKU(jku string, fetch httputils.Fetch, kid *string, alg string, ign
 	}
 }
 
+// PrivateFromJwk reads a private or symmetric key from its jwk. An "oct" jwk
+// (RFC 7518 section 6.4) is returned as a []byte.
 func PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error) {
 	if kty, present := jwk["kty"]; present {
 		ktyString, ok := kty.(string)
@@ -90,14 +92,22 @@ func PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error) {
 				return nil, err
 			}
 			return key, nil
+		case "oct":
+			key, err := common.SecretKeyFromJwk(jwk)
+			if err != nil {
+				return nil, err
+			}
+			return key, nil
 		default:
-			return nil, fmt.Errorf("%wthe 'kty' claim is not one of EC, RSA, OKP and AKP", joseerror.ErrUnsupportedAlgorithm)
+			return nil, fmt.Errorf("%wthe 'kty' claim is not one of EC, RSA, OKP, AKP and oct", joseerror.ErrUnsupportedAlgorithm)
 		}
 	} else {
 		return nil, fmt.Errorf("%wa jwk must carry the REQUIRED 'kty' claim naming its key type", joseerror.ErrInvalidPrivateKey)
 	}
 }
 
+// PublicFromJwk reads a public key from its jwk. An "oct" jwk is refused: a
+// symmetric key (RFC 7518 section 6.4) has no public half.
 func PublicFromJwk(jwk map[string]any) (crypto.PublicKey, error) {
 	if kty, present := jwk["kty"]; present {
 		ktyString, ok := kty.(string)
@@ -129,6 +139,8 @@ func PublicFromJwk(jwk map[string]any) (crypto.PublicKey, error) {
 				return nil, err
 			}
 			return key, nil
+		case "oct":
+			return nil, fmt.Errorf("%wan oct jwk is a symmetric key, which has no public half", joseerror.ErrInvalidPublicKey)
 		default:
 			return nil, fmt.Errorf("%wthe 'kty' claim is not one of EC, RSA, OKP and AKP", joseerror.ErrUnsupportedAlgorithm)
 		}
