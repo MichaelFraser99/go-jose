@@ -39,7 +39,8 @@ var signatureOperations = map[string]bool{"sign": true, "verify": true}
 // so a jwk whose "alg" is present and is not the string alg names is refused.
 // A jwk whose "use" is present and is not "enc", or whose "key_ops" is present
 // and lacks "wrapKey", is refused too (RFC 7517 sections 4.2 and 4.3). So is a
-// jwk whose "use" and "key_ops" are not consistent, which section 4.3 forbids.
+// jwk whose "use" and "key_ops" are not consistent, or whose "key_ops" lists a
+// value twice, both of which section 4.3 forbids.
 // Every refusal of the jwk carries ErrInvalidPublicKey.
 func GetEncrypterFromJwk(alg jwa.Algorithm, publicJwk map[string]any) (model.Encrypter, error) {
 	read, ok := encrypterKeyReaders[alg]
@@ -116,11 +117,16 @@ func checkKeyDeclarations(alg jwa.Algorithm, key map[string]any, operation strin
 		return fmt.Errorf("%wthe jwk's key_ops must be an array", class)
 	}
 	permitted := false
+	seen := map[string]bool{}
 	for _, op := range ops {
 		name, ok := op.(string)
 		if !ok {
 			return fmt.Errorf("%wthe jwk's key_ops must hold strings", class)
 		}
+		if seen[name] {
+			return fmt.Errorf("%wthe jwk's key_ops lists %s more than once", class, jsonutils.QuoteBounded(name))
+		}
+		seen[name] = true
 		if usePresent && signatureOperations[name] {
 			return fmt.Errorf("%wthe jwk's use enc and key_ops %s are not consistent", class, jsonutils.QuoteBounded(name))
 		}

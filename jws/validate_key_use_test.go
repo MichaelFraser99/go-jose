@@ -39,6 +39,8 @@ func TestGetValidatorFromJwk_RefusesAJwkMarkedAsNotForVerifying(t *testing.T) {
 		"key_ops holding none":             {members: map[string]any{"key_ops": []any{}}, clause: "RFC 7517 4.3"},
 		"key_ops that is a string":         {members: map[string]any{"key_ops": "verify"}, clause: "RFC 7517 4.3"},
 		"key_ops holding a number":         {members: map[string]any{"key_ops": []any{"verify", 7}}, clause: "RFC 7517 4.3"},
+		"key_ops listing verify twice":     {members: map[string]any{"key_ops": []any{"verify", "verify"}}, clause: "RFC 7517 4.3"},
+		"key_ops listing sign twice":       {members: map[string]any{"key_ops": []any{"sign", "verify", "sign"}}, clause: "RFC 7517 4.3"},
 		"use of sig and key_ops of sign":   {members: map[string]any{"use": "sig", "key_ops": []any{"sign"}}, clause: "RFC 7517 4.3"},
 		"use of enc and key_ops of verify": {members: map[string]any{"use": "enc", "key_ops": []any{"verify"}}, clause: "RFC 7517 4.2"},
 	}

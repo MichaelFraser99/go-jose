@@ -164,7 +164,7 @@ signer, err := jws.GetSigner(jwa.ES256, nil)
 signerValidator, err := jws.GetValidator(signer.Alg(), signer.Public())
 ```
 
-`jws.GetValidatorFromJwk` builds a validator from a jwk, decoded as a `map[string]any` rather than raw bytes. It reads the key by its `kty`, as `jwk.PublicFromJwk` does, so a jwk without a `kty`, or whose `kty` does not match its algorithm, is refused. RFC 8725 section 3.1 requires each key to be used with exactly one algorithm, so a jwk that carries an `alg` member is refused with `ErrInvalidPublicKey` unless that member is the algorithm you asked for. `EdDSA` and `Ed25519` count as the same algorithm here, because this library supports only the Ed25519 curve for `EdDSA`. A jwk whose `use` is present and is not `"sig"` is refused with `ErrInvalidPublicKey`. So is a jwk whose `key_ops` is present and does not include `"verify"`. RFC 7517 sections 4.2 and 4.3 let a publisher mark a key as not for verifying signatures. `IgnoreKeyUse` does not apply to `GetValidatorFromJwk`. To verify with such a key, read it with `jwk.PublicFromJwk` and give the key to `GetValidator`, which has no key-use rule. `GetValidatorFromJwk` refuses the HMAC algorithms with `ErrUnsupportedAlgorithm`, because an `oct` key cannot be reached this way. The example below builds a validator for ES256:
+`jws.GetValidatorFromJwk` builds a validator from a jwk, decoded as a `map[string]any` rather than raw bytes. It reads the key by its `kty`, as `jwk.PublicFromJwk` does, so a jwk without a `kty`, or whose `kty` does not match its algorithm, is refused. RFC 8725 section 3.1 requires each key to be used with exactly one algorithm, so a jwk that carries an `alg` member is refused with `ErrInvalidPublicKey` unless that member is the algorithm you asked for. `EdDSA` and `Ed25519` count as the same algorithm here, because this library supports only the Ed25519 curve for `EdDSA`. A jwk whose `use` is present and is not `"sig"` is refused with `ErrInvalidPublicKey`. So is a jwk whose `key_ops` is present and does not include `"verify"`, or lists a value twice, which RFC 7517 section 4.3 says MUST NOT happen. RFC 7517 sections 4.2 and 4.3 let a publisher mark a key as not for verifying signatures. `IgnoreKeyUse` does not apply to `GetValidatorFromJwk`. To verify with such a key, read it with `jwk.PublicFromJwk` and give the key to `GetValidator`, which has no key-use rule. `GetValidatorFromJwk` refuses the HMAC algorithms with `ErrUnsupportedAlgorithm`, because an `oct` key cannot be reached this way. The example below builds a validator for ES256:
 ```go
 // Construct a validator from a jwk public key
 validator, err := jws.GetValidatorFromJwk(jwa.ES256, publicKeyMap)
@@ -533,7 +533,7 @@ These functions enforce what the JWK declares about itself:
 
 - If `alg` is present, it must name the algorithm that you give.
 - If `use` is present, it must be `enc`.
-- If `key_ops` is present, it must include `wrapKey` for an encrypter and `unwrapKey` for a decrypter.
+- If `key_ops` is present, it must include `wrapKey` for an encrypter and `unwrapKey` for a decrypter, and it must not list a value twice.
 - If `use` is present, `key_ops` must not include `sign` or `verify`, as RFC 7517 section 4.3 requires the two to agree.
 
 A refused JWK gives `ErrInvalidPublicKey` from `GetEncrypterFromJwk` and `ErrInvalidPrivateKey` from `GetDecrypterFromJwk`. A JWK cannot hold a `dir` key, because no JWK member names the `enc` that the key is bound to. For `dir`, build a `jwe.DirectKey`.
@@ -686,6 +686,8 @@ These are new:
 - `jwa.Encryption` with `jwa.GetEncryption`, and the `alg` constants `jwa.RSAOAEP` to `jwa.Dir`. The integer values of the existing `jwa.Algorithm` constants do not change.
 - `JoseOptions` fields: `AllowedKeyManagementAlgorithms`, `AllowedContentEncryptionAlgorithms` and `OnDecrypterError`.
 - The error sentinel `ErrEncryptionError`. `ErrDecryptionFailed` now has a use.
+
+A jwk whose `key_ops` lists a value twice is now refused by `jws.GetValidatorFromJwk`, and skipped in a `jku` key set. RFC 7517 section 4.3 says this MUST NOT happen. If a key set that you rely on does it, have its publisher remove the repeated value.
 
 `jwk.PublicFromJwk` refuses an `oct` jwk with `ErrInvalidPublicKey`, because a symmetric key has no public half. v0.11.0 refused it with `ErrUnsupportedAlgorithm`. If you match the old sentinel for this case, match the new one.
 
