@@ -44,7 +44,7 @@ func ValidateHeader(ctx context.Context, header map[string]any, client *http.Cli
 		return nil, err
 	}
 
-	params, err := readHeaderShape(header, model.JWS)
+	params, err := readHeaderShape(header, jwsMode)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +130,7 @@ func ValidateJWEHeader(header map[string]any, opts *model.JoseOptions) (jwa.Algo
 	if err := validateKeyIdentifierRequirement(header, opts.RequireKeyIdentifier); err != nil {
 		return jwa.Unknown, jwa.UnknownEncryption, err
 	}
-	if _, err := readHeaderShape(header, model.JWE); err != nil {
+	if _, err := readHeaderShape(header, jweMode); err != nil {
 		return jwa.Unknown, jwa.UnknownEncryption, err
 	}
 	understood := slices.DeleteFunc(slices.Clone(opts.UnderstoodCriticalHeaders), func(name string) bool { return name == "b64" })
@@ -145,7 +145,7 @@ func ValidateJWEHeader(header map[string]any, opts *model.JoseOptions) (jwa.Algo
 // about to emit, as ValidateJWEHeader checks it on receipt, without its
 // allow-lists or expectations.
 func CheckJWEHeaderShape(header map[string]any) error {
-	_, err := readHeaderShape(header, model.JWE)
+	_, err := readHeaderShape(header, jweMode)
 	return err
 }
 
@@ -197,11 +197,18 @@ type headerShape struct {
 // ErrMissingCriticalClaim, since this library handles only a base64url-encoded
 // payload.
 func CheckHeaderShape(header map[string]any) error {
-	_, err := readHeaderShape(header, model.JWS)
+	_, err := readHeaderShape(header, jwsMode)
 	return err
 }
 
-func readHeaderShape(header map[string]any, mode model.Mode) (headerShape, error) {
+type mode int
+
+const (
+	jwsMode mode = iota
+	jweMode
+)
+
+func readHeaderShape(header map[string]any, mode mode) (headerShape, error) {
 	var params headerShape
 	var err error
 
@@ -252,7 +259,7 @@ func readHeaderShape(header map[string]any, mode model.Mode) (headerShape, error
 		}
 	}
 
-	if b64, present := header["b64"]; present && mode == model.JWS {
+	if b64, present := header["b64"]; present && mode == jwsMode {
 		encoded, ok := b64.(bool)
 		if !ok {
 			return headerShape{}, fmt.Errorf("%wthe 'b64' header must be a JSON boolean", joseerror.ErrMalformedClaim)
@@ -263,7 +270,7 @@ func readHeaderShape(header map[string]any, mode model.Mode) (headerShape, error
 	}
 
 	banned := jsonutils.ValidateNoBannedCriticalValues
-	if mode == model.JWE {
+	if mode == jweMode {
 		banned = jsonutils.ValidateNoBannedCriticalJWEValues
 	}
 	_, err = jsonutils.RetrieveClaim[[]any](header, "crit", jsonutils.ValidateNonEmptySlice, jsonutils.ValidateNoDuplicateSliceValues, banned, jsonutils.ValidateCriticalValuesPresent)

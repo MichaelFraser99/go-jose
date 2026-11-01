@@ -3,6 +3,7 @@ package jwe
 import (
 	"crypto"
 	"fmt"
+	"slices"
 
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/direct"
@@ -17,16 +18,42 @@ import (
 // one "enc" it may be used with, as RFC 8725 section 3.1 requires of every key.
 // Key must be the length Enc requires: 32, 48 or 64 octets for A128CBC-HS256,
 // A192CBC-HS384 or A256CBC-HS512, and 16, 24 or 32 for A128GCM, A192GCM or
-// A256GCM.
-type DirectKey = direct.Key
+// A256GCM. Pass it by value.
+type DirectKey struct {
+	Key []byte
+	Enc jwa.Encryption
+}
+
+type directEncrypter struct {
+	*direct.Encrypter
+	key DirectKey
+}
+
+func (d *directEncrypter) Public() crypto.PublicKey {
+	return DirectKey{Key: slices.Clone(d.key.Key), Enc: d.key.Enc}
+}
+
+type directDecrypter struct {
+	*direct.Decrypter
+	key DirectKey
+}
+
+func (d *directDecrypter) Public() crypto.PublicKey {
+	return DirectKey{Key: slices.Clone(d.key.Key), Enc: d.key.Enc}
+}
 
 // GetEncrypter returns an Encrypter for the key management algorithm alg.
 //
 // For RSA-OAEP, RSA-OAEP-256, RSA-OAEP-384 and RSA-OAEP-512, key is the
-// recipient's *rsa.PublicKey of 2048 bits or more (RFC 7518 section 4.3). For
+// recipient's *rsa.PublicKey with a modulus of 2048 to 8192 bits (RFC 7518
+// section 4.3 sets the minimum). For
 // A128KW, A192KW and A256KW, key is the shared key of 16, 24 or 32 octets
 // (section 4.4), or what Public returns for one. For dir, key is a DirectKey
 // (section 4.5), and Encrypt refuses any other enc. A shared key is copied.
+//
+// A shared key has no public half, so the Public method of an A128KW, A192KW,
+// A256KW or dir Encrypter returns the secret itself, as an HMAC Signer's does.
+// Do not log or publish what it returns.
 //
 // With dir and an AES GCM enc, every token is encrypted under the one shared
 // key with a random IV. RFC 7518 section 8.4 says AES GCM MUST NOT be used with
@@ -50,7 +77,11 @@ func GetEncrypter(alg jwa.Algorithm, key crypto.PublicKey) (model.Encrypter, err
 		if !ok {
 			return nil, fmt.Errorf("%wdir takes a jwe.DirectKey", joseerror.ErrInvalidPublicKey)
 		}
-		e, err = direct.NewEncrypter(directKey)
+		inner, err := direct.NewEncrypter(direct.Key{Key: directKey.Key, Enc: directKey.Enc})
+		if err != nil {
+			return nil, err
+		}
+		return &directEncrypter{Encrypter: inner, key: DirectKey{Key: slices.Clone(directKey.Key), Enc: directKey.Enc}}, nil
 	case jwa.ES256, jwa.ES384, jwa.ES512, jwa.RS256, jwa.RS384, jwa.RS512, jwa.PS256, jwa.PS384, jwa.PS512, jwa.HS256, jwa.HS384, jwa.HS512, jwa.EdDSA, jwa.Ed25519, jwa.MLDSA44, jwa.MLDSA65, jwa.MLDSA87, jwa.Unknown:
 		return nil, fmt.Errorf("%w%s is not a key management algorithm this library implements", joseerror.ErrUnsupportedAlgorithm, algorithmName(alg))
 	default:
@@ -67,8 +98,8 @@ func GetEncrypter(alg jwa.Algorithm, key crypto.PublicKey) (model.Encrypter, err
 //
 // For RSA-OAEP, RSA-OAEP-256, RSA-OAEP-384 and RSA-OAEP-512, key is an
 // *rsa.PrivateKey, or a crypto.Decrypter whose Public is an *rsa.PublicKey and
-// which accepts *rsa.OAEPOptions, with a modulus of 2048 bits or more (RFC 7518
-// section 4.3). For A128KW, A192KW, A256KW and dir, key is the shared key as
+// which accepts *rsa.OAEPOptions, with a modulus of 2048 to 8192 bits (RFC 7518
+// section 4.3 sets the minimum). For A128KW, A192KW, A256KW and dir, key is the shared key as
 // GetEncrypter takes it. A dir Decrypter decrypts only a JWE whose "enc" is the
 // DirectKey's; any other fails as ErrDecryptionFailed.
 func GetDecrypter(alg jwa.Algorithm, key crypto.PrivateKey) (model.Decrypter, error) {
@@ -89,7 +120,11 @@ func GetDecrypter(alg jwa.Algorithm, key crypto.PrivateKey) (model.Decrypter, er
 		if !ok {
 			return nil, fmt.Errorf("%wdir takes a jwe.DirectKey", joseerror.ErrInvalidPrivateKey)
 		}
-		d, err = direct.NewDecrypter(directKey)
+		inner, err := direct.NewDecrypter(direct.Key{Key: directKey.Key, Enc: directKey.Enc})
+		if err != nil {
+			return nil, err
+		}
+		return &directDecrypter{Decrypter: inner, key: DirectKey{Key: slices.Clone(directKey.Key), Enc: directKey.Enc}}, nil
 	case jwa.ES256, jwa.ES384, jwa.ES512, jwa.RS256, jwa.RS384, jwa.RS512, jwa.PS256, jwa.PS384, jwa.PS512, jwa.HS256, jwa.HS384, jwa.HS512, jwa.EdDSA, jwa.Ed25519, jwa.MLDSA44, jwa.MLDSA65, jwa.MLDSA87, jwa.Unknown:
 		return nil, fmt.Errorf("%w%s is not a key management algorithm this library implements", joseerror.ErrUnsupportedAlgorithm, algorithmName(alg))
 	default:

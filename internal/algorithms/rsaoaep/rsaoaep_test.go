@@ -1,6 +1,7 @@
 package rsaoaep
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
@@ -114,5 +115,46 @@ func TestNewDecrypter_RefusesATypedNilCryptoDecrypter(t *testing.T) {
 	decrypter, err := NewDecrypter(jwa.RSAOAEP, key)
 	if !errors.Is(err, joseerror.ErrInvalidPrivateKey) || decrypter != nil {
 		t.Errorf("want ErrInvalidPrivateKey and no decrypter rather than a panic, got %v", err)
+	}
+}
+
+func TestDecrypt_RefusesACiphertextNotAsLongAsTheModulus(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encrypter, err := NewEncrypter(jwa.RSAOAEP, &key.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decrypter, err := NewDecrypter(jwa.RSAOAEP, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cek, leadingZero []byte
+	for range 20000 {
+		c, encryptedKey, err := encrypter.WrapKey(rand.Reader, jwa.A128GCM, map[string]any{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if encryptedKey[0] == 0 {
+			cek, leadingZero = c, encryptedKey
+			break
+		}
+	}
+	if leadingZero == nil {
+		t.Fatal("no ciphertext with a leading zero octet in 20000 tries")
+	}
+	if got, err := decrypter.Decrypt(nil, leadingZero, nil); err != nil || !bytes.Equal(got, cek) {
+		t.Fatalf("the full-length ciphertext must decrypt, got %v", err)
+	}
+	for name, msg := range map[string][]byte{
+		"the leading zero octet stripped": leadingZero[1:],
+		"an octet appended":               append(bytes.Clone(leadingZero), 0),
+		"empty":                           nil,
+	} {
+		if got, err := decrypter.Decrypt(nil, msg, nil); !errors.Is(err, ErrCiphertextLength) || got != nil {
+			t.Errorf("[RFC 8017 7.1.2 step 1] %s: a ciphertext must be exactly k octets, got %v", name, err)
+		}
 	}
 }

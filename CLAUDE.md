@@ -25,6 +25,8 @@ Concise and genuinely helpful godoc comments are permitted here. Two conditions,
 
 A godoc comment that names an RFC clause earns its place. One that recounts a fix does not.
 
+One exception, and only one: an `Example` function in an `example_test.go` file ends with a single `// Output:` line. `go test` reads that line to check what the example prints, so it is a test directive, not a note. It is the last line of the function, and nothing follows `// Output:` on that line except the expected output. An example has no other comment, and no other test file may use this exception.
+
 ## Layout
 
 - **`jwa/`** — algorithm identifiers. `Algorithm` is an int whose zero value is `Unknown`.

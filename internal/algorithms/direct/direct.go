@@ -47,7 +47,7 @@ type Decrypter struct {
 func checkKey(key Key, class error) error {
 	size := contentenc.KeySize(key.Enc)
 	if size == 0 {
-		return fmt.Errorf("%w'%s' is not a content encryption algorithm this library implements", joseerror.ErrUnsupportedAlgorithm, key.Enc)
+		return fmt.Errorf("%w%s is not a content encryption algorithm this library implements", joseerror.ErrUnsupportedAlgorithm, contentenc.Name(key.Enc))
 	}
 	if len(key.Key) != size {
 		return fmt.Errorf("%w%s requires a key of %d octets, got %d", class, key.Enc, size, len(key.Key))

@@ -481,7 +481,6 @@ func TestDecrypt_ChecksTheHeader(t *testing.T) {
 		{name: "zip of another type", head: map[string]any{"alg": "dir", "enc": "A128GCM", "zip": 1}, want: []error{joseerror.ErrUnsupportedAlgorithm}},
 		{name: "an alg outside the allow-list", head: map[string]any{"alg": "dir", "enc": "A128GCM"}, opts: &model.JoseOptions{AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.A128KW}}, want: []error{joseerror.ErrUnsupportedAlgorithm}},
 		{name: "an enc outside the allow-list", head: map[string]any{"alg": "dir", "enc": "A128GCM"}, opts: &model.JoseOptions{AllowedContentEncryptionAlgorithms: []jwa.Encryption{jwa.A256GCM}}, want: []error{joseerror.ErrUnsupportedAlgorithm}},
-		{name: "a JWS allow-list does not admit the alg", head: map[string]any{"alg": "dir", "enc": "A128GCM"}, opts: &model.JoseOptions{AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.RS256}}, want: []error{joseerror.ErrUnsupportedAlgorithm}},
 		{name: "crit naming an extension not understood", head: map[string]any{"alg": "dir", "enc": "A128GCM", "crit": []any{"exp"}, "exp": 1}, want: []error{joseerror.ErrMissingCriticalClaim}},
 		{name: "crit naming a parameter that is absent", head: map[string]any{"alg": "dir", "enc": "A128GCM", "crit": []any{"exp"}}, opts: &model.JoseOptions{UnderstoodCriticalHeaders: []string{"exp"}}, want: []error{joseerror.ErrMissingCriticalClaim}},
 		{name: "an empty crit", head: map[string]any{"alg": "dir", "enc": "A128GCM", "crit": []any{}}, want: []error{joseerror.ErrMalformedClaim}},
@@ -902,5 +901,105 @@ func TestDecrypt_StopsWhenTheContextEndsDuringADecrypter(t *testing.T) {
 	_, plaintext, used, err := Decrypt(ctx, token, decrypters, nil)
 	if !errors.Is(err, context.Canceled) || plaintext != nil || used != nil || cancelling != 1 || after != 0 {
 		t.Errorf("want context.Canceled with no further decrypter tried, got %v after %d and %d calls", err, cancelling, after)
+	}
+}
+
+func TestDecryptAndParseHeader_RefuseAnAllowListNamingSomethingThisLibraryCannotDecrypt(t *testing.T) {
+	cek := randomBytes(t, 16)
+	token := dirToken(t, jwa.A128GCM, cek)
+	decrypter := scriptedDecrypter{alg: jwa.Dir, cek: cek}
+	for name, opts := range map[string]*model.JoseOptions{
+		"a JWS alg":                      {AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.Dir, jwa.RS256}},
+		"Unknown":                        {AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.Unknown}},
+		"an alg outside the enumeration": {AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.Algorithm(999)}},
+		"UnknownEncryption":              {AllowedContentEncryptionAlgorithms: []jwa.Encryption{jwa.A128GCM, jwa.UnknownEncryption}},
+		"an enc outside the enumeration": {AllowedContentEncryptionAlgorithms: []jwa.Encryption{jwa.Encryption(99)}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, plaintext, used, err := Decrypt(context.Background(), token, []model.Decrypter{decrypter}, opts); !errors.Is(err, joseerror.ErrInvalidOptions) || plaintext != nil || used != nil {
+				t.Errorf("an allow-list that can admit nothing it names is a configuration fault, so want ErrInvalidOptions, got %v", err)
+			}
+			if head, err := ParseHeader(token, opts); !errors.Is(err, joseerror.ErrInvalidOptions) || head != nil {
+				t.Errorf("ParseHeader: want ErrInvalidOptions, got %v", err)
+			}
+		})
+	}
+}
+
+func TestDecrypt_ReturnsTheContextErrorWhenItEndsDuringTheLastDecrypter(t *testing.T) {
+	cek := randomBytes(t, 16)
+	token := dirToken(t, jwa.A128GCM, cek)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var calls int
+	_, plaintext, used, err := Decrypt(ctx, token, []model.Decrypter{cancellingDecrypter{cancel: cancel, calls: &calls}}, nil)
+	if !errors.Is(err, context.Canceled) || plaintext != nil || used != nil || calls != 1 {
+		t.Errorf("a context that ended while the only decrypter ran must be reported as itself, not as a failure to decrypt; got %v after %d calls", err, calls)
+	}
+}
+
+func TestDecrypt_OnDecrypterErrorSeesEachFailureWhileTheResultStaysUniform(t *testing.T) {
+	cek := randomBytes(t, 16)
+	token := dirToken(t, jwa.A128GCM, cek)
+	outage := errors.New("hsm: slot 3 unavailable")
+	failing := &scriptedDecrypter{alg: jwa.Dir, err: outage}
+	short := &scriptedDecrypter{alg: jwa.Dir, cek: cek[:15]}
+	right := &scriptedDecrypter{alg: jwa.Dir, cek: cek}
+	type call struct {
+		decrypter model.Decrypter
+		err       error
+	}
+	var calls []call
+	opts := &model.JoseOptions{OnDecrypterError: func(d model.Decrypter, err error) { calls = append(calls, call{d, err}) }}
+
+	_, _, _, err := Decrypt(context.Background(), token, []model.Decrypter{failing, short}, opts)
+	if !errors.Is(err, joseerror.ErrDecryptionFailed) || errors.Is(err, outage) || strings.Contains(err.Error(), "hsm") {
+		t.Errorf("[RFC 7516 11.5] the returned error must stay the uniform ErrDecryptionFailed, got %v", err)
+	}
+	if len(calls) != 2 || !errors.Is(calls[0].err, outage) || calls[0].decrypter != model.Decrypter(failing) || calls[1].decrypter != model.Decrypter(short) || !strings.Contains(calls[1].err.Error(), "15 octets") {
+		t.Errorf("want the hook called once per failing decrypter, with the outage and then the short CEK, got %+v", calls)
+	}
+
+	calls = nil
+	if _, _, used, err := Decrypt(context.Background(), token, []model.Decrypter{right}, opts); err != nil || used != model.Decrypter(right) || len(calls) != 0 {
+		t.Errorf("a decrypter that succeeds must not reach the hook, got %v and %d calls", err, len(calls))
+	}
+}
+
+func TestParseHeader_ReturnsTheHeaderDecryptWouldCheck(t *testing.T) {
+	pair := pairFor(t, jwa.A128KW, jwa.A128GCM)
+	token, err := Encrypt(pair.encrypter, jwa.A128GCM, []byte("p"), map[string]any{"kid": "tenant-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := ParseHeader(token, nil)
+	if err != nil || head["kid"] != "tenant-a" || head["alg"] != "A128KW" || head["enc"] != "A128GCM" {
+		t.Errorf("want the protected header, got %v and %v", head, err)
+	}
+	for name, token := range map[string]string{
+		"a JWS":             "eyJhbGciOiJIUzI1NiJ9.e30.c2ln",
+		"six parts":         token + ".",
+		"zip":               headerToken(t, map[string]any{"alg": "dir", "enc": "A128GCM", "zip": "DEF"}),
+		"RSA1_5":            headerToken(t, map[string]any{"alg": "RSA1_5", "enc": "A128GCM"}),
+		"an unknown crit":   headerToken(t, map[string]any{"alg": "dir", "enc": "A128GCM", "crit": []any{"x"}, "x": 1}),
+		"a non-JSON header": "e30x..AAAA.AA.AAAA",
+	} {
+		t.Run(name, func(t *testing.T) {
+			head, err := ParseHeader(token, nil)
+			_, _, _, decryptErr := Decrypt(context.Background(), token, []model.Decrypter{pair.decrypter}, nil)
+			if !errors.Is(err, joseerror.ErrMalformedToken) || head != nil || err.Error() != decryptErr.Error() {
+				t.Errorf("want the refusal Decrypt gives, %v, got %v and %v", decryptErr, head, err)
+			}
+		})
+	}
+	if head, err := ParseHeader(headerToken(t, map[string]any{"alg": "dir", "enc": "A128GCM", "typ": "JWT"}), &model.JoseOptions{AcceptedTypes: []string{"secevent+jwt"}}); !errors.Is(err, joseerror.ErrMalformedClaim) || head != nil {
+		t.Errorf("ParseHeader must apply the options Decrypt applies, got %v", err)
+	}
+}
+
+func TestEncrypt_NamesAnUnknownEncByItsValue(t *testing.T) {
+	_, err := Encrypt(pairFor(t, jwa.A128KW, jwa.A128GCM).encrypter, jwa.UnknownEncryption, []byte("p"), nil)
+	if !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || !strings.Contains(err.Error(), "jwa.Encryption(0)") {
+		t.Errorf("an enc with no name must be shown by its value, got %v", err)
 	}
 }

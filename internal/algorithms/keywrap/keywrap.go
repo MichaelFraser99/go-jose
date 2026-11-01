@@ -74,7 +74,7 @@ func (encrypter *Encrypter) Public() crypto.PublicKey {
 func (encrypter *Encrypter) WrapKey(rand io.Reader, enc jwa.Encryption, header map[string]any) (cek, encryptedKey []byte, err error) {
 	size := contentenc.KeySize(enc)
 	if size == 0 {
-		return nil, nil, fmt.Errorf("%w'%s' is not a content encryption algorithm this library implements", joseerror.ErrUnsupportedAlgorithm, enc)
+		return nil, nil, fmt.Errorf("%w%s is not a content encryption algorithm this library implements", joseerror.ErrUnsupportedAlgorithm, contentenc.Name(enc))
 	}
 	cek = make([]byte, size)
 	if _, err := io.ReadFull(rand, cek); err != nil {

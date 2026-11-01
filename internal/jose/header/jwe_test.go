@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/MichaelFraser99/go-jose/joseerror"
-	"github.com/MichaelFraser99/go-jose/model"
 )
 
 func TestReadHeaderShape_AJWECritMayNameNoParameterRFC7516OrRFC7518DefinesForJWE(t *testing.T) {
@@ -41,11 +40,11 @@ func TestReadHeaderShape_AJWECritMayNameNoParameterRFC7516OrRFC7518DefinesForJWE
 			for member, value := range present {
 				head[member] = value
 			}
-			if _, err := readHeaderShape(jsonDecodedHeader(t, head), model.JWE); !errors.Is(err, joseerror.ErrMalformedClaim) {
+			if _, err := readHeaderShape(jsonDecodedHeader(t, head), jweMode); !errors.Is(err, joseerror.ErrMalformedClaim) {
 				t.Errorf("[RFC 7516 4.1.13 via RFC 7515 4.1.11] crit must not name %q in a JWE, want ErrMalformedClaim, got %v", name, err)
 			}
 			delete(head, "crit")
-			if _, err := readHeaderShape(jsonDecodedHeader(t, head), model.JWE); err != nil {
+			if _, err := readHeaderShape(jsonDecodedHeader(t, head), jweMode); err != nil {
 				t.Fatalf("without crit the header must be well formed, got %v", err)
 			}
 		})
@@ -56,7 +55,7 @@ func TestReadHeaderShape_AJWSCritMayStillNameAJWEOnlyParameter(t *testing.T) {
 	for _, name := range []string{"enc", "zip", "epk", "apu", "apv", "iv", "tag", "p2s", "p2c"} {
 		t.Run(name, func(t *testing.T) {
 			head := map[string]any{"alg": "RS256", name: "AAAA", "crit": []any{name}}
-			if _, err := readHeaderShape(jsonDecodedHeader(t, head), model.JWS); err != nil {
+			if _, err := readHeaderShape(jsonDecodedHeader(t, head), jwsMode); err != nil {
 				t.Errorf("[RFC 7515 4.1.11] %q is not defined for JWS, so a JWS crit may name it, got %v", name, err)
 			}
 		})

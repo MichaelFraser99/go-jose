@@ -66,6 +66,15 @@ type JoseOptions struct {
 	// ErrUnsupportedAlgorithm.
 	AllowedContentEncryptionAlgorithms []jwa.Encryption
 
+	// OnDecrypterError, if set, is called by jwe.Decrypt with each decrypter that
+	// fails and its error, or an error naming the wrong CEK length it returned.
+	// Decrypt still returns the one ErrDecryptionFailed RFC 7516 section 11.5
+	// requires, so this is the only place a cause such as a hardware module
+	// outage can be seen. It runs on the caller's goroutine before the next
+	// decrypter is tried. What it receives can depend on the token, so log it
+	// and never return it to the sender.
+	OnDecrypterError func(decrypter Decrypter, err error)
+
 	// ClockSkewLeeway widens the window the iat, nbf and exp claims are judged against, to allow for clock skew between the issuer and this verifier. A value of zero or less grants none. Defaults to 0
 	ClockSkewLeeway time.Duration
 
@@ -149,17 +158,10 @@ type JoseOptions struct {
 // different algorithms of one family need separate retrievers.
 type Retriever func() ([]crypto.PublicKey, error)
 
-type Mode int //todo: do we actually need this?
-
-const (
-	JWS Mode = iota
-	JWE
-)
-
 type Jwks struct {
 	Keys []map[string]any `json:"keys"`
 	Opts struct {
-		EnforceUniqueKIDs bool //todo: we should enforce this on marshal too
+		EnforceUniqueKIDs bool
 	} `json:"-"`
 }
 
@@ -271,8 +273,6 @@ type Signer interface {
 // ValidateSignature expects the raw JWS Signing Input as digest (not pre-hashed).
 // The implementation hashes it internally using the algorithm's designated hash
 // before performing verification.
-//
-// todo: these could have jwk methods - especially the Validator
 type Validator interface {
 	ValidateSignature(digest, signature []byte) (bool, error)
 	Public() crypto.PublicKey
@@ -296,6 +296,11 @@ type Encrypter interface {
 // Decrypt takes the JWE Encrypted Key as msg and a DecrypterOpts, and returns the
 // CEK. An RSA key held outside this process, such as in a hardware module, can
 // decrypt through jwe.GetDecrypter.
+//
+// jwe.Decrypt returns the Decrypter that succeeded, for the caller to compare
+// with ==. So an implementation must be a comparable type, such as a pointer:
+// comparing two interface values that hold a struct with a slice or map field
+// panics. Every Decrypter this library returns is a pointer.
 type Decrypter interface {
 	Alg() jwa.Algorithm
 	crypto.Decrypter
@@ -304,7 +309,8 @@ type Decrypter interface {
 // DecrypterOpts carries what a Decrypter needs beyond the JWE Encrypted Key:
 // the JWE Protected Header, which holds the parameters of algorithms such as
 // ECDH-ES, and the content encryption algorithm, whose key length some
-// algorithms derive a key for.
+// algorithms derive a key for. jwe.Decrypt passes it by value, not as a
+// pointer.
 type DecrypterOpts struct {
 	Header map[string]any
 	Enc    jwa.Encryption

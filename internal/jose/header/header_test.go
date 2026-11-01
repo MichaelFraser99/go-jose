@@ -77,7 +77,7 @@ func TestValidateHeader(t *testing.T) {
 		keySet.Keys = append(keySet.Keys, entry)
 	}
 	jwkKeysArray = append(jwkKeysArray, rsaKey.Public())
-	jwkKeysArray = append(jwkKeysArray, rsaKey.Public()) //twice - once for RS and once for PS entry
+	jwkKeysArray = append(jwkKeysArray, rsaKey.Public())
 	keySet.Keys = append(keySet.Keys, rsaJwk)
 	keySet.Keys = append(keySet.Keys, psJwk)
 	rs256JkuKeys := jwkKeysArray[:len(jwkKeysArray)-1]

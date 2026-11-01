@@ -8,6 +8,7 @@ package rsaoaep
 import (
 	"crypto"
 	"crypto/rsa"
+	"errors"
 	"fmt"
 	"io"
 
@@ -108,7 +109,7 @@ func (encrypter *Encrypter) Public() crypto.PublicKey {
 func (encrypter *Encrypter) WrapKey(rand io.Reader, enc jwa.Encryption, header map[string]any) (cek, encryptedKey []byte, err error) {
 	size := contentenc.KeySize(enc)
 	if size == 0 {
-		return nil, nil, fmt.Errorf("%w'%s' is not a content encryption algorithm this library implements", joseerror.ErrUnsupportedAlgorithm, enc)
+		return nil, nil, fmt.Errorf("%w%s is not a content encryption algorithm this library implements", joseerror.ErrUnsupportedAlgorithm, contentenc.Name(enc))
 	}
 	cek = make([]byte, size)
 	if _, err := io.ReadFull(rand, cek); err != nil {
@@ -129,8 +130,16 @@ func (decrypter *Decrypter) Public() crypto.PublicKey {
 	return keycopy.RSAPublicKey(decrypter.publicKey)
 }
 
+// ErrCiphertextLength is returned by Decrypt for a JWE Encrypted Key that is not
+// exactly as long as the modulus, which RFC 8017 section 7.1.2 step 1 requires.
+var ErrCiphertextLength = errors.New("an RSAES-OAEP ciphertext is as long as the modulus")
+
 // Decrypt recovers the CEK from msg, the JWE Encrypted Key, with RSAES-OAEP
-// under the hash alg names. opts is not read.
+// under the hash alg names. msg must be exactly as long as the modulus, else
+// ErrCiphertextLength. opts is not read.
 func (decrypter *Decrypter) Decrypt(rand io.Reader, msg []byte, _ crypto.DecrypterOpts) ([]byte, error) {
+	if len(msg) != (decrypter.publicKey.N.BitLen()+7)/8 {
+		return nil, ErrCiphertextLength
+	}
 	return decrypter.key.Decrypt(rand, msg, &rsa.OAEPOptions{Hash: decrypter.hash, MGFHash: decrypter.hash})
 }

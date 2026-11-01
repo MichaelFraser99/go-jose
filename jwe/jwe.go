@@ -47,7 +47,7 @@ func encrypt(random io.Reader, encrypter model.Encrypter, enc jwa.Encryption, pl
 		return "", fmt.Errorf("%w'%s' is not a key management algorithm this library implements", joseerror.ErrUnsupportedAlgorithm, alg)
 	}
 	if contentenc.KeySize(enc) == 0 {
-		return "", fmt.Errorf("%w'%s' is not a content encryption algorithm this library implements", joseerror.ErrUnsupportedAlgorithm, enc)
+		return "", fmt.Errorf("%w%s is not a content encryption algorithm this library implements", joseerror.ErrUnsupportedAlgorithm, contentenc.Name(enc))
 	}
 
 	h := maps.Clone(head)
@@ -143,13 +143,24 @@ func checkProducerHeader(headBytes []byte) error {
 //
 // Only the decrypters passed are tried. A "jku", "jwk", "x5u" or "x5c" in the
 // header names the recipient's public key, which cannot decrypt, so none is
-// fetched or read. Each decrypter whose Alg is the token's alg is tried in turn, up to
-// JoseOptions.MaxKeysTried (100 when unset); more is ErrTooManyKeys. A decrypter
-// that fails, or returns a CEK of the wrong length, is given a random CEK in its
-// place, as RFC 7516 section 11.5 advises, so every failure to decrypt is the
-// one ErrDecryptionFailed. A nil ctx or decrypter is ErrInvalidOptions. ctx is
-// checked before each decrypter is tried, and its error returned once it ends.
-// Each decrypter is given its own copy of the header and the encrypted key.
+// fetched or read. If more decrypters have the token's alg than
+// JoseOptions.MaxKeysTried allows (100 when unset), Decrypt refuses with
+// ErrTooManyKeys before it tries any. Otherwise it tries each in turn. Each
+// decrypter is given its own copy of the header and the encrypted key.
+//
+// A decrypter that fails, or returns a CEK of the wrong length, is given a
+// random CEK in its place, as RFC 7516 section 11.5 advises. Every failure that
+// depends on a key is then the one ErrDecryptionFailed with one message, and
+// the decrypter's own error is passed only to JoseOptions.OnDecrypterError. If
+// no decrypter has the token's alg, the message says so; that reveals which
+// algs you hold keys for, as the time taken does, but nothing about a key.
+//
+// A nil ctx or decrypter, or an allow-list naming an algorithm this library
+// does not implement, is ErrInvalidOptions. ctx is checked before each
+// decrypter and after the last, and its error is returned once it ends. A
+// crypto.Decrypter takes no context, so a call already running cannot be
+// interrupted; to bound one, build its decrypter per request around a
+// crypto.Decrypter that holds the request's context.
 //
 // Decrypt does not compare the header's "kid" with the decrypter that
 // succeeded. With a shared key, such as A256KW or dir, the key is what
@@ -166,17 +177,13 @@ func Decrypt(ctx context.Context, compactSerialization string, decrypters []mode
 		}
 	}
 
-	components := strings.SplitN(compactSerialization, ".", 6)
-	if len(components) != 5 {
-		return nil, nil, nil, fmt.Errorf("%wa JWE Compact Serialization has exactly five parts", joseerror.ErrMalformedToken)
+	if err := checkOptions(opts); err != nil {
+		return nil, nil, nil, err
 	}
-	protectedHeader, err = jsonutils.DecodeBase64urlMap(components[0])
+
+	components, protectedHeader, alg, enc, err := parseProtected(compactSerialization, opts)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("%werror processing protected header: %v", joseerror.ErrMalformedToken, err)
-	}
-	alg, enc, err := header.ValidateJWEHeader(protectedHeader, opts)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("%werror validating header: %w", joseerror.ErrMalformedToken, err)
+		return nil, nil, nil, err
 	}
 
 	var parts [4][]byte
@@ -234,6 +241,11 @@ func Decrypt(ctx context.Context, compactSerialization string, decrypters []mode
 		recovered, err := candidate.Decrypt(rand.Reader, slices.Clone(encryptedKey), model.DecrypterOpts{Header: ownHeader, Enc: enc})
 		if err == nil && len(recovered) == size {
 			copy(cek, recovered)
+		} else if opts != nil && opts.OnDecrypterError != nil {
+			if err == nil {
+				err = fmt.Errorf("the decrypter returned a content encryption key of %d octets, and %s requires %d", len(recovered), enc, size)
+			}
+			opts.OnDecrypterError(candidate, err)
 		}
 		aead, err := contentenc.New(enc, cek)
 		if err != nil {
@@ -243,7 +255,62 @@ func Decrypt(ctx context.Context, compactSerialization string, decrypters []mode
 			return protectedHeader, plaintext, candidate, nil
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, nil, err
+	}
 	return nil, nil, nil, fmt.Errorf("%wno decrypter given could decrypt the token", joseerror.ErrDecryptionFailed)
+}
+
+// ParseHeader returns the JWE Protected Header of a JWE Compact Serialization
+// without decrypting it, after the checks Decrypt makes of the token's shape
+// and header, with the same errors. Use it to choose which decrypter to pass to
+// Decrypt, for example by "kid", or to log a token Decrypt refused.
+//
+// The header is not authenticated until Decrypt succeeds: anyone can write any
+// "kid". Never trust a value from it. To know which key a token was encrypted
+// with, use the decrypter Decrypt returns.
+func ParseHeader(compactSerialization string, opts *model.JoseOptions) (map[string]any, error) {
+	if err := checkOptions(opts); err != nil {
+		return nil, err
+	}
+	_, protectedHeader, _, _, err := parseProtected(compactSerialization, opts)
+	if err != nil {
+		return nil, err
+	}
+	return protectedHeader, nil
+}
+
+func parseProtected(compactSerialization string, opts *model.JoseOptions) ([]string, map[string]any, jwa.Algorithm, jwa.Encryption, error) {
+	components := strings.SplitN(compactSerialization, ".", 6)
+	if len(components) != 5 {
+		return nil, nil, jwa.Unknown, jwa.UnknownEncryption, fmt.Errorf("%wa JWE Compact Serialization has exactly five parts", joseerror.ErrMalformedToken)
+	}
+	protectedHeader, err := jsonutils.DecodeBase64urlMap(components[0])
+	if err != nil {
+		return nil, nil, jwa.Unknown, jwa.UnknownEncryption, fmt.Errorf("%werror processing protected header: %v", joseerror.ErrMalformedToken, err)
+	}
+	alg, enc, err := header.ValidateJWEHeader(protectedHeader, opts)
+	if err != nil {
+		return nil, nil, jwa.Unknown, jwa.UnknownEncryption, fmt.Errorf("%werror validating header: %w", joseerror.ErrMalformedToken, err)
+	}
+	return components, protectedHeader, alg, enc, nil
+}
+
+func checkOptions(opts *model.JoseOptions) error {
+	if opts == nil {
+		return nil
+	}
+	for _, alg := range opts.AllowedKeyManagementAlgorithms {
+		if !slices.Contains(header.KeyManagementAlgorithms, alg) {
+			return fmt.Errorf("%wAllowedKeyManagementAlgorithms holds %s, which is not a key management algorithm this library implements", joseerror.ErrInvalidOptions, algorithmName(alg))
+		}
+	}
+	for _, enc := range opts.AllowedContentEncryptionAlgorithms {
+		if contentenc.KeySize(enc) == 0 {
+			return fmt.Errorf("%wAllowedContentEncryptionAlgorithms holds %s, which is not a content encryption algorithm this library implements", joseerror.ErrInvalidOptions, contentenc.Name(enc))
+		}
+	}
+	return nil
 }
 
 func encryptedKeySize(alg jwa.Algorithm, cekSize int) (int, bool) {

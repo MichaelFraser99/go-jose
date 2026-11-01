@@ -1,11 +1,13 @@
 package jwa
 
+// Algorithm is an "alg" value: a JWS signature algorithm (RFC 7518 section 3,
+// RFC 9864, RFC 9964) or a JWE key management algorithm (RFC 7518 section 4).
+// A signer or validator refuses a key management algorithm, and an encrypter or
+// decrypter refuses a signature algorithm.
 type Algorithm int
 
 // Unknown is the zero value, so an Algorithm a caller never set names no
 // algorithm rather than aliasing a real one.
-//
-// todo: finish this list
 const (
 	Unknown Algorithm = iota
 	ES256
@@ -118,8 +120,10 @@ func (a Algorithm) String() string {
 	}
 }
 
-// GetAlgorithm takes in a string representation of an Algorithm ("ES256" or "HS384")
-// If the provided string does not match a defined algorithm, Unknown is returned
+// GetAlgorithm returns the Algorithm a registered "alg" name identifies, such as
+// "ES256" or "RSA-OAEP-256", and Unknown for any other string. The comparison is
+// case sensitive (RFC 7515 section 4.1.1, RFC 7516 section 4.1.1). A result
+// other than Unknown may be a signature or a key management algorithm.
 func GetAlgorithm(alg string) Algorithm {
 	switch alg {
 	case "ES256":

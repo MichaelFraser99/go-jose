@@ -113,8 +113,7 @@ func Validate(ctx context.Context, token string, outOfBoundsPublicKey model.Retr
 			return nil, nil, fmt.Errorf("failed to verify jws compact serialization: %w", err)
 		}
 	} else if len(segments) == 5 {
-		//todo jwe
-		return nil, nil, fmt.Errorf("%wthe token has the five segments of a JWE, which this library does not support", joseerror.ErrUnsupportedAlgorithm)
+		return nil, nil, fmt.Errorf("%wthe token has the five segments of a JWE, which Validate does not decrypt: decrypt it with jwe.Decrypt first", joseerror.ErrUnsupportedAlgorithm)
 	} else {
 		return nil, nil, fmt.Errorf("%wa JWS has three segments, got %d", joseerror.ErrMalformedToken, len(segments))
 	}

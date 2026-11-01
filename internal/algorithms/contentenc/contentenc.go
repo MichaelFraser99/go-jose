@@ -35,6 +35,15 @@ func KeySize(enc jwa.Encryption) int {
 	return 0
 }
 
+// Name returns enc's registered name, or "jwa.Encryption(n)" for a value with
+// none, so an error message never shows an empty name.
+func Name(enc jwa.Encryption) string {
+	if name := enc.String(); name != "" {
+		return fmt.Sprintf("%q", name)
+	}
+	return fmt.Sprintf("jwa.Encryption(%d)", int(enc))
+}
+
 // New returns the AEAD for enc keyed with cek. Its NonceSize is the length of
 // the JWE Initialization Vector, 16 octets for AES_CBC_HMAC_SHA2 and 12 for AES
 // GCM (RFC 7518 sections 5.2.2.1 and 5.3), and its Overhead the length of the
@@ -42,7 +51,7 @@ func KeySize(enc jwa.Encryption) int {
 func New(enc jwa.Encryption, cek []byte) (cipher.AEAD, error) {
 	size := KeySize(enc)
 	if size == 0 {
-		return nil, fmt.Errorf("%w'%s' is not a content encryption algorithm this library implements", joseerror.ErrUnsupportedAlgorithm, enc)
+		return nil, fmt.Errorf("%w%s is not a content encryption algorithm this library implements", joseerror.ErrUnsupportedAlgorithm, Name(enc))
 	}
 	if len(cek) != size {
 		return nil, fmt.Errorf("%s requires a content encryption key of %d octets, got %d", enc, size, len(cek))

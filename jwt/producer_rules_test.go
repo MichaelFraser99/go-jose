@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es256"
@@ -328,5 +329,12 @@ func TestNew_RefusesAJweKeyManagementAlgorithm(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestValidate_PointsAJWEAtJweDecrypt(t *testing.T) {
+	_, _, err := Validate(context.Background(), "a.b.c.d.e", nil, nil)
+	if !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || !strings.Contains(err.Error(), "jwe.Decrypt") {
+		t.Errorf("[RFC 7516 9] a five-part token is a JWE, which Validate does not decrypt, so want ErrUnsupportedAlgorithm naming jwe.Decrypt, got %v", err)
 	}
 }
