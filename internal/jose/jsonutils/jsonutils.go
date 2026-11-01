@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/joseerror"
-	"github.com/MichaelFraser99/go-jose/jwa"
 	"net/url"
 	"reflect"
 	"slices"
@@ -174,14 +173,6 @@ func RetrieveClaim[T any](jsonInput map[string]any, claimName string, validator 
 }
 
 var (
-	ValidateAlg = func(jsonInput map[string]any, retrievedClaimValue string) error {
-		parsedAlg := jwa.GetAlgorithm(retrievedClaimValue)
-		if parsedAlg == jwa.Unknown {
-			return fmt.Errorf("%w%s is not a supported algorithm", joseerror.ErrUnsupportedAlgorithm, QuoteBounded(retrievedClaimValue))
-		}
-		return nil
-	}
-
 	ValidateHttpsUrlClaim = func(jsonInput map[string]any, retrievedClaimValue string) error {
 		parsedUrl, err := url.Parse(retrievedClaimValue)
 		if err != nil {

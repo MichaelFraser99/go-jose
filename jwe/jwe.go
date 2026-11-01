@@ -121,8 +121,10 @@ func checkProducerHeader(headBytes []byte) error {
 // decrypted it. An empty plaintext is an empty, non-nil slice.
 //
 // A token of other than five parts, or with a part that is not base64url, is
-// refused with ErrMalformedToken (section 7.1). A fault in the header is
-// ErrMalformedToken wrapping the reason:
+// refused with ErrMalformedToken (section 7.1). A header that breaks RFC 7516
+// is ErrMalformedToken wrapping the reason. A well-formed header refused by the
+// options, or naming what this library does not implement, is that reason
+// alone, not ErrMalformedToken:
 //
 //   - "alg" must name a key management algorithm this library implements and
 //     "enc" a content encryption algorithm it implements (sections 4.1.1 and
@@ -295,7 +297,7 @@ func parseProtected(compactSerialization string, opts *model.JoseOptions) ([]str
 	}
 	alg, enc, err := header.ValidateJWEHeader(protectedHeader, opts)
 	if err != nil {
-		return nil, nil, jwa.Unknown, jwa.UnknownEncryption, fmt.Errorf("%werror validating header: %w", joseerror.ErrMalformedToken, err)
+		return nil, nil, jwa.Unknown, jwa.UnknownEncryption, err
 	}
 	return components, protectedHeader, alg, enc, nil
 }

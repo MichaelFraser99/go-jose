@@ -141,8 +141,8 @@ func TestDecrypt_RefusesEachRFCExampleThisLibraryDoesNotImplement(t *testing.T) 
 				t.Fatal(err)
 			}
 			_, plaintext, _, err := Decrypt(context.Background(), example.Compact, []model.Decrypter{decrypter}, nil)
-			if !errors.Is(err, joseerror.ErrMalformedToken) || !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || plaintext != nil {
-				t.Errorf("[RFC 7516 5.2 step 5] %s names an alg or zip this library does not implement, so want ErrUnsupportedAlgorithm, got %v", id, err)
+			if errors.Is(err, joseerror.ErrMalformedToken) || !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || plaintext != nil {
+				t.Errorf("[RFC 7516 5.2 step 5] %s names an alg or zip this library does not implement, so want ErrUnsupportedAlgorithm and not ErrMalformedToken, as the token is well formed, got %v", id, err)
 			}
 		})
 	}
