@@ -247,6 +247,16 @@ func TestGetEncrypterFromJwk_RefusesAJwkThatDeclaresAnotherUse(t *testing.T) {
 			decrypter: map[string]any{"alg": "A128KW", "key_ops": []any{"wrapKey", "encrypt", "decrypt"}},
 			clause:    "RFC 7517 4.3",
 		},
+		"key_ops listing the operation twice": {
+			encrypter: map[string]any{"alg": "A128KW", "key_ops": []any{"wrapKey", "wrapKey"}},
+			decrypter: map[string]any{"alg": "A128KW", "key_ops": []any{"unwrapKey", "unwrapKey"}},
+			clause:    "RFC 7517 4.3",
+		},
+		"key_ops listing another value twice": {
+			encrypter: map[string]any{"alg": "A128KW", "key_ops": []any{"encrypt", "wrapKey", "encrypt"}},
+			decrypter: map[string]any{"alg": "A128KW", "key_ops": []any{"decrypt", "unwrapKey", "decrypt"}},
+			clause:    "RFC 7517 4.3",
+		},
 		"empty key_ops": {
 			encrypter: map[string]any{"alg": "A128KW", "key_ops": []any{}},
 			decrypter: map[string]any{"alg": "A128KW", "key_ops": []any{}},

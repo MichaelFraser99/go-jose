@@ -203,8 +203,9 @@ func checkMember(jwk map[string]any, kid *string, alg string, ignoreKeyUse bool)
 // CheckKeyUse refuses a jwk its publisher marked as not for verifying signatures:
 // one whose "use" is present and is not "sig" (RFC 7517 section 4.2), or whose
 // "key_ops" is present and lacks "verify" (RFC 7517 section 4.3). A member of the
-// wrong type is refused with malformed, and a mark that excludes verifying with
-// refused.
+// wrong type, or a "key_ops" that lists a value twice, which section 4.3 says
+// MUST NOT happen, is refused with malformed, and a mark that excludes verifying
+// with refused.
 func CheckKeyUse(jwk map[string]any, refused, malformed error) error {
 	if u, present := jwk["use"]; present {
 		su, ok := u.(string)
@@ -222,11 +223,16 @@ func CheckKeyUse(jwk map[string]any, refused, malformed error) error {
 			return fmt.Errorf("%wjwk key_ops must be an array", malformed)
 		}
 		verify := false
+		seen := map[string]bool{}
 		for _, op := range ops {
 			sop, ok := op.(string)
 			if !ok {
 				return fmt.Errorf("%wjwk key_ops must hold strings", malformed)
 			}
+			if seen[sop] {
+				return fmt.Errorf("%wjwk key_ops lists %s more than once", malformed, jsonutils.QuoteBounded(sop))
+			}
+			seen[sop] = true
 			if sop == "verify" {
 				verify = true
 			}
