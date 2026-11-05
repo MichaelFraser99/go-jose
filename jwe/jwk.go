@@ -3,6 +3,8 @@ package jwe
 import (
 	"crypto"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
 	"github.com/MichaelFraser99/go-jose/joseerror"
@@ -12,13 +14,31 @@ import (
 )
 
 var encrypterKeyReaders = map[jwa.Algorithm]func(map[string]any) (crypto.PublicKey, error){
-	jwa.RSAOAEP:    jwk.PublicFromJwk,
-	jwa.RSAOAEP256: jwk.PublicFromJwk,
-	jwa.RSAOAEP384: jwk.PublicFromJwk,
-	jwa.RSAOAEP512: jwk.PublicFromJwk,
-	jwa.A128KW:     readSharedKey,
-	jwa.A192KW:     readSharedKey,
-	jwa.A256KW:     readSharedKey,
+	jwa.RSAOAEP:      jwk.PublicFromJwk,
+	jwa.RSAOAEP256:   jwk.PublicFromJwk,
+	jwa.RSAOAEP384:   jwk.PublicFromJwk,
+	jwa.RSAOAEP512:   jwk.PublicFromJwk,
+	jwa.A128KW:       readSharedKey,
+	jwa.A192KW:       readSharedKey,
+	jwa.A256KW:       readSharedKey,
+	jwa.ECDHES:       jwk.PublicFromJwk,
+	jwa.ECDHESA128KW: jwk.PublicFromJwk,
+	jwa.ECDHESA192KW: jwk.PublicFromJwk,
+	jwa.ECDHESA256KW: jwk.PublicFromJwk,
+}
+
+var keyAgreementAlgorithms = []jwa.Algorithm{jwa.ECDHES, jwa.ECDHESA128KW, jwa.ECDHESA192KW, jwa.ECDHESA256KW}
+
+func requiredOperations(alg jwa.Algorithm, decrypting bool) []string {
+	switch {
+	case slices.Contains(keyAgreementAlgorithms, alg) && decrypting:
+		return []string{"deriveKey", "deriveBits"}
+	case slices.Contains(keyAgreementAlgorithms, alg):
+		return nil
+	case decrypting:
+		return []string{"unwrapKey"}
+	}
+	return []string{"wrapKey"}
 }
 
 func readSharedKey(sharedJwk map[string]any) (crypto.PublicKey, error) {
@@ -31,23 +51,26 @@ var signatureOperations = map[string]bool{"sign": true, "verify": true}
 // from the recipient's jwk, as GetEncrypter does from a key.
 //
 // For RSA-OAEP, RSA-OAEP-256, RSA-OAEP-384 and RSA-OAEP-512, the jwk is an RSA
-// public key. For A128KW, A192KW and A256KW, it is an "oct" key. dir is refused
-// with ErrUnsupportedAlgorithm, as no jwk member names the "enc" a dir key is
-// bound to (RFC 8725 section 3.1); build a DirectKey instead.
+// public key. For the ECDH-ES algorithms, it is an EC public key on P-256, P-384
+// or P-521, or an OKP X25519 public key. For A128KW, A192KW and A256KW, it is an
+// "oct" key. dir is refused with ErrUnsupportedAlgorithm, as no jwk member
+// names the "enc" a dir key is bound to (RFC 8725 section 3.1); build a
+// DirectKey instead.
 //
 // RFC 8725 section 3.1 requires each key to be used with exactly one algorithm,
 // so a jwk whose "alg" is present and is not the string alg names is refused.
 // A jwk whose "use" is present and is not "enc", or whose "key_ops" is present
-// and lacks "wrapKey", is refused too (RFC 7517 sections 4.2 and 4.3). So is a
-// jwk whose "use" and "key_ops" are not consistent, or whose "key_ops" lists a
-// value twice, both of which section 4.3 forbids.
+// and lacks "wrapKey", is refused too (RFC 7517 sections 4.2 and 4.3). An
+// ECDH-ES key is held to no "key_ops" value, as none names a public key used
+// for key agreement. So is a jwk whose "use" and "key_ops" are not consistent,
+// or whose "key_ops" lists a value twice, both of which section 4.3 forbids.
 // Every refusal of the jwk carries ErrInvalidPublicKey.
 func GetEncrypterFromJwk(alg jwa.Algorithm, publicJwk map[string]any) (model.Encrypter, error) {
 	read, ok := encrypterKeyReaders[alg]
 	if !ok {
 		return nil, notFromJwk(alg)
 	}
-	if err := checkKeyDeclarations(alg, publicJwk, "wrapKey", joseerror.ErrInvalidPublicKey); err != nil {
+	if err := checkKeyDeclarations(alg, publicJwk, requiredOperations(alg, false), joseerror.ErrInvalidPublicKey); err != nil {
 		return nil, err
 	}
 	key, err := read(publicJwk)
@@ -68,12 +91,13 @@ func GetEncrypterFromJwk(alg jwa.Algorithm, publicJwk map[string]any) (model.Enc
 // private key. For A128KW, A192KW and A256KW, it is an "oct" key. dir is refused
 // as GetEncrypterFromJwk refuses it. The jwk's "alg", "use" and "key_ops" are
 // held to the rules GetEncrypterFromJwk applies, with "unwrapKey" in place of
-// "wrapKey". Every refusal of the jwk carries ErrInvalidPrivateKey.
+// "wrapKey", and, for an ECDH-ES key, "deriveKey" or "deriveBits" (RFC 7517
+// section 4.3). Every refusal of the jwk carries ErrInvalidPrivateKey.
 func GetDecrypterFromJwk(alg jwa.Algorithm, privateJwk map[string]any) (model.Decrypter, error) {
 	if _, ok := encrypterKeyReaders[alg]; !ok {
 		return nil, notFromJwk(alg)
 	}
-	if err := checkKeyDeclarations(alg, privateJwk, "unwrapKey", joseerror.ErrInvalidPrivateKey); err != nil {
+	if err := checkKeyDeclarations(alg, privateJwk, requiredOperations(alg, true), joseerror.ErrInvalidPrivateKey); err != nil {
 		return nil, err
 	}
 	key, err := jwk.PrivateFromJwk(privateJwk)
@@ -94,7 +118,7 @@ func notFromJwk(alg jwa.Algorithm) error {
 	return fmt.Errorf("%w%s is not a key management algorithm this library implements", joseerror.ErrUnsupportedAlgorithm, algorithmName(alg))
 }
 
-func checkKeyDeclarations(alg jwa.Algorithm, key map[string]any, operation string, class error) error {
+func checkKeyDeclarations(alg jwa.Algorithm, key map[string]any, operations []string, class error) error {
 	if member, present := key["alg"]; present {
 		if name, isString := member.(string); name != alg.String() {
 			return fmt.Errorf("%wthe jwk's alg %s does not name %s", class, describe(name, isString), alg.String())
@@ -130,12 +154,12 @@ func checkKeyDeclarations(alg jwa.Algorithm, key map[string]any, operation strin
 		if usePresent && signatureOperations[name] {
 			return fmt.Errorf("%wthe jwk's use enc and key_ops %s are not consistent", class, jsonutils.QuoteBounded(name))
 		}
-		if name == operation {
+		if slices.Contains(operations, name) {
 			permitted = true
 		}
 	}
-	if !permitted {
-		return fmt.Errorf("%wthe jwk's key_ops do not include %s", class, operation)
+	if !permitted && len(operations) > 0 {
+		return fmt.Errorf("%wthe jwk's key_ops do not include %s", class, strings.Join(operations, " or "))
 	}
 	return nil
 }

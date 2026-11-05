@@ -132,6 +132,11 @@ func checkProducerHeader(headBytes []byte) error {
 //     AllowedContentEncryptionAlgorithms when set, else ErrUnsupportedAlgorithm.
 //   - "zip" is ErrUnsupportedAlgorithm: section 4.1.3 requires it to be
 //     processed, and this library does not decompress.
+//   - For an ECDH-ES alg, "epk" must be present and be an EC or X25519 public
+//     key with its point on its curve and no private member (RFC 7518 section
+//     4.6.1.1, RFC 8725 section 3.4); an "epk" on a curve this library does not
+//     implement is ErrUnsupportedAlgorithm. "apu" and "apv", in any JWE, must be
+//     base64url strings and must differ (section 4.6.2).
 //   - "crit" follows RFC 7515 section 4.1.11, as section 4.1.13 requires, and
 //     may name no parameter RFC 7516 or RFC 7518 defines for JWE.
 //   - The parameters shared with RFC 7515 have the shapes jws.Verify requires,
@@ -321,11 +326,11 @@ func checkOptions(opts *model.JoseOptions) error {
 
 func encryptedKeySize(alg jwa.Algorithm, cekSize int) (least, most int) {
 	switch alg {
-	case jwa.A128KW, jwa.A192KW, jwa.A256KW:
+	case jwa.A128KW, jwa.A192KW, jwa.A256KW, jwa.ECDHESA128KW, jwa.ECDHESA192KW, jwa.ECDHESA256KW:
 		return cekSize + 8, cekSize + 8
 	case jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512:
 		return common.MinimumRSAModulusBits / 8, common.MaximumRSAModulusBits / 8
-	case jwa.Dir, jwa.ES256, jwa.ES384, jwa.ES512, jwa.RS256, jwa.RS384, jwa.RS512, jwa.PS256, jwa.PS384, jwa.PS512, jwa.HS256, jwa.HS384, jwa.HS512, jwa.EdDSA, jwa.Ed25519, jwa.MLDSA44, jwa.MLDSA65, jwa.MLDSA87, jwa.Unknown:
+	case jwa.Dir, jwa.ECDHES, jwa.ES256, jwa.ES384, jwa.ES512, jwa.RS256, jwa.RS384, jwa.RS512, jwa.PS256, jwa.PS384, jwa.PS512, jwa.HS256, jwa.HS384, jwa.HS512, jwa.EdDSA, jwa.Ed25519, jwa.MLDSA44, jwa.MLDSA65, jwa.MLDSA87, jwa.Unknown:
 	}
 	return 0, 0
 }

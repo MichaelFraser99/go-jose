@@ -398,7 +398,11 @@ The value returned is a pointer to the respective key, such as `*ecdsa.PublicKey
 
 An `oct` jwk holds a symmetric key in `k`, as RFC 7518 section 6.4.1 defines. `PrivateFromJwk` reads it as a `[]byte`, and refuses a `k` that is absent, not a string, not strict base64url or empty. `PrivateJwk` writes a `[]byte` as an `oct` jwk with no `kid`, because RFC 7638 section 7 says to conceal the thumbprint of a symmetric key. A symmetric key has no public half, so `PublicFromJwk` and `PublicJwk` refuse it with `ErrInvalidPublicKey`.
 
-An `OKP` jwk is read only when its `crv` is `Ed25519`, the one OKP subtype this library supports. RFC 8037 section 2 requires `crv`, so a jwk without a string `crv` is refused as an invalid key. Any other subtype is refused with `ErrUnsupportedAlgorithm`. Each of `x` and `d` must be 32 octets, the key sizes RFC 8032 section 5.1.5 sets for Ed25519. For a private key, `x` must be the public key of `d`. `x` must be the canonical encoding of a point, so one key has one `x` and one thumbprint.
+An `OKP` jwk is read when its `crv` is `Ed25519` or `X25519`, the two OKP subtypes this library supports. RFC 8037 section 2 requires `crv`, so a jwk without a string `crv` is refused as an invalid key. Any other subtype, such as `X448`, is refused with `ErrUnsupportedAlgorithm`, because Go has no X448.
+
+For `Ed25519`, each of `x` and `d` must be 32 octets, the key sizes RFC 8032 section 5.1.5 sets. For a private key, `x` must be the public key of `d`. `x` must be the canonical encoding of a point, so one key has one `x` and one thumbprint.
+
+For `X25519`, `PublicFromJwk` returns an `*ecdh.PublicKey` and `PrivateFromJwk` returns an `*ecdh.PrivateKey`. Each of `x` and `d` must be 32 octets. For a private key, `x` must be the public key of `d`. A public `x` that is not canonical is accepted, because RFC 7748 section 5 requires it. `PublicJwk` and `PrivateJwk` write an X25519 `*ecdh` key as an OKP jwk, and an `*ecdh` key on P-256, P-384 or P-521 as an EC jwk, which reads back as an `*ecdsa` key. RFC 8037 section 3.2 forbids signing with an X25519 key, so no signer or validator accepts one: `jws.GetValidatorFromJwk` refuses an X25519 jwk with `ErrInvalidPublicKey`, and verification skips one in a `jku` set or an inline `jwk`.
 
 **This is a breaking change for OKP keys.** Earlier versions ignored the value of `crv`, so an `X25519` or `Ed448` key was returned as an Ed25519 key. They also accepted any length of `x` and `d`, and did not compare `x` with `d`. A key that those versions read can now be refused.
 
@@ -516,6 +520,7 @@ The `jwe` package encrypts and decrypts the JWE Compact Serialization of RFC 751
 | `alg` | Key for `GetEncrypter` | Key for `GetDecrypter` |
 | --- | --- | --- |
 | `RSA-OAEP`, `RSA-OAEP-256`, `RSA-OAEP-384`, `RSA-OAEP-512` | `*rsa.PublicKey` | `*rsa.PrivateKey`, or a `crypto.Decrypter` with an `*rsa.PublicKey` |
+| `ECDH-ES`, `ECDH-ES+A128KW`, `ECDH-ES+A192KW`, `ECDH-ES+A256KW` | `*ecdsa.PublicKey` on P-256, P-384 or P-521, or `*ecdh.PublicKey` on one of those curves or X25519 | the matching `*ecdsa.PrivateKey` or `*ecdh.PrivateKey` |
 | `A128KW`, `A192KW`, `A256KW` | `[]byte` of 16, 24 or 32 octets | the same `[]byte` |
 | `dir` | `jwe.DirectKey{Key: secret, Enc: enc}` | the same `jwe.DirectKey` |
 
@@ -527,20 +532,26 @@ CAUTION: Do not encrypt more than 2^32 tokens under one `dir` key with an AES GC
 
 The `enc` values are `A128CBC-HS256`, `A192CBC-HS384`, `A256CBC-HS512`, `A128GCM`, `A192GCM` and `A256GCM`, from RFC 7518 section 5. In Go they are `jwa.A128CBCHS256` to `jwa.A256GCM`, of type `jwa.Encryption`.
 
-To build an encrypter or decrypter from a JWK, call `jwe.GetEncrypterFromJwk` or `jwe.GetDecrypterFromJwk`. For the `RSA-OAEP` algorithms, give an RSA JWK: the public key for an encrypter, and the private key for a decrypter. For `A128KW`, `A192KW` and `A256KW`, give an `oct` JWK whose `k` is 16, 24 or 32 octets.
+To build an encrypter or decrypter from a JWK, call `jwe.GetEncrypterFromJwk` or `jwe.GetDecrypterFromJwk`. For the `RSA-OAEP` algorithms, give an RSA JWK: the public key for an encrypter, and the private key for a decrypter. For the `ECDH-ES` algorithms, give an EC JWK on P-256, P-384 or P-521, or an OKP JWK on X25519. For `A128KW`, `A192KW` and `A256KW`, give an `oct` JWK whose `k` is 16, 24 or 32 octets.
 
 These functions enforce what the JWK declares about itself:
 
 - If `alg` is present, it must name the algorithm that you give.
 - If `use` is present, it must be `enc`.
-- If `key_ops` is present, it must include `wrapKey` for an encrypter and `unwrapKey` for a decrypter, and it must not list a value twice.
+- If `key_ops` is present, it must include `wrapKey` for an encrypter and `unwrapKey` for a decrypter, and it must not list a value twice. For an `ECDH-ES` decrypter, it must include `deriveKey` or `deriveBits` instead. An `ECDH-ES` encrypter has no required value, because no `key_ops` value names a public key that is used for key agreement.
 - If `use` is present, `key_ops` must not include `sign` or `verify`, as RFC 7517 section 4.3 requires the two to agree.
 
 A refused JWK gives `ErrInvalidPublicKey` from `GetEncrypterFromJwk` and `ErrInvalidPrivateKey` from `GetDecrypterFromJwk`. A JWK cannot hold a `dir` key, because no JWK member names the `enc` that the key is bound to. For `dir`, build a `jwe.DirectKey`.
 
 CAUTION: Do not log or publish what `Public()` returns for an `A128KW`, `A192KW`, `A256KW` or `dir` encrypter or decrypter. A shared key has no public half, so `Public()` returns the secret itself, as it does for an HMAC signer.
 
-This library does not implement `RSA1_5`, and it will not. RFC 8725 section 3.2 advises against it because of padding oracle attacks. `ECDH-ES`, `A128GCMKW` to `A256GCMKW`, `PBES2` and `zip` are not implemented yet.
+With `ECDH-ES`, the key that the two parties agree is the content encryption key, and the encrypted key is empty. With `ECDH-ES+A128KW` to `ECDH-ES+A256KW`, the agreed key wraps a random content encryption key. `Encrypt` makes a new ephemeral key for each token, as RFC 7518 section 4.6 requires, and writes its public half to the `epk` header. Do not set `epk` yourself: `Encrypt` refuses it with `ErrMalformedClaim`.
+
+To bind the agreed key to the two parties, set `apu` and `apv` in the header that you give `Encrypt`. Each is a base64url string, and RFC 7518 section 4.6.2 requires them to be different. They enter the key derivation, so the recipient must receive the same values. `Decrypt` refuses a token whose `apu` and `apv` are equal or are not base64url strings, as malformed.
+
+`Decrypt` refuses an ECDH-ES token with `ErrMalformedToken` if its `epk` is absent, is not an EC or X25519 public key, has a point that is not on its curve, or carries a private member such as `d`. RFC 8725 section 3.4 requires this check. An `epk` on a curve that this library does not implement, such as X448, is refused with `ErrUnsupportedAlgorithm`. An `epk` on a different curve from the decrypter's key fails with `ErrDecryptionFailed`, like any other key that cannot decrypt the token.
+
+This library does not implement `RSA1_5`, and it will not. RFC 8725 section 3.2 advises against it because of padding oracle attacks. `A128GCMKW` to `A256GCMKW`, `PBES2` and `zip` are not implemented yet.
 
 ### Encrypt
 
@@ -683,11 +694,13 @@ These are new:
 - The `jwe` package, with `GetEncrypter`, `GetDecrypter`, `GetEncrypterFromJwk`, `GetDecrypterFromJwk`, `Encrypt`, `Decrypt`, `ParseHeader` and `DirectKey`. See [Encrypting and decrypting](#encrypting-and-decrypting).
 - `oct` keys in the `jwk` package: `PrivateFromJwk` reads one as a `[]byte`, and `PrivateJwk` writes one.
 - `model.Encrypter`, `model.Decrypter` and `model.DecrypterOpts`.
-- `jwa.Encryption` with `jwa.GetEncryption`, and the `alg` constants `jwa.RSAOAEP` to `jwa.Dir`. The integer values of the existing `jwa.Algorithm` constants do not change.
+- `jwa.Encryption` with `jwa.GetEncryption`, and the `alg` constants `jwa.RSAOAEP` to `jwa.Dir` and `jwa.ECDHES` to `jwa.ECDHESA256KW`. The integer values of the existing `jwa.Algorithm` constants do not change.
 - `JoseOptions` fields: `AllowedKeyManagementAlgorithms`, `AllowedContentEncryptionAlgorithms` and `OnDecrypterError`.
 - The error sentinel `ErrEncryptionError`. `ErrDecryptionFailed` now has a use.
 
 A jwk whose `key_ops` lists a value twice is now refused by `jws.GetValidatorFromJwk`, and skipped in a `jku` key set. RFC 7517 section 4.3 says this MUST NOT happen. If a key set that you rely on does it, have its publisher remove the repeated value.
+
+`jwk.PublicFromJwk` and `jwk.PrivateFromJwk` now read an X25519 jwk as an `*ecdh` key. v0.11.0 refused it with `ErrUnsupportedAlgorithm`. `jws.GetValidatorFromJwk` refuses an X25519 jwk with `ErrInvalidPublicKey`, where v0.11.0 gave `ErrUnsupportedAlgorithm`.
 
 `jwk.PublicFromJwk` refuses an `oct` jwk with `ErrInvalidPublicKey`, because a symmetric key has no public half. v0.11.0 refused it with `ErrUnsupportedAlgorithm`. If you match the old sentinel for this case, match the new one.
 

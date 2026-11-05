@@ -18,7 +18,7 @@ import (
 	"github.com/MichaelFraser99/go-jose/model"
 )
 
-var jweKeyManagementAlgorithms = []jwa.Algorithm{jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512, jwa.A128KW, jwa.A192KW, jwa.A256KW, jwa.Dir}
+var jweKeyManagementAlgorithms = []jwa.Algorithm{jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512, jwa.A128KW, jwa.A192KW, jwa.A256KW, jwa.Dir, jwa.ECDHES, jwa.ECDHESA128KW, jwa.ECDHESA192KW, jwa.ECDHESA256KW}
 
 func TestAJWEKeyManagementAlgorithmCannotSignOrVerifyAJWS(t *testing.T) {
 	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto"
+	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/base64"
@@ -12,6 +13,7 @@ import (
 	"io"
 	"math"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -62,6 +64,12 @@ func pairFor(t *testing.T, alg jwa.Algorithm, enc jwa.Encryption) keyPair {
 	var public, private any
 	if alg == jwa.Dir {
 		public = DirectKey{Key: randomBytes(t, cekSizes[enc]), Enc: enc}
+	} else if slices.Contains(keyAgreement, alg) {
+		key, err := ecdh.P256().GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		public, private = key.PublicKey(), key
 	} else if size, shared := sharedKeySizes[alg]; shared {
 		public = randomBytes(t, size)
 	} else {
@@ -81,7 +89,9 @@ func pairFor(t *testing.T, alg jwa.Algorithm, enc jwa.Encryption) keyPair {
 	return keyPair{encrypter: encrypter, decrypter: decrypter}
 }
 
-var allKeyManagement = []jwa.Algorithm{jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512, jwa.A128KW, jwa.A192KW, jwa.A256KW, jwa.Dir}
+var keyAgreement = []jwa.Algorithm{jwa.ECDHES, jwa.ECDHESA128KW, jwa.ECDHESA192KW, jwa.ECDHESA256KW}
+
+var allKeyManagement = append([]jwa.Algorithm{jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512, jwa.A128KW, jwa.A192KW, jwa.A256KW, jwa.Dir}, keyAgreement...)
 
 func TestEncrypt_RoundTripsEveryAlgAndEnc(t *testing.T) {
 	for _, alg := range allKeyManagement {
@@ -161,7 +171,7 @@ func encodeParts(parts [5][]byte) string {
 }
 
 func TestDecrypt_RefusesATokenWithAnyOctetChanged(t *testing.T) {
-	for _, alg := range []jwa.Algorithm{jwa.RSAOAEP256, jwa.A256KW, jwa.Dir} {
+	for _, alg := range []jwa.Algorithm{jwa.RSAOAEP256, jwa.A256KW, jwa.Dir, jwa.ECDHES, jwa.ECDHESA256KW} {
 		for _, enc := range []jwa.Encryption{jwa.A128CBCHS256, jwa.A256GCM} {
 			pair := pairFor(t, alg, enc)
 			token, err := Encrypt(pair.encrypter, enc, []byte("a plaintext of more than one block"), nil)
@@ -193,7 +203,7 @@ func TestDecrypt_RefusesATokenWithAnyOctetChanged(t *testing.T) {
 }
 
 func TestDecrypt_AHeaderChangedToOtherValidJSONFailsTheTag(t *testing.T) {
-	for _, alg := range []jwa.Algorithm{jwa.RSAOAEP256, jwa.A256KW, jwa.Dir} {
+	for _, alg := range []jwa.Algorithm{jwa.RSAOAEP256, jwa.A256KW, jwa.Dir, jwa.ECDHES, jwa.ECDHESA256KW} {
 		for _, enc := range []jwa.Encryption{jwa.A128CBCHS256, jwa.A256GCM} {
 			t.Run(alg.String()+"/"+enc.String(), func(t *testing.T) {
 				pair := pairFor(t, alg, enc)
@@ -256,7 +266,7 @@ func TestDecrypt_ATokenOfOnlyDotsIsRefusedWithoutSplittingItAll(t *testing.T) {
 }
 
 func TestDecrypt_EveryFailureToDecryptIsTheSameError(t *testing.T) {
-	for _, alg := range []jwa.Algorithm{jwa.RSAOAEP, jwa.A128KW, jwa.Dir} {
+	for _, alg := range []jwa.Algorithm{jwa.RSAOAEP, jwa.A128KW, jwa.Dir, jwa.ECDHES, jwa.ECDHESA128KW} {
 		t.Run(alg.String(), func(t *testing.T) {
 			pair := pairFor(t, alg, jwa.A128GCM)
 			token, err := Encrypt(pair.encrypter, jwa.A128GCM, []byte("p"), nil)

@@ -58,7 +58,7 @@ func exampleDecrypter(t *testing.T, example testvectors.JWEExample) model.Decryp
 
 func TestDecrypt_RecoversThePlaintextOfEachRFCExample(t *testing.T) {
 	byID := examples(t)
-	for _, id := range []string{"RFC7516-A.1", "RFC7516-A.3", "RFC7520-5.2", "RFC7520-5.6", "RFC7520-5.8"} {
+	for _, id := range []string{"RFC7516-A.1", "RFC7516-A.3", "RFC7520-5.2", "RFC7520-5.4", "RFC7520-5.5", "RFC7520-5.6", "RFC7520-5.8"} {
 		t.Run(id, func(t *testing.T) {
 			example := byID[id]
 			head, plaintext, _, err := Decrypt(context.Background(), example.Compact, []model.Decrypter{exampleDecrypter(t, example)}, nil)
@@ -81,10 +81,14 @@ func TestDecrypt_RecoversThePlaintextOfEachRFCExample(t *testing.T) {
 
 func TestDecrypter_RecoversTheCEKOfEachRFCExample(t *testing.T) {
 	byID := examples(t)
-	for _, id := range []string{"RFC7516-A.1", "RFC7516-A.3", "RFC7520-5.2", "RFC7520-5.6", "RFC7520-5.8"} {
+	for _, id := range []string{"RFC7516-A.1", "RFC7516-A.3", "RFC7520-5.2", "RFC7520-5.4", "RFC7520-5.5", "RFC7520-5.6", "RFC7520-5.8"} {
 		t.Run(id, func(t *testing.T) {
 			example := byID[id]
-			cek, err := exampleDecrypter(t, example).Decrypt(nil, example.EncryptedKey, model.DecrypterOpts{Enc: jwa.GetEncryption(example.Enc)})
+			head, err := jsonutils.DecodeBase64urlMap(example.ProtectedHeader)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cek, err := exampleDecrypter(t, example).Decrypt(nil, example.EncryptedKey, model.DecrypterOpts{Header: head, Enc: jwa.GetEncryption(example.Enc)})
 			if err != nil {
 				t.Fatalf("[RFC 7516 5.2 step 10] %s: %s", id, err)
 			}
@@ -133,7 +137,7 @@ func TestEncrypter_WrapsTheCEKAsEachRFCExampleDoes(t *testing.T) {
 
 func TestDecrypt_RefusesEachRFCExampleThisLibraryDoesNotImplement(t *testing.T) {
 	byID := examples(t)
-	for _, id := range []string{"RFC7520-5.3", "RFC7520-5.4", "RFC7520-5.5", "RFC7520-5.7", "RFC7520-5.9"} {
+	for _, id := range []string{"RFC7520-5.3", "RFC7520-5.7", "RFC7520-5.9"} {
 		t.Run(id, func(t *testing.T) {
 			example := byID[id]
 			decrypter, err := GetDecrypter(jwa.A128KW, make([]byte, 16))

@@ -6,7 +6,7 @@ This file gives guidance to Claude Code (claude.ai/code) when it works in this r
 
 A zero-dependency Go implementation of the JOSE standards: JWS (RFC 7515), JWE (RFC 7516), JWK (RFC 7517), JWA (RFC 7518) and JWT (RFC 7519). It is a library, not a service.
 
-JWE is the Compact Serialization only, with the RSA-OAEP family, AES Key Wrap and `dir` for key management and all six RFC 7518 section 5 content encryption algorithms. `RSA1_5` is left out on purpose (RFC 8725 section 3.2). A `dir` key is a `jwe.DirectKey` bound to one `enc` (RFC 8725 section 3.1), and `jwe.Decrypt` returns the decrypter that succeeded so a caller never has to trust `kid`. ECDH-ES, AES GCM key wrap, PBES2, `zip`, nested JWTs and HPKE are planned under issue #72 and not yet implemented.
+JWE is the Compact Serialization only, with the RSA-OAEP family, ECDH-ES (P-256, P-384, P-521 and X25519, direct and with AES Key Wrap), AES Key Wrap and `dir` for key management and all six RFC 7518 section 5 content encryption algorithms. `RSA1_5` is left out on purpose (RFC 8725 section 3.2). A `dir` key is a `jwe.DirectKey` bound to one `enc` (RFC 8725 section 3.1), and `jwe.Decrypt` returns the decrypter that succeeded so a caller never has to trust `kid`. AES GCM key wrap, PBES2, `zip`, nested JWTs and HPKE are planned under issue #72 and not yet implemented.
 
 ## Commands
 
@@ -89,6 +89,10 @@ RFC 7516 section 11.5 requires a recipient not to reveal which step of decryptio
 ### A JWE header's key parameters name the recipient's public key
 
 In a JWS, `jku`, `jwk`, `x5u` and `x5c` name the key that verifies. In a JWE they name the public key the sender encrypted to, which cannot decrypt. So `jwe.Decrypt` never fetches or reads them, and the caller's decrypters are the only keys. Do not route a JWE header through `header.ValidateHeader`, which builds retrievers for them. `header.ValidateJWEHeader` is the JWE path.
+
+### An ECDH-ES `epk` is checked twice, for different reasons
+
+`header.ValidateJWEHeader` checks that the `epk` is a valid public key on a supported curve, with no private member. Those faults depend on the token alone, so they are `ErrMalformedToken` and are refused before any decrypter runs. `ecdhes.Decrypter` then checks that the `epk` is on its own key's curve, as RFC 8725 section 3.4 requires. That fault depends on the recipient's key, so it is the uniform `ErrDecryptionFailed`. Keep both checks: the first stops an invalid point reaching `crypto/ecdh`, and the second stops a valid point on another curve reaching the key agreement. An X25519 key is never a signing key (RFC 8037 section 3.2), so no signer or validator may accept an `*ecdh` key.
 
 ## Conventions
 

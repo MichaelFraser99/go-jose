@@ -1,6 +1,7 @@
 package header
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"strings"
 
 	"errors"
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/ecdhes"
 	"github.com/MichaelFraser99/go-jose/internal/httputils"
 	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
 	"github.com/MichaelFraser99/go-jose/internal/jose/jwk"
@@ -78,6 +80,49 @@ func ValidateHeader(ctx context.Context, header map[string]any, client *http.Cli
 	return jwkRetrievers, nil
 }
 
+func checkPartyInfo(header map[string]any) error {
+	decoded := map[string][]byte{}
+	for _, name := range []string{"apu", "apv"} {
+		raw, present := header[name]
+		if !present {
+			continue
+		}
+		encoded, ok := raw.(string)
+		if !ok {
+			return fmt.Errorf("%wthe '%s' header must be a base64url string", joseerror.ErrMalformedClaim, name)
+		}
+		value, err := jsonutils.DecodeBase64url(encoded)
+		if err != nil {
+			return fmt.Errorf("%wthe '%s' header must be a base64url string", joseerror.ErrMalformedClaim, name)
+		}
+		decoded[name] = value
+	}
+	partyU, hasU := decoded["apu"]
+	partyV, hasV := decoded["apv"]
+	if hasU && hasV && bytes.Equal(partyU, partyV) {
+		return fmt.Errorf("%wthe 'apu' and 'apv' headers must be distinct (RFC 7518 section 4.6.2)", joseerror.ErrMalformedClaim)
+	}
+	return nil
+}
+
+func checkEphemeralKey(header map[string]any) error {
+	raw, present := header["epk"]
+	if !present {
+		return fmt.Errorf("%wthe 'epk' header is required for ECDH-ES (RFC 7518 section 4.6.1.1)", joseerror.ErrMissingClaim)
+	}
+	epk, ok := raw.(map[string]any)
+	if !ok {
+		return fmt.Errorf("%wthe 'epk' header must be a JSON object", joseerror.ErrMalformedClaim)
+	}
+	if _, err := ecdhes.EphemeralPublicKey(epk); err != nil {
+		if errors.Is(err, joseerror.ErrUnsupportedAlgorithm) {
+			return err
+		}
+		return fmt.Errorf("%wthe 'epk' header is not a valid public key: %w", joseerror.ErrMalformedClaim, err)
+	}
+	return nil
+}
+
 func malformed(err error) error {
 	return fmt.Errorf("%werror validating header: %w", joseerror.ErrMalformedToken, err)
 }
@@ -87,7 +132,10 @@ var KeyManagementAlgorithms = []jwa.Algorithm{
 	jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512,
 	jwa.A128KW, jwa.A192KW, jwa.A256KW,
 	jwa.Dir,
+	jwa.ECDHES, jwa.ECDHESA128KW, jwa.ECDHESA192KW, jwa.ECDHESA256KW,
 }
+
+var keyAgreementAlgorithms = []jwa.Algorithm{jwa.ECDHES, jwa.ECDHESA128KW, jwa.ECDHESA192KW, jwa.ECDHESA256KW}
 
 // ValidateJWEHeader checks a decoded JWE Protected Header, as RFC 7516 section
 // 5.2 step 5 requires, and returns the alg and enc it names.
@@ -117,6 +165,14 @@ func ValidateJWEHeader(header map[string]any, opts *model.JoseOptions) (jwa.Algo
 	}
 	if _, err := readHeaderShape(header, jweMode); err != nil {
 		return jwa.Unknown, jwa.UnknownEncryption, malformed(err)
+	}
+	if slices.Contains(keyAgreementAlgorithms, jwa.GetAlgorithm(*algName)) {
+		if err := checkEphemeralKey(header); err != nil {
+			if errors.Is(err, joseerror.ErrUnsupportedAlgorithm) {
+				return jwa.Unknown, jwa.UnknownEncryption, err
+			}
+			return jwa.Unknown, jwa.UnknownEncryption, malformed(err)
+		}
 	}
 
 	alg := jwa.GetAlgorithm(*algName)
@@ -276,6 +332,12 @@ func readHeaderShape(header map[string]any, mode mode) (headerShape, error) {
 
 	for _, name := range []string{"typ", "cty"} {
 		if _, err := jsonutils.RetrieveClaim[string](header, name); err != nil && !errors.Is(err, joseerror.ErrMissingClaim) {
+			return headerShape{}, err
+		}
+	}
+
+	if mode == jweMode {
+		if err := checkPartyInfo(header); err != nil {
 			return headerShape{}, err
 		}
 	}

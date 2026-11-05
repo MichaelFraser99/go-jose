@@ -7,6 +7,7 @@ import (
 
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/direct"
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/ecdhes"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/keywrap"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/rsaoaep"
 	"github.com/MichaelFraser99/go-jose/joseerror"
@@ -46,10 +47,13 @@ func (d *directDecrypter) Public() crypto.PublicKey {
 //
 // For RSA-OAEP, RSA-OAEP-256, RSA-OAEP-384 and RSA-OAEP-512, key is the
 // recipient's *rsa.PublicKey with a modulus of 2048 to 8192 bits (RFC 7518
-// section 4.3 sets the minimum). For
-// A128KW, A192KW and A256KW, key is the shared key of 16, 24 or 32 octets
-// (section 4.4), or what Public returns for one. For dir, key is a DirectKey
-// (section 4.5), and Encrypt refuses any other enc. A shared key is copied.
+// section 4.3 sets the minimum). For ECDH-ES, ECDH-ES+A128KW, ECDH-ES+A192KW
+// and ECDH-ES+A256KW, key is the recipient's *ecdsa.PublicKey on P-256, P-384
+// or P-521, or *ecdh.PublicKey on one of those curves or X25519 (section 4.6,
+// RFC 8037 section 3.2). For A128KW, A192KW and A256KW, key is the shared key
+// of 16, 24 or 32 octets (section 4.4), or what Public returns for one. For
+// dir, key is a DirectKey (section 4.5), and Encrypt refuses any other enc. A
+// shared key is copied.
 //
 // A shared key has no public half, so the Public method of an A128KW, A192KW,
 // A256KW or dir Encrypter returns the secret itself, as an HMAC Signer's does.
@@ -66,6 +70,8 @@ func GetEncrypter(alg jwa.Algorithm, key crypto.PublicKey) (model.Encrypter, err
 	switch alg {
 	case jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512:
 		e, err = rsaoaep.NewEncrypter(alg, key)
+	case jwa.ECDHES, jwa.ECDHESA128KW, jwa.ECDHESA192KW, jwa.ECDHESA256KW:
+		e, err = ecdhes.NewEncrypter(alg, key)
 	case jwa.A128KW, jwa.A192KW, jwa.A256KW:
 		secret, ok := secretBytes(key)
 		if !ok {
@@ -99,9 +105,13 @@ func GetEncrypter(alg jwa.Algorithm, key crypto.PublicKey) (model.Encrypter, err
 // For RSA-OAEP, RSA-OAEP-256, RSA-OAEP-384 and RSA-OAEP-512, key is an
 // *rsa.PrivateKey, or a crypto.Decrypter whose Public is an *rsa.PublicKey and
 // which accepts *rsa.OAEPOptions, with a modulus of 2048 to 8192 bits (RFC 7518
-// section 4.3 sets the minimum). For A128KW, A192KW, A256KW and dir, key is the shared key as
-// GetEncrypter takes it. A dir Decrypter decrypts only a JWE whose "enc" is the
-// DirectKey's; any other fails as ErrDecryptionFailed.
+// section 4.3 sets the minimum). For the ECDH-ES algorithms, key is an
+// *ecdsa.PrivateKey on P-256, P-384 or P-521, or an *ecdh.PrivateKey on one of
+// those curves or X25519, and a JWE whose "epk" is on another curve fails as
+// ErrDecryptionFailed (RFC 8725 section 3.4). For A128KW, A192KW, A256KW and
+// dir, key is the shared key as GetEncrypter takes it. A dir Decrypter
+// decrypts only a JWE whose "enc" is the DirectKey's; any other fails as
+// ErrDecryptionFailed.
 func GetDecrypter(alg jwa.Algorithm, key crypto.PrivateKey) (model.Decrypter, error) {
 	var d model.Decrypter
 	var err error
@@ -109,6 +119,8 @@ func GetDecrypter(alg jwa.Algorithm, key crypto.PrivateKey) (model.Decrypter, er
 	switch alg {
 	case jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512:
 		d, err = rsaoaep.NewDecrypter(alg, key)
+	case jwa.ECDHES, jwa.ECDHESA128KW, jwa.ECDHESA192KW, jwa.ECDHESA256KW:
+		d, err = ecdhes.NewDecrypter(alg, key)
 	case jwa.A128KW, jwa.A192KW, jwa.A256KW:
 		secret, ok := secretBytes(key)
 		if !ok {

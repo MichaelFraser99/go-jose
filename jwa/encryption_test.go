@@ -4,14 +4,18 @@ import "testing"
 
 func TestKeyManagementAlgorithm_NamesAreTheRegisteredOnes(t *testing.T) {
 	tests := map[Algorithm]string{
-		RSAOAEP:    "RSA-OAEP",
-		RSAOAEP256: "RSA-OAEP-256",
-		RSAOAEP384: "RSA-OAEP-384",
-		RSAOAEP512: "RSA-OAEP-512",
-		A128KW:     "A128KW",
-		A192KW:     "A192KW",
-		A256KW:     "A256KW",
-		Dir:        "dir",
+		RSAOAEP:      "RSA-OAEP",
+		RSAOAEP256:   "RSA-OAEP-256",
+		RSAOAEP384:   "RSA-OAEP-384",
+		RSAOAEP512:   "RSA-OAEP-512",
+		A128KW:       "A128KW",
+		A192KW:       "A192KW",
+		A256KW:       "A256KW",
+		Dir:          "dir",
+		ECDHES:       "ECDH-ES",
+		ECDHESA128KW: "ECDH-ES+A128KW",
+		ECDHESA192KW: "ECDH-ES+A192KW",
+		ECDHESA256KW: "ECDH-ES+A256KW",
 	}
 	for alg, name := range tests {
 		if alg.String() != name {
@@ -24,7 +28,7 @@ func TestKeyManagementAlgorithm_NamesAreTheRegisteredOnes(t *testing.T) {
 			t.Errorf("%q must not be the zero value", name)
 		}
 	}
-	for _, name := range []string{"RSA1_5", "rsa-oaep", "DIR", "A128kw"} {
+	for _, name := range []string{"RSA1_5", "rsa-oaep", "DIR", "A128kw", "ecdh-es", "ECDH-ES+A128GCMKW", "ECDH-1PU"} {
 		if GetAlgorithm(name) != Unknown {
 			t.Errorf("[RFC 8725 3.2, RFC 7515 4.1.1] %q is not an algorithm this library supports, so it must be Unknown", name)
 		}
