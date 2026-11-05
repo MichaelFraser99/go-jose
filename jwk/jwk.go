@@ -2,6 +2,7 @@ package jwk
 
 import (
 	"crypto"
+	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/mldsa"
@@ -14,18 +15,26 @@ import (
 
 // PublicFromJwk reads a public key from its jwk. An "oct" jwk is refused with
 // ErrInvalidPublicKey: a symmetric key (RFC 7518 section 6.4) has no public half.
+// An "OKP" jwk of subtype X25519 is returned as an *ecdh.PublicKey, which RFC
+// 8037 section 3.2 bars from signing, and of any subtype other than Ed25519 and
+// X25519 is refused with ErrUnsupportedAlgorithm.
 func PublicFromJwk(jwk map[string]any) (crypto.PublicKey, error) {
 	return internal_jwk.PublicFromJwk(jwk)
 }
 
 // PublicJwk builds the jwk of a public key. A symmetric key is refused with
-// ErrInvalidPublicKey, as it has no public half.
+// ErrInvalidPublicKey, as it has no public half. An *ecdh.PublicKey on X25519
+// becomes an "OKP" jwk (RFC 8037 section 2), and one on P-256, P-384 or P-521
+// the "EC" jwk of the same point, which PublicFromJwk reads as an
+// *ecdsa.PublicKey.
 func PublicJwk(publicKey crypto.PublicKey) (*map[string]any, error) {
 	var m map[string]any
 	var err error
 	switch key := publicKey.(type) {
 	case *ecdsa.PublicKey:
 		m, err = common.JwkFromECDSAPublicKey(key)
+	case *ecdh.PublicKey:
+		m, err = common.JwkFromECDHPublicKey(key)
 	case *rsa.PublicKey:
 		m, err = common.JwkFromRSAPublicKey(key)
 	case *ed25519.PublicKey:
@@ -47,20 +56,27 @@ func PublicJwk(publicKey crypto.PublicKey) (*map[string]any, error) {
 
 // PrivateFromJwk reads a private or symmetric key from its jwk. An "oct" jwk
 // (RFC 7518 section 6.4) is returned as a []byte; its "k" must be present,
-// strict base64url and not empty.
+// strict base64url and not empty. An "OKP" jwk of subtype X25519 is returned as
+// an *ecdh.PrivateKey, and its "x" must be the public key of its "d" (RFC 8037
+// section 3.2.1).
 func PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error) {
 	return internal_jwk.PrivateFromJwk(jwk)
 }
 
 // PrivateJwk builds the jwk of a private key. A symmetric key, as a []byte or
 // what Public returns for one, becomes an "oct" jwk (RFC 7518 section 6.4) with
-// no "kid", as RFC 7638 section 7 says its thumbprint should be concealed.
+// no "kid", as RFC 7638 section 7 says its thumbprint should be concealed. An
+// *ecdh.PrivateKey on X25519 becomes an "OKP" jwk (RFC 8037 section 2), and one
+// on P-256, P-384 or P-521 the "EC" jwk of the same scalar, which
+// PrivateFromJwk reads as an *ecdsa.PrivateKey.
 func PrivateJwk(privateKey crypto.PrivateKey) (*map[string]any, error) {
 	var m map[string]any
 	var err error
 	switch key := privateKey.(type) {
 	case *ecdsa.PrivateKey:
 		m, err = common.JwkFromECDSAPrivateKey(key)
+	case *ecdh.PrivateKey:
+		m, err = common.JwkFromECDHPrivateKey(key)
 	case *rsa.PrivateKey:
 		m, err = common.JwkFromRSAPrivateKey(key)
 	case *ed25519.PrivateKey:

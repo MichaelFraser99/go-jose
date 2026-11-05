@@ -81,7 +81,7 @@ func PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error) {
 			}
 			return key, nil
 		case "OKP":
-			key, err := common.EdDSAPrivateKeyFromJwk(jwk)
+			key, err := common.OKPPrivateKeyFromJwk(jwk)
 			if err != nil {
 				return nil, err
 			}
@@ -128,7 +128,7 @@ func PublicFromJwk(jwk map[string]any) (crypto.PublicKey, error) {
 			}
 			return key, nil
 		case "OKP":
-			key, err := common.EdDSAPublicKeyFromJwk(jwk)
+			key, err := common.OKPPublicKeyFromJwk(jwk)
 			if err != nil {
 				return nil, err
 			}

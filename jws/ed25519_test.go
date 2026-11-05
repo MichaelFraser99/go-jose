@@ -209,8 +209,8 @@ func TestGetValidatorFromJwk_BindsAnOKPKeyToEitherEdDSAIdentifier(t *testing.T) 
 		want   error
 		clause string
 	}{
-		"an X25519 key for Ed25519":            {jwa.Ed25519, with("crv", "X25519"), joseerror.ErrUnsupportedAlgorithm, "RFC 9864 4.1.1"},
-		"an X25519 key for EdDSA":              {jwa.EdDSA, with("crv", "X25519"), joseerror.ErrUnsupportedAlgorithm, "RFC 8037 3.1"},
+		"an X25519 key for Ed25519":            {jwa.Ed25519, with("crv", "X25519"), joseerror.ErrInvalidPublicKey, "RFC 8037 3.2"},
+		"an X25519 key for EdDSA":              {jwa.EdDSA, with("crv", "X25519"), joseerror.ErrInvalidPublicKey, "RFC 8037 3.2"},
 		"an Ed448 key for Ed25519":             {jwa.Ed25519, with("crv", "Ed448"), joseerror.ErrUnsupportedAlgorithm, "RFC 9864 4.1.1"},
 		"an Ed448 key for EdDSA":               {jwa.EdDSA, with("crv", "Ed448"), joseerror.ErrUnsupportedAlgorithm, "RFC 8037 3.1"},
 		"an EC key for Ed25519":                {jwa.Ed25519, *ecJwk, joseerror.ErrInvalidPublicKey, "RFC 9864 4.1.1"},

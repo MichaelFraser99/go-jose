@@ -26,7 +26,7 @@ func okpJwk(t *testing.T, crv any, withPrivate bool) map[string]any {
 	return jwk
 }
 
-func TestFromJwk_AnOKPKeyMustNameTheEd25519Subtype(t *testing.T) {
+func TestFromJwk_AnEd25519KeyMustNameASupportedSubtype(t *testing.T) {
 	tests := map[string]struct {
 		crv       any
 		reference string
@@ -35,7 +35,6 @@ func TestFromJwk_AnOKPKeyMustNameTheEd25519Subtype(t *testing.T) {
 	}{
 		"Ed25519":           {crv: "Ed25519", reference: "RFC 8037 3.1"},
 		"Ed448":             {crv: "Ed448", reference: "RFC 8037 3.1", public: joseerror.ErrUnsupportedAlgorithm, private: joseerror.ErrUnsupportedAlgorithm},
-		"X25519":            {crv: "X25519", reference: "RFC 8037 3.2", public: joseerror.ErrUnsupportedAlgorithm, private: joseerror.ErrUnsupportedAlgorithm},
 		"X448":              {crv: "X448", reference: "RFC 8037 3.2", public: joseerror.ErrUnsupportedAlgorithm, private: joseerror.ErrUnsupportedAlgorithm},
 		"a lower case name": {crv: "ed25519", reference: "RFC 8037 2", public: joseerror.ErrUnsupportedAlgorithm, private: joseerror.ErrUnsupportedAlgorithm},
 		"absent":            {crv: nil, reference: "RFC 8037 2", public: joseerror.ErrInvalidPublicKey, private: joseerror.ErrInvalidPrivateKey},
