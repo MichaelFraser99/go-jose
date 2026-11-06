@@ -200,8 +200,8 @@ func TestFromJwk_RefusesAnX25519JwkWithOneFault(t *testing.T) {
 		"d of 33 octets":                    {jwk: with("d", encode(append(bytes.Clone(d), 0))), private: joseerror.ErrInvalidPrivateKey, privateClause: "RFC 7748 5"},
 		"d a number":                        {jwk: with("d", 7), private: joseerror.ErrMalformedClaim, privateClause: "RFC 8037 2"},
 		"d with padding":                    {jwk: with("d", encode(d)+"="), private: joseerror.ErrMalformedClaim, privateClause: "RFC 7515 2"},
-		"x the public key of another d":     {jwk: with("x", encode(other.PublicKey().Bytes())), private: joseerror.ErrInvalidPrivateKey, privateClause: "RFC 8037 3.2.1"},
-		"x a non-canonical encoding of d's": {jwk: with("x", encode(highBitX)), private: joseerror.ErrInvalidPrivateKey, privateClause: "RFC 8037 3.2.1"},
+		"x the public key of another d":     {jwk: with("x", encode(other.PublicKey().Bytes())), private: joseerror.ErrInvalidPrivateKey, privateClause: "RFC 8037 2"},
+		"x a non-canonical encoding of d's": {jwk: with("x", encode(highBitX)), private: joseerror.ErrInvalidPrivateKey, privateClause: "RFC 7748 6.1"},
 	}
 
 	for name, test := range tests {

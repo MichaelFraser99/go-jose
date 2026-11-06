@@ -10,12 +10,14 @@ import (
 	"crypto"
 	"crypto/ecdh"
 	"crypto/ecdsa"
+	"crypto/elliptic"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
 
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/aeskw"
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/concatkdf"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/contentenc"
 	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
@@ -54,6 +56,14 @@ var curveNames = map[ecdh.Curve]string{
 	ecdh.X25519(): "X25519",
 }
 
+func nistCurve(curve elliptic.Curve) bool {
+	switch curve {
+	case elliptic.P256(), elliptic.P384(), elliptic.P521():
+		return true
+	}
+	return false
+}
+
 func checkAlg(alg jwa.Algorithm) error {
 	if _, ok := wrapKeySizes[alg]; !ok {
 		return fmt.Errorf("%w'%s' is not an ECDH-ES algorithm", joseerror.ErrUnsupportedAlgorithm, alg)
@@ -71,8 +81,11 @@ func NewEncrypter(alg jwa.Algorithm, publicKey crypto.PublicKey) (*Encrypter, er
 	var public *ecdh.PublicKey
 	switch key := publicKey.(type) {
 	case *ecdsa.PublicKey:
-		if key == nil {
+		if key == nil || !nistCurve(key.Curve) {
 			return nil, fmt.Errorf("%wan ECDH-ES key must be on P-256, P-384 or P-521", joseerror.ErrInvalidPublicKey)
+		}
+		if err := common.CheckECDSAPublicKey(key, key.Curve, joseerror.ErrInvalidPublicKey); err != nil {
+			return nil, err
 		}
 		converted, err := key.ECDH()
 		if err != nil {
@@ -92,7 +105,8 @@ func NewEncrypter(alg jwa.Algorithm, publicKey crypto.PublicKey) (*Encrypter, er
 
 // NewDecrypter returns a Decrypter for alg with privateKey, an
 // *ecdsa.PrivateKey on P-256, P-384 or P-521, or an *ecdh.PrivateKey on one of
-// those curves or X25519.
+// those curves or X25519. An *ecdsa.PrivateKey's point must be the public point
+// of its scalar d, as RFC 7518 section 6.2.2.1 requires.
 func NewDecrypter(alg jwa.Algorithm, privateKey crypto.PrivateKey) (*Decrypter, error) {
 	if err := checkAlg(alg); err != nil {
 		return nil, err
@@ -100,8 +114,11 @@ func NewDecrypter(alg jwa.Algorithm, privateKey crypto.PrivateKey) (*Decrypter, 
 	var private *ecdh.PrivateKey
 	switch key := privateKey.(type) {
 	case *ecdsa.PrivateKey:
-		if key == nil {
+		if key == nil || !nistCurve(key.Curve) {
 			return nil, fmt.Errorf("%wan ECDH-ES key must be on P-256, P-384 or P-521", joseerror.ErrInvalidPrivateKey)
+		}
+		if err := common.CheckECDSAPrivateKey(key, key.Curve); err != nil {
+			return nil, err
 		}
 		converted, err := key.ECDH()
 		if err != nil {
@@ -138,9 +155,9 @@ func (encrypter *Encrypter) WrapKey(rand io.Reader, enc jwa.Encryption, header m
 	if _, present := header["epk"]; present {
 		return nil, nil, fmt.Errorf("%wthe 'epk' header is generated for each token and must not be given", joseerror.ErrMalformedClaim)
 	}
-	partyU, partyV, err := partyInfo(header)
+	partyU, partyV, err := PartyInfo(header)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w%s", joseerror.ErrMalformedClaim, err.Error())
+		return nil, nil, err
 	}
 	ephemeral, err := encrypter.public.Curve().GenerateKey(rand)
 	if err != nil {
@@ -199,11 +216,11 @@ func (decrypter *Decrypter) Decrypt(_ io.Reader, msg []byte, opts crypto.Decrypt
 	if !ok {
 		return nil, ErrKeyAgreement
 	}
-	public, err := ephemeralPublicKey(epk, decrypter.private.Curve())
+	public, err := EphemeralPublicKey(epk)
 	if err != nil {
 		return nil, ErrKeyAgreement
 	}
-	partyU, partyV, err := partyInfo(options.Header)
+	partyU, partyV, err := PartyInfo(options.Header)
 	if err != nil {
 		return nil, ErrKeyAgreement
 	}
@@ -235,7 +252,10 @@ func derive(alg jwa.Algorithm, enc jwa.Encryption, z, partyU, partyV []byte) ([]
 	return concatkdf.Derive(z, wrapKeySizes[alg]*8, []byte(alg.String()), partyU, partyV)
 }
 
-func partyInfo(header map[string]any) (partyU, partyV []byte, err error) {
+// PartyInfo reads the "apu" and "apv" headers that enter the Concat KDF. Each
+// is a base64url string, and RFC 7518 section 4.6.2 requires the two to be
+// distinct; any other value is refused with ErrMalformedClaim.
+func PartyInfo(header map[string]any) (partyU, partyV []byte, err error) {
 	for _, name := range []string{"apu", "apv"} {
 		raw, present := header[name]
 		if !present {
@@ -243,11 +263,11 @@ func partyInfo(header map[string]any) (partyU, partyV []byte, err error) {
 		}
 		encoded, ok := raw.(string)
 		if !ok {
-			return nil, nil, fmt.Errorf("the '%s' header must be a base64url string", name)
+			return nil, nil, fmt.Errorf("%wthe '%s' header must be a base64url string", joseerror.ErrMalformedClaim, name)
 		}
 		decoded, err := jsonutils.DecodeBase64url(encoded)
 		if err != nil {
-			return nil, nil, fmt.Errorf("the '%s' header must be a base64url string", name)
+			return nil, nil, fmt.Errorf("%wthe '%s' header must be a base64url string", joseerror.ErrMalformedClaim, name)
 		}
 		if name == "apu" {
 			partyU = decoded
@@ -258,17 +278,30 @@ func partyInfo(header map[string]any) (partyU, partyV []byte, err error) {
 	_, hasU := header["apu"]
 	_, hasV := header["apv"]
 	if hasU && hasV && bytes.Equal(partyU, partyV) {
-		return nil, nil, errors.New("the 'apu' and 'apv' headers must be distinct (RFC 7518 section 4.6.2)")
+		return nil, nil, fmt.Errorf("%wthe 'apu' and 'apv' headers must be distinct (RFC 7518 section 4.6.2)", joseerror.ErrMalformedClaim)
 	}
 	return partyU, partyV, nil
 }
 
 // EphemeralPublicKey reads an "epk" header as a public key on a curve this
 // package implements, refusing one that carries a private member, as RFC 7518
-// section 4.6.1.1 requires.
+// section 4.6.1.1 requires. A key that cannot agree a key at all, one whose
+// "kty" is not "EC" or "OKP", or an OKP key whose subtype is not X25519 or
+// X448 (RFC 8037 section 3.2), is ErrMalformedClaim. An EC or OKP key on a
+// curve this package does not implement, such as X448, is
+// ErrUnsupportedAlgorithm.
 func EphemeralPublicKey(epk map[string]any) (*ecdh.PublicKey, error) {
 	if _, private := epk["d"]; private {
 		return nil, fmt.Errorf("%wthe 'epk' header must hold only public key members", joseerror.ErrMalformedClaim)
+	}
+	switch epk["kty"] {
+	case "EC":
+	case "OKP":
+		if crv := epk["crv"]; crv != "X25519" && crv != "X448" {
+			return nil, fmt.Errorf("%wthe 'epk' header is an OKP key of a subtype other than X25519 or X448, so it cannot agree a key (RFC 8037 section 3.2)", joseerror.ErrMalformedClaim)
+		}
+	default:
+		return nil, fmt.Errorf("%wthe 'epk' header is not an EC or OKP key, so it cannot agree a key (RFC 7518 section 4.6)", joseerror.ErrMalformedClaim)
 	}
 	key, err := internal_jwk.PublicFromJwk(epk)
 	if err != nil {
@@ -285,17 +318,6 @@ func EphemeralPublicKey(epk map[string]any) (*ecdh.PublicKey, error) {
 		return converted, nil
 	}
 	return nil, fmt.Errorf("%wthe 'epk' header is not an EC or X25519 key, so it cannot agree a key (RFC 8037 section 3.2)", joseerror.ErrMalformedClaim)
-}
-
-func ephemeralPublicKey(epk map[string]any, curve ecdh.Curve) (*ecdh.PublicKey, error) {
-	public, err := EphemeralPublicKey(epk)
-	if err != nil {
-		return nil, err
-	}
-	if public.Curve() != curve {
-		return nil, errors.New("the 'epk' header is on another curve")
-	}
-	return public, nil
 }
 
 func publicJwk(public *ecdh.PublicKey) map[string]any {

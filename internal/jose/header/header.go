@@ -1,7 +1,6 @@
 package header
 
 import (
-	"bytes"
 	"context"
 	"crypto"
 	"fmt"
@@ -80,29 +79,16 @@ func ValidateHeader(ctx context.Context, header map[string]any, client *http.Cli
 	return jwkRetrievers, nil
 }
 
-func checkPartyInfo(header map[string]any) error {
-	decoded := map[string][]byte{}
-	for _, name := range []string{"apu", "apv"} {
-		raw, present := header[name]
-		if !present {
-			continue
-		}
-		encoded, ok := raw.(string)
-		if !ok {
-			return fmt.Errorf("%wthe '%s' header must be a base64url string", joseerror.ErrMalformedClaim, name)
-		}
-		value, err := jsonutils.DecodeBase64url(encoded)
-		if err != nil {
-			return fmt.Errorf("%wthe '%s' header must be a base64url string", joseerror.ErrMalformedClaim, name)
-		}
-		decoded[name] = value
+func checkKeyAgreement(header map[string]any) error {
+	alg, _ := header["alg"].(string)
+	if !slices.Contains(keyAgreementAlgorithms, jwa.GetAlgorithm(alg)) {
+		return nil
 	}
-	partyU, hasU := decoded["apu"]
-	partyV, hasV := decoded["apv"]
-	if hasU && hasV && bytes.Equal(partyU, partyV) {
-		return fmt.Errorf("%wthe 'apu' and 'apv' headers must be distinct (RFC 7518 section 4.6.2)", joseerror.ErrMalformedClaim)
+	if err := checkEphemeralKey(header); err != nil {
+		return err
 	}
-	return nil
+	_, _, err := ecdhes.PartyInfo(header)
+	return err
 }
 
 func checkEphemeralKey(header map[string]any) error {
@@ -148,9 +134,12 @@ var keyAgreementAlgorithms = []jwa.Algorithm{jwa.ECDHES, jwa.ECDHESA128KW, jwa.E
 // decompress. The parameters RFC 7516 shares with RFC 7515 have the shapes
 // CheckHeaderShape describes, except that "b64" (RFC 7797, JWS only) is not
 // read, and "crit" may name no parameter RFC 7516 or RFC 7518 defines for JWE
-// (RFC 7516 section 4.1.13). AcceptedTypes, RequireKeyIdentifier and
-// UnderstoodCriticalHeaders apply as they do to a JWS, except that "b64" in
-// UnderstoodCriticalHeaders is ignored, as RFC 7797 defines it for JWS only.
+// (RFC 7516 section 4.1.13). For an ECDH-ES alg, "epk" must be a key
+// ecdhes.EphemeralPublicKey accepts, and "apu" and "apv" must be distinct
+// base64url strings (RFC 7518 section 4.6); no other alg reads them.
+// AcceptedTypes, RequireKeyIdentifier and UnderstoodCriticalHeaders apply as
+// they do to a JWS, except that "b64" in UnderstoodCriticalHeaders is ignored,
+// as RFC 7797 defines it for JWS only.
 func ValidateJWEHeader(header map[string]any, opts *model.JoseOptions) (jwa.Algorithm, jwa.Encryption, error) {
 	if opts == nil {
 		opts = &model.JoseOptions{}
@@ -166,13 +155,11 @@ func ValidateJWEHeader(header map[string]any, opts *model.JoseOptions) (jwa.Algo
 	if _, err := readHeaderShape(header, jweMode); err != nil {
 		return jwa.Unknown, jwa.UnknownEncryption, malformed(err)
 	}
-	if slices.Contains(keyAgreementAlgorithms, jwa.GetAlgorithm(*algName)) {
-		if err := checkEphemeralKey(header); err != nil {
-			if errors.Is(err, joseerror.ErrUnsupportedAlgorithm) {
-				return jwa.Unknown, jwa.UnknownEncryption, err
-			}
-			return jwa.Unknown, jwa.UnknownEncryption, malformed(err)
+	if err := checkKeyAgreement(header); err != nil {
+		if errors.Is(err, joseerror.ErrUnsupportedAlgorithm) {
+			return jwa.Unknown, jwa.UnknownEncryption, err
 		}
+		return jwa.Unknown, jwa.UnknownEncryption, malformed(err)
 	}
 
 	alg := jwa.GetAlgorithm(*algName)
@@ -213,8 +200,10 @@ func ValidateJWEHeader(header map[string]any, opts *model.JoseOptions) (jwa.Algo
 // about to emit, as ValidateJWEHeader checks it on receipt, without its
 // allow-lists or expectations.
 func CheckJWEHeaderShape(header map[string]any) error {
-	_, err := readHeaderShape(header, jweMode)
-	return err
+	if _, err := readHeaderShape(header, jweMode); err != nil {
+		return err
+	}
+	return checkKeyAgreement(header)
 }
 
 type carriedSourceError struct {
@@ -332,12 +321,6 @@ func readHeaderShape(header map[string]any, mode mode) (headerShape, error) {
 
 	for _, name := range []string{"typ", "cty"} {
 		if _, err := jsonutils.RetrieveClaim[string](header, name); err != nil && !errors.Is(err, joseerror.ErrMissingClaim) {
-			return headerShape{}, err
-		}
-	}
-
-	if mode == jweMode {
-		if err := checkPartyInfo(header); err != nil {
 			return headerShape{}, err
 		}
 	}

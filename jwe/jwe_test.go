@@ -543,6 +543,9 @@ func TestDecrypt_AcceptsWhatTheHeaderRulesAllow(t *testing.T) {
 		{name: "a b64 that is not a boolean", head: map[string]any{"b64": "no"}},
 		{name: "an accepted typ", head: map[string]any{"typ": "JOSE"}, opts: &model.JoseOptions{AcceptedTypes: []string{"JOSE"}}},
 		{name: "an unknown parameter", head: map[string]any{"unknown": map[string]any{}}},
+		{name: "an apu equal to the apv, which only ECDH-ES reads", head: map[string]any{"apu": "QQ", "apv": "QQ"}},
+		{name: "an apu that is not a string, which only ECDH-ES reads", head: map[string]any{"apu": 1}},
+		{name: "an epk that is not a key, which only ECDH-ES reads", head: map[string]any{"epk": 1}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -640,6 +643,8 @@ func (h headerRewriter) WrapKey(random io.Reader, enc jwa.Encryption, header map
 func TestEncrypt_RefusesWhatItCannotEmit(t *testing.T) {
 	kw := pairFor(t, jwa.A128KW, jwa.A128GCM).encrypter
 	dir := pairFor(t, jwa.Dir, jwa.A128GCM).encrypter
+	agreement := pairFor(t, jwa.ECDHES, jwa.A128GCM).encrypter
+	agreementKW := pairFor(t, jwa.ECDHESA128KW, jwa.A128GCM).encrypter
 	var typedNil *headerRewriter
 	tests := []struct {
 		name      string
@@ -669,6 +674,11 @@ func TestEncrypt_RefusesWhatItCannotEmit(t *testing.T) {
 		{name: "an encrypter that deletes alg", encrypter: headerRewriter{Encrypter: kw, rewrite: func(h map[string]any) { delete(h, "alg") }}, enc: jwa.A128GCM, want: joseerror.ErrEncryptionError},
 		{name: "an encrypter returning a short CEK", encrypter: headerRewriter{Encrypter: kw, cek: make([]byte, 15)}, enc: jwa.A128GCM, want: joseerror.ErrEncryptionError},
 		{name: "a dir encrypter returning an encrypted key", encrypter: headerRewriter{Encrypter: dir, key: []byte{1}}, enc: jwa.A128GCM, want: joseerror.ErrEncryptionError},
+		{name: "an ECDH-ES encrypter returning an encrypted key", encrypter: headerRewriter{Encrypter: agreement, key: make([]byte, 24)}, enc: jwa.A128GCM, want: joseerror.ErrEncryptionError},
+		{name: "a key wrap encrypter returning an encrypted key 8 octets short", encrypter: headerRewriter{Encrypter: agreementKW, key: make([]byte, 16)}, enc: jwa.A128GCM, want: joseerror.ErrEncryptionError},
+		{name: "an ECDH-ES encrypter leaving out the epk", encrypter: headerRewriter{Encrypter: agreement, rewrite: func(h map[string]any) { delete(h, "epk") }}, enc: jwa.A128GCM, want: joseerror.ErrMissingClaim},
+		{name: "an ECDH-ES encrypter writing an epk with a private member", encrypter: headerRewriter{Encrypter: agreement, rewrite: func(h map[string]any) { h["epk"].(map[string]any)["d"] = "AAAA" }}, enc: jwa.A128GCM, want: joseerror.ErrMalformedClaim},
+		{name: "an ECDH-ES encrypter writing an apu equal to the apv", encrypter: headerRewriter{Encrypter: agreementKW, rewrite: func(h map[string]any) { h["apu"], h["apv"] = "QQ", "QQ" }}, enc: jwa.A128GCM, want: joseerror.ErrMalformedClaim},
 		{name: "an encrypter adding a malformed parameter", encrypter: headerRewriter{Encrypter: kw, rewrite: func(h map[string]any) { h["x5t"] = "not base64url!" }}, enc: jwa.A128GCM, want: joseerror.ErrMalformedClaim},
 		{name: "an encrypter of a JWS alg", encrypter: algOverride{Encrypter: kw, alg: jwa.RS256}, enc: jwa.A128GCM, want: joseerror.ErrUnsupportedAlgorithm},
 		{name: "an encrypter of an alg outside the enumeration", encrypter: algOverride{Encrypter: kw, alg: jwa.Algorithm(999)}, enc: jwa.A128GCM, want: joseerror.ErrUnsupportedAlgorithm},

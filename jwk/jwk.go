@@ -58,7 +58,7 @@ func PublicJwk(publicKey crypto.PublicKey) (*map[string]any, error) {
 // (RFC 7518 section 6.4) is returned as a []byte; its "k" must be present,
 // strict base64url and not empty. An "OKP" jwk of subtype X25519 is returned as
 // an *ecdh.PrivateKey, and its "x" must be the public key of its "d" (RFC 8037
-// section 3.2.1).
+// section 2).
 func PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error) {
 	return internal_jwk.PrivateFromJwk(jwk)
 }

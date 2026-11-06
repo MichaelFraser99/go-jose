@@ -333,9 +333,10 @@ func X25519PublicKeyFromJwk(jwk map[string]any) (*ecdh.PublicKey, error) {
 }
 
 // X25519PrivateKeyFromJwk reads the jwk of an X25519 private key. RFC 8037
-// section 2 carries the private key as "d" and the public key as "x", and RFC
-// 7748 section 5 makes each 32 octets. Section 3.2.1 makes "x" the X25519 of
-// "d" and the base point, so an "x" that is not exactly that output is refused.
+// section 2 carries the private key of the pair as "d" and its public key as
+// "x", and RFC 7748 section 5 makes each 32 octets. That public key is the
+// X25519 of "d" and the base point (RFC 7748 section 6.1), so an "x" that is
+// not exactly that output is refused.
 func X25519PrivateKeyFromJwk(jwk map[string]any) (*ecdh.PrivateKey, error) {
 	if err := requireOKPSubtype(jwk, "X25519", jose_errors.ErrInvalidPrivateKey); err != nil {
 		return nil, err

@@ -60,11 +60,12 @@ var signatureOperations = map[string]bool{"sign": true, "verify": true}
 // RFC 8725 section 3.1 requires each key to be used with exactly one algorithm,
 // so a jwk whose "alg" is present and is not the string alg names is refused.
 // A jwk whose "use" is present and is not "enc", or whose "key_ops" is present
-// and lacks "wrapKey", is refused too (RFC 7517 sections 4.2 and 4.3). An
-// ECDH-ES key is held to no "key_ops" value, as none names a public key used
-// for key agreement. So is a jwk whose "use" and "key_ops" are not consistent,
-// or whose "key_ops" lists a value twice, both of which section 4.3 forbids.
-// Every refusal of the jwk carries ErrInvalidPublicKey.
+// and lacks "wrapKey", is refused too (RFC 7517 sections 4.2 and 4.3). So is a
+// jwk whose "use" and "key_ops" are not consistent, or whose "key_ops" lists a
+// value twice, both of which section 4.3 forbids. No "key_ops" value names a
+// public key used for key agreement, so an ECDH-ES jwk needs none, but one
+// whose "key_ops" names "sign" or "verify" is refused. Every refusal of the jwk
+// carries ErrInvalidPublicKey.
 func GetEncrypterFromJwk(alg jwa.Algorithm, publicJwk map[string]any) (model.Encrypter, error) {
 	read, ok := encrypterKeyReaders[alg]
 	if !ok {
@@ -88,11 +89,12 @@ func GetEncrypterFromJwk(alg jwa.Algorithm, publicJwk map[string]any) (model.Enc
 // from the recipient's jwk, as GetDecrypter does from a key.
 //
 // For RSA-OAEP, RSA-OAEP-256, RSA-OAEP-384 and RSA-OAEP-512, the jwk is an RSA
-// private key. For A128KW, A192KW and A256KW, it is an "oct" key. dir is refused
-// as GetEncrypterFromJwk refuses it. The jwk's "alg", "use" and "key_ops" are
-// held to the rules GetEncrypterFromJwk applies, with "unwrapKey" in place of
-// "wrapKey", and, for an ECDH-ES key, "deriveKey" or "deriveBits" (RFC 7517
-// section 4.3). Every refusal of the jwk carries ErrInvalidPrivateKey.
+// private key. For the ECDH-ES algorithms, it is an EC private key on P-256,
+// P-384 or P-521, or an OKP X25519 private key. For A128KW, A192KW and A256KW,
+// it is an "oct" key. dir is refused as GetEncrypterFromJwk refuses it. The
+// jwk's "alg", "use" and "key_ops" are held to the rules GetEncrypterFromJwk
+// applies, with "unwrapKey" in place of "wrapKey", and, for an ECDH-ES key,
+// "deriveKey" or "deriveBits" (RFC 7517 section 4.3). Every refusal of the jwk carries ErrInvalidPrivateKey.
 func GetDecrypterFromJwk(alg jwa.Algorithm, privateJwk map[string]any) (model.Decrypter, error) {
 	if _, ok := encrypterKeyReaders[alg]; !ok {
 		return nil, notFromJwk(alg)
@@ -153,6 +155,9 @@ func checkKeyDeclarations(alg jwa.Algorithm, key map[string]any, operations []st
 		seen[name] = true
 		if usePresent && signatureOperations[name] {
 			return fmt.Errorf("%wthe jwk's use enc and key_ops %s are not consistent", class, jsonutils.QuoteBounded(name))
+		}
+		if len(operations) == 0 && signatureOperations[name] {
+			return fmt.Errorf("%wthe jwk's key_ops %s names a signature operation, not key agreement", class, jsonutils.QuoteBounded(name))
 		}
 		if slices.Contains(operations, name) {
 			permitted = true

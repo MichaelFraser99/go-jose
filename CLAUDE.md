@@ -92,7 +92,7 @@ In a JWS, `jku`, `jwk`, `x5u` and `x5c` name the key that verifies. In a JWE the
 
 ### An ECDH-ES `epk` is checked twice, for different reasons
 
-`header.ValidateJWEHeader` checks that the `epk` is a valid public key on a supported curve, with no private member. Those faults depend on the token alone, so they are `ErrMalformedToken` and are refused before any decrypter runs. `ecdhes.Decrypter` then checks that the `epk` is on its own key's curve, as RFC 8725 section 3.4 requires. That fault depends on the recipient's key, so it is the uniform `ErrDecryptionFailed`. Keep both checks: the first stops an invalid point reaching `crypto/ecdh`, and the second stops a valid point on another curve reaching the key agreement. An X25519 key is never a signing key (RFC 8037 section 3.2), so no signer or validator may accept an `*ecdh` key.
+`header.ValidateJWEHeader` checks that the `epk` is a valid public key on a supported curve, with no private member. Those faults depend on the token alone, so they are `ErrMalformedToken` and are refused before any decrypter runs. In `ecdhes.Decrypter`, `crypto/ecdh` then refuses an `epk` on a different curve from the recipient's key, as RFC 8725 section 3.4 requires. That fault depends on the recipient's key, so it is the uniform `ErrDecryptionFailed`. Keep the header check: it stops an invalid point reaching `crypto/ecdh`. Do not add a curve comparison before the key agreement, because `crypto/ecdh` already refuses the mismatch and no test can reach a second check. An X25519 key is never a signing key (RFC 8037 section 3.2), so no signer or validator may accept an `*ecdh` key.
 
 ## Conventions
 

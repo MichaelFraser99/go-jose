@@ -132,6 +132,11 @@ func TestDecrypt_ChecksTheEphemeralPublicKey(t *testing.T) {
 		{name: "an apu equal to the apv", head: map[string]any{"epk": onCurve, "apu": "QQ", "apv": "QQ"}, want: joseerror.ErrMalformedClaim, malformed: true, clause: "RFC 7518 4.6.2"},
 		{name: "an apv that is not base64url", head: map[string]any{"epk": onCurve, "apv": "Qm9i="}, want: joseerror.ErrMalformedClaim, malformed: true, clause: "RFC 7518 4.6.1.3"},
 		{name: "an apu that is not a string", head: map[string]any{"epk": onCurve, "apu": 7}, want: joseerror.ErrMalformedClaim, malformed: true, clause: "RFC 7518 4.6.1.2"},
+		{name: "an epk of an unknown kty", head: map[string]any{"epk": map[string]any{"kty": "FOO"}}, want: joseerror.ErrMalformedClaim, malformed: true, clause: "RFC 7518 4.6"},
+		{name: "an epk with no kty", head: map[string]any{"epk": map[string]any{"crv": "P-256"}}, want: joseerror.ErrMalformedClaim, malformed: true, clause: "RFC 7518 4.6"},
+		{name: "an oct epk", head: map[string]any{"epk": map[string]any{"kty": "oct", "k": "AAAA"}}, want: joseerror.ErrMalformedClaim, malformed: true, clause: "RFC 7518 4.6"},
+		{name: "an AKP epk", head: map[string]any{"epk": map[string]any{"kty": "AKP", "alg": "nope", "pub": "AAAA"}}, want: joseerror.ErrMalformedClaim, malformed: true, clause: "RFC 7518 4.6"},
+		{name: "an Ed448 epk", head: map[string]any{"epk": map[string]any{"kty": "OKP", "crv": "Ed448", "x": base64.RawURLEncoding.EncodeToString(make([]byte, 57))}}, want: joseerror.ErrMalformedClaim, malformed: true, clause: "RFC 8037 3.2"},
 		{name: "an X448 epk", head: map[string]any{"epk": map[string]any{"kty": "OKP", "crv": "X448", "x": base64.RawURLEncoding.EncodeToString(make([]byte, 56))}}, want: joseerror.ErrUnsupportedAlgorithm, clause: "RFC 8037 3.2"},
 		{name: "an epk on a curve this library does not implement", head: map[string]any{"epk": map[string]any{"kty": "EC", "crv": "secp256k1", "x": "AAAA", "y": "AAAA"}}, want: joseerror.ErrUnsupportedAlgorithm, clause: "RFC 7518 6.2.1.1"},
 		{name: "a valid epk on another curve", head: map[string]any{"epk": epkOf(t, p384.PublicKey())}, want: joseerror.ErrDecryptionFailed, clause: "RFC 8725 3.4"},
@@ -217,6 +222,11 @@ func TestGetEncrypterAndGetDecrypterFromJwk_BuildECDHESKeys(t *testing.T) {
 			}
 			if e, err := GetEncrypterFromJwk(jwa.ECDHES, with(*publicJwk, map[string]any{"use": "enc", "key_ops": []any{"sign"}})); !errors.Is(err, joseerror.ErrInvalidPublicKey) || e != nil {
 				t.Errorf("[RFC 7517 4.3] use enc and key_ops sign are not consistent, got %v", err)
+			}
+			for _, ops := range [][]any{{"verify"}, {"sign"}, {"deriveKey", "verify"}} {
+				if e, err := GetEncrypterFromJwk(jwa.ECDHES, with(*publicJwk, map[string]any{"key_ops": ops})); !errors.Is(err, joseerror.ErrInvalidPublicKey) || e != nil {
+					t.Errorf("[RFC 7517 4.3] key_ops %v names a signature operation, so the key is not for key agreement, got %v", ops, err)
+				}
 			}
 			if e, err := GetEncrypterFromJwk(jwa.ECDHES, with(*publicJwk, map[string]any{"alg": "ECDH-ES+A128KW"})); !errors.Is(err, joseerror.ErrInvalidPublicKey) || e != nil {
 				t.Errorf("[RFC 8725 3.1] a jwk naming another alg must be refused, got %v", err)

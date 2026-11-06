@@ -538,7 +538,7 @@ These functions enforce what the JWK declares about itself:
 
 - If `alg` is present, it must name the algorithm that you give.
 - If `use` is present, it must be `enc`.
-- If `key_ops` is present, it must include `wrapKey` for an encrypter and `unwrapKey` for a decrypter, and it must not list a value twice. For an `ECDH-ES` decrypter, it must include `deriveKey` or `deriveBits` instead. An `ECDH-ES` encrypter has no required value, because no `key_ops` value names a public key that is used for key agreement.
+- If `key_ops` is present, it must include `wrapKey` for an encrypter and `unwrapKey` for a decrypter, and it must not list a value twice. For an `ECDH-ES` decrypter, it must include `deriveKey` or `deriveBits` instead. An `ECDH-ES` encrypter has no required value, because no `key_ops` value names a public key that is used for key agreement. But its `key_ops` must not include `sign` or `verify`, because those values mark a signing key.
 - If `use` is present, `key_ops` must not include `sign` or `verify`, as RFC 7517 section 4.3 requires the two to agree.
 
 A refused JWK gives `ErrInvalidPublicKey` from `GetEncrypterFromJwk` and `ErrInvalidPrivateKey` from `GetDecrypterFromJwk`. A JWK cannot hold a `dir` key, because no JWK member names the `enc` that the key is bound to. For `dir`, build a `jwe.DirectKey`.
@@ -547,9 +547,9 @@ CAUTION: Do not log or publish what `Public()` returns for an `A128KW`, `A192KW`
 
 With `ECDH-ES`, the key that the two parties agree is the content encryption key, and the encrypted key is empty. With `ECDH-ES+A128KW` to `ECDH-ES+A256KW`, the agreed key wraps a random content encryption key. `Encrypt` makes a new ephemeral key for each token, as RFC 7518 section 4.6 requires, and writes its public half to the `epk` header. Do not set `epk` yourself: `Encrypt` refuses it with `ErrMalformedClaim`.
 
-To bind the agreed key to the two parties, set `apu` and `apv` in the header that you give `Encrypt`. Each is a base64url string, and RFC 7518 section 4.6.2 requires them to be different. They enter the key derivation, so the recipient must receive the same values. `Decrypt` refuses a token whose `apu` and `apv` are equal or are not base64url strings, as malformed.
+To bind the agreed key to the two parties, set `apu` and `apv` in the header that you give `Encrypt`. Each is a base64url string, and RFC 7518 section 4.6.2 requires them to be different. They enter the key derivation, so the recipient must receive the same values. `Decrypt` refuses an ECDH-ES token whose `apu` and `apv` are equal or are not base64url strings, as malformed. No other `alg` reads `apu` or `apv`, so `Decrypt` ignores them in a token of any other `alg`.
 
-`Decrypt` refuses an ECDH-ES token with `ErrMalformedToken` if its `epk` is absent, is not an EC or X25519 public key, has a point that is not on its curve, or carries a private member such as `d`. RFC 8725 section 3.4 requires this check. An `epk` on a curve that this library does not implement, such as X448, is refused with `ErrUnsupportedAlgorithm`. An `epk` on a different curve from the decrypter's key fails with `ErrDecryptionFailed`, like any other key that cannot decrypt the token.
+`Decrypt` refuses an ECDH-ES token with `ErrMalformedToken` if its `epk` is absent, has a point that is not on its curve, or carries a private member such as `d`. RFC 8725 section 3.4 requires this check. It also refuses an `epk` that cannot agree a key: one whose `kty` is not `EC` or `OKP`, or an `OKP` key whose `crv` is not `X25519` or `X448`. An `epk` on a curve that this library does not implement, such as `X448` or `secp256k1`, is refused with `ErrUnsupportedAlgorithm`. An `epk` on a different curve from the decrypter's key fails with `ErrDecryptionFailed`, like any other key that cannot decrypt the token.
 
 This library does not implement `RSA1_5`, and it will not. RFC 8725 section 3.2 advises against it because of padding oracle attacks. `A128GCMKW` to `A256GCMKW`, `PBES2` and `zip` are not implemented yet.
 
@@ -650,7 +650,7 @@ Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 | `ErrDecryptionFailed` | A JWE did not decrypt. The error is the same for a wrong key, a changed token and a decrypter that failed, as RFC 7516 section 11.5 requires. It also covers a call with no decrypter for the token's `alg` |
 | `ErrUnsupportedAlgorithm` | The algorithm named is not supported, has no validator in this library, or is not permitted by the options given |
 | `ErrSigningError` | Signing failed |
-| `ErrEncryptionError` | Encryption failed. The random source failed, or a custom `Encrypter` returned a key or header that `jwe.Encrypt` cannot use |
+| `ErrEncryptionError` | Encryption failed. The random source failed, or a custom `Encrypter` returned a key or header that `jwe.Encrypt` cannot use, such as an encrypted key of a length that `jwe.Decrypt` refuses |
 | `ErrMalformedClaim` | A claim is present but its type or value is wrong. This includes a `b64` that is not a boolean, and an `x5c` or `x5u` chain that is out of order or longer than 16 certificates |
 | `ErrMissingClaim` | A required claim is absent |
 | `ErrMissingCriticalClaim` | A header named in `crit` is absent, or names an extension this library does not understand, or `b64` is `false` |

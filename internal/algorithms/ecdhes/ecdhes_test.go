@@ -10,6 +10,8 @@ import (
 	"crypto/rsa"
 	"encoding/base64"
 	"errors"
+	"math/big"
+	"reflect"
 	"testing"
 
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/aeskw"
@@ -309,5 +311,64 @@ func TestWrapKey_GeneratesANewEphemeralKeyEachTime(t *testing.T) {
 	}
 	if first["epk"].(map[string]any)["x"] == second["epk"].(map[string]any)["x"] || bytes.Equal(firstCEK, secondCEK) {
 		t.Error("[RFC 7518 4.6] a new ephemeral public key MUST be generated for each key agreement")
+	}
+}
+
+func refusedWithoutPanic(t *testing.T, build func() (any, error), class error) {
+	t.Helper()
+	var built any
+	var err error
+	func() {
+		defer func() {
+			if panicked := recover(); panicked != nil {
+				t.Fatalf("[RFC 7518 4.6] a partly built key must be refused rather than panic, got panic %v", panicked)
+			}
+		}()
+		built, err = build()
+	}()
+	if !errors.Is(err, class) || !reflect.ValueOf(built).IsNil() {
+		t.Errorf("[RFC 7518 4.6] want %v and nothing built, got %v", class, err)
+	}
+}
+
+func TestNewEncrypterAndNewDecrypter_RefuseAPartlyBuiltECDSAKey(t *testing.T) {
+	for _, curve := range []elliptic.Curve{elliptic.P256(), elliptic.P384(), elliptic.P521()} {
+		key, err := ecdsa.GenerateKey(curve, rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		other, err := ecdsa.GenerateKey(curve, rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := curve.Params().N
+		public := map[string]*ecdsa.PublicKey{
+			"a zero ecdsa.PublicKey":   {},
+			"a curve and no point":     {Curve: curve},
+			"a nil curve":              {X: key.X, Y: key.Y},
+			"a nil x":                  {Curve: curve, Y: key.Y},
+			"a nil y":                  {Curve: curve, X: key.X},
+			"a point not on the curve": {Curve: curve, X: key.X, Y: new(big.Int).Add(key.Y, big.NewInt(1))},
+		}
+		private := map[string]*ecdsa.PrivateKey{
+			"a zero ecdsa.PrivateKey":   {},
+			"a curve and no point":      {PublicKey: ecdsa.PublicKey{Curve: curve}, D: key.D},
+			"a nil x":                   {PublicKey: ecdsa.PublicKey{Curve: curve, Y: key.Y}, D: key.D},
+			"a point not on the curve":  {PublicKey: ecdsa.PublicKey{Curve: curve, X: key.X, Y: new(big.Int).Add(key.Y, big.NewInt(1))}, D: key.D},
+			"a nil scalar":              {PublicKey: key.PublicKey},
+			"a zero scalar":             {PublicKey: key.PublicKey, D: big.NewInt(0)},
+			"a scalar equal to n":       {PublicKey: key.PublicKey, D: new(big.Int).Set(n)},
+			"the scalar of another key": {PublicKey: key.PublicKey, D: other.D},
+		}
+		for name, public := range public {
+			t.Run(curve.Params().Name+" encrypter with "+name, func(t *testing.T) {
+				refusedWithoutPanic(t, func() (any, error) { return NewEncrypter(jwa.ECDHES, public) }, joseerror.ErrInvalidPublicKey)
+			})
+		}
+		for name, private := range private {
+			t.Run(curve.Params().Name+" decrypter with "+name, func(t *testing.T) {
+				refusedWithoutPanic(t, func() (any, error) { return NewDecrypter(jwa.ECDHES, private) }, joseerror.ErrInvalidPrivateKey)
+			})
+		}
 	}
 }
