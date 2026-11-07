@@ -75,6 +75,29 @@ type JoseOptions struct {
 	// and never return it to the sender.
 	OnDecrypterError func(decrypter Decrypter, err error)
 
+	// MaxPBES2Count bounds the "p2c" of a PBES2 JWE, the PBKDF2 iteration count
+	// jwe.Decrypt runs for each PBES2 decrypter it tries. A peer chooses "p2c", so
+	// a JWE naming more is refused with ErrOutOfBounds before any decrypter runs.
+	// Zero or less means 1,200,000: draft-ietf-oauth-rfc8725bis section 3.13
+	// recommends refusing more than twice the 600,000 iterations OWASP gives for
+	// HMAC SHA-256, which jwe.PasswordKey uses by default.
+	MaxPBES2Count int
+
+	// RequireRecommendedPBES2Count refuses a PBES2 JWE whose "p2c" is less than
+	// the 1000 that RFC 7518 section 4.8.1.2 recommends, with ErrOutOfBounds. Off
+	// by default, including when no options are passed, because the section
+	// recommends the minimum and does not require it. A low count makes the
+	// password cheap to guess from the token, and refusing the token cannot undo
+	// that once it has been sent, so turn this on to make producers raise it.
+	RequireRecommendedPBES2Count bool
+
+	// MaxDecompressedSize turns on the "zip" header (RFC 7516 section 4.1.3) and
+	// bounds the octets jwe.Decrypt inflates a DEF plaintext to. A plaintext that
+	// inflates to more is refused with ErrOutOfBounds, as
+	// draft-ietf-oauth-rfc8725bis section 3.15 recommends. Zero or less, the
+	// default, refuses every JWE with "zip" with ErrUnsupportedAlgorithm.
+	MaxDecompressedSize int
+
 	// ClockSkewLeeway widens the window the iat, nbf and exp claims are judged against, to allow for clock skew between the issuer and this verifier. A value of zero or less grants none. Defaults to 0
 	ClockSkewLeeway time.Duration
 
