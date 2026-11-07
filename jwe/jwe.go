@@ -150,10 +150,11 @@ func checkProducerHeader(headBytes []byte) error {
 // The Initialization Vector and Authentication Tag must be the lengths enc
 // defines. The JWE Encrypted Key of a dir or ECDH-ES JWE must be empty, and
 // that of an A128KW, A192KW, A256KW or ECDH-ES key wrap JWE must be 8 octets
-// longer than enc's key (section 5.2 step 10, RFC 3394 section 2.2.1). That of an RSA-OAEP JWE is as long as
-// the recipient's modulus (RFC 8017 section 7.1.2), so it must be 256 to 1024
-// octets, the moduli this library accepts. Any other length is
-// ErrMalformedToken, and is refused before any decrypter is tried.
+// longer than enc's key (section 5.2 step 10, RFC 3394 section 2.2.1). That of
+// an RSA-OAEP JWE is as long as the recipient's modulus (RFC 8017 section
+// 7.1.2), so it must be 256 to 1024 octets, the moduli this library accepts.
+// Any other length is ErrMalformedToken, and is refused before any decrypter
+// is tried.
 //
 // Only the decrypters passed are tried. A "jku", "jwk", "x5u" or "x5c" in the
 // header names the recipient's public key, which cannot decrypt, so none is

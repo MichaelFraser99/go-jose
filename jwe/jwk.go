@@ -94,7 +94,8 @@ func GetEncrypterFromJwk(alg jwa.Algorithm, publicJwk map[string]any) (model.Enc
 // it is an "oct" key. dir is refused as GetEncrypterFromJwk refuses it. The
 // jwk's "alg", "use" and "key_ops" are held to the rules GetEncrypterFromJwk
 // applies, with "unwrapKey" in place of "wrapKey", and, for an ECDH-ES key,
-// "deriveKey" or "deriveBits" (RFC 7517 section 4.3). Every refusal of the jwk carries ErrInvalidPrivateKey.
+// "deriveKey" or "deriveBits" (RFC 7517 section 4.3). Every refusal of the jwk
+// carries ErrInvalidPrivateKey.
 func GetDecrypterFromJwk(alg jwa.Algorithm, privateJwk map[string]any) (model.Decrypter, error) {
 	if _, ok := encrypterKeyReaders[alg]; !ok {
 		return nil, notFromJwk(alg)
