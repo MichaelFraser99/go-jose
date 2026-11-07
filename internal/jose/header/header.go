@@ -108,11 +108,7 @@ func checkAlgorithmParameters(header map[string]any) error {
 func checkAlgorithmBounds(header map[string]any, alg jwa.Algorithm, opts *model.JoseOptions) error {
 	if slices.Contains(PasswordAlgorithms, alg) {
 		_, count, _ := pbes2.Parameters(header)
-		maximum := DefaultMaxPBES2Count
-		if opts.MaxPBES2Count > 0 {
-			maximum = opts.MaxPBES2Count
-		}
-		if count > maximum {
+		if maximum := MaxPBES2Count(opts); count > maximum {
 			return fmt.Errorf("%wthe 'p2c' header asks for more PBKDF2 iterations than the %d MaxPBES2Count allows", joseerror.ErrOutOfBounds, maximum)
 		}
 		if opts.RequireRecommendedPBES2Count && count < pbes2.RecommendedCount {
@@ -173,6 +169,15 @@ var PasswordAlgorithms = []jwa.Algorithm{jwa.PBES2HS256A128KW, jwa.PBES2HS384A19
 // unset: twice the 600,000 iterations draft-ietf-oauth-rfc8725bis section 3.13
 // cites, as that section recommends.
 const DefaultMaxPBES2Count = 1_200_000
+
+// MaxPBES2Count returns the PBKDF2 iterations one JWE may cost: opts.MaxPBES2Count,
+// or DefaultMaxPBES2Count when that is zero or less.
+func MaxPBES2Count(opts *model.JoseOptions) int {
+	if opts != nil && opts.MaxPBES2Count > 0 {
+		return opts.MaxPBES2Count
+	}
+	return DefaultMaxPBES2Count
+}
 
 // ValidateJWEHeader checks a decoded JWE Protected Header, as RFC 7516 section
 // 5.2 step 5 requires, and returns the alg and enc it names.

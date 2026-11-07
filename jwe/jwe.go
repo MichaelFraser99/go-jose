@@ -17,6 +17,7 @@ import (
 
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/contentenc"
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/pbes2"
 	"github.com/MichaelFraser99/go-jose/internal/jose/header"
 	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
 	"github.com/MichaelFraser99/go-jose/joseerror"
@@ -151,10 +152,12 @@ func checkProducerHeader(headBytes []byte) error {
 //     12 and 16 octets (RFC 7518 section 4.7.1).
 //   - For a PBES2 alg, "p2s" must be a base64url string of at least 8 octets
 //     and "p2c" a positive integer (RFC 7518 section 4.8.1). A peer chooses
-//     "p2c", and each PBES2 decrypter tried runs that many PBKDF2 iterations, so
-//     a "p2c" above JoseOptions.MaxPBES2Count (1,200,000 when unset) is
-//     ErrOutOfBounds, as draft-ietf-oauth-rfc8725bis section 3.13 recommends.
-//     So is one below 1000 when RequireRecommendedPBES2Count is set.
+//     "p2c", and each PBES2 decrypter tried runs that many PBKDF2 iterations.
+//     JoseOptions.MaxPBES2Count (1,200,000 when unset) bounds the iterations of
+//     the whole call, as draft-ietf-oauth-rfc8725bis section 3.13 recommends:
+//     a "p2c" times the number of decrypters of the token's alg that exceeds it
+//     is ErrOutOfBounds, before any decrypter runs. So is a "p2c" below 1000
+//     when RequireRecommendedPBES2Count is set.
 //   - "crit" follows RFC 7515 section 4.1.11, as section 4.1.13 requires, and
 //     may name no parameter RFC 7516 or RFC 7518 defines for JWE.
 //   - The parameters shared with RFC 7515 have the shapes jws.Verify requires,
@@ -256,6 +259,12 @@ func Decrypt(ctx context.Context, compactSerialization string, decrypters []mode
 	}
 	if len(candidates) > maxKeysTried {
 		return nil, nil, nil, fmt.Errorf("%w%d decrypters implement %s, more than the %d MaxKeysTried allows", joseerror.ErrTooManyKeys, len(candidates), alg, maxKeysTried)
+	}
+	if slices.Contains(header.PasswordAlgorithms, alg) {
+		_, count, _ := pbes2.Parameters(protectedHeader)
+		if maximum := header.MaxPBES2Count(opts); count > maximum/len(candidates) {
+			return nil, nil, nil, fmt.Errorf("%w%d %s decrypters at a 'p2c' of %d would run more PBKDF2 iterations than the %d MaxPBES2Count allows", joseerror.ErrOutOfBounds, len(candidates), alg, count, maximum)
+		}
 	}
 
 	aad := []byte(components[0])

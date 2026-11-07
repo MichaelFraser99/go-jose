@@ -75,12 +75,16 @@ type JoseOptions struct {
 	// and never return it to the sender.
 	OnDecrypterError func(decrypter Decrypter, err error)
 
-	// MaxPBES2Count bounds the "p2c" of a PBES2 JWE, the PBKDF2 iteration count
-	// jwe.Decrypt runs for each PBES2 decrypter it tries. A peer chooses "p2c", so
-	// a JWE naming more is refused with ErrOutOfBounds before any decrypter runs.
-	// Zero or less means 1,200,000: draft-ietf-oauth-rfc8725bis section 3.13
-	// recommends refusing more than twice the 600,000 iterations OWASP gives for
-	// HMAC SHA-256, which jwe.PasswordKey uses by default.
+	// MaxPBES2Count bounds the PBKDF2 iterations one call to jwe.Decrypt may run
+	// for a PBES2 JWE. A peer chooses "p2c", and each decrypter of the token's alg
+	// runs that many, so a JWE whose "p2c" times the number of those decrypters
+	// is more than this is refused with ErrOutOfBounds before any decrypter runs.
+	// jwe.ParseHeader refuses a "p2c" above it. Zero or less means 1,200,000:
+	// draft-ietf-oauth-rfc8725bis section 3.13 recommends refusing more than
+	// twice the 600,000 iterations OWASP gives for HMAC SHA-256, which
+	// jwe.PasswordKey uses by default. So by default one password decrypter takes
+	// any token jwe.PasswordKey writes by default, and two take one of up to
+	// 600,000 iterations.
 	MaxPBES2Count int
 
 	// RequireRecommendedPBES2Count refuses a PBES2 JWE whose "p2c" is less than

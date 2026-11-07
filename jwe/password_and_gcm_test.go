@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"slices"
 	"testing"
 
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/aeskw"
@@ -341,5 +342,42 @@ func TestGetEncrypterFromJwk_RefusesPBES2AndBuildsAESGCMKeyWrap(t *testing.T) {
 		if e, err := GetEncrypterFromJwk(alg, with(octJwkFixture(secret), map[string]any{"key_ops": []any{"encrypt"}}), nil); !errors.Is(err, joseerror.ErrInvalidPublicKey) || e != nil {
 			t.Errorf("[RFC 7517 4.3] a %s jwk whose key_ops lacks wrapKey must be refused, got %v", alg, err)
 		}
+	}
+}
+
+func TestDecrypt_MaxPBES2CountBoundsTheIterationsOfTheWholeCall(t *testing.T) {
+	password := func() model.Decrypter { return &scriptedDecrypter{alg: jwa.PBES2HS256A128KW} }
+	other := &scriptedDecrypter{alg: jwa.A128KW}
+	salt := "AAAAAAAAAAA"
+	for _, c := range []struct {
+		name       string
+		p2c        int
+		decrypters []model.Decrypter
+		opts       *model.JoseOptions
+		want       error
+	}{
+		{name: "two decrypters at half the default bound", p2c: 600_000, decrypters: []model.Decrypter{password(), password()}, want: joseerror.ErrDecryptionFailed},
+		{name: "two decrypters at one more than half the default bound", p2c: 600_001, decrypters: []model.Decrypter{password(), password()}, want: joseerror.ErrOutOfBounds},
+		{name: "three decrypters at a third of a lowered bound", p2c: 1000, decrypters: []model.Decrypter{password(), password(), password()}, opts: &model.JoseOptions{MaxPBES2Count: 3000}, want: joseerror.ErrDecryptionFailed},
+		{name: "three decrypters at one more than a third of a lowered bound", p2c: 1001, decrypters: []model.Decrypter{password(), password(), password()}, opts: &model.JoseOptions{MaxPBES2Count: 3000}, want: joseerror.ErrOutOfBounds},
+		{name: "three decrypters whose product is one less than a lowered bound", p2c: 1000, decrypters: []model.Decrypter{password(), password(), password()}, opts: &model.JoseOptions{MaxPBES2Count: 3001}, want: joseerror.ErrDecryptionFailed},
+		{name: "decrypters of another alg do not count", p2c: 1_200_000, decrypters: []model.Decrypter{other, password(), other, other}, want: joseerror.ErrDecryptionFailed},
+		{name: "a hundred decrypters at a p2c of 12,001", p2c: 12_001, decrypters: slices.Repeat([]model.Decrypter{password()}, 100), want: joseerror.ErrOutOfBounds},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			called := 0
+			opts := &model.JoseOptions{OnDecrypterError: func(model.Decrypter, error) { called++ }}
+			if c.opts != nil {
+				opts.MaxPBES2Count = c.opts.MaxPBES2Count
+			}
+			token := keyedHeaderToken(t, map[string]any{"alg": "PBES2-HS256+A128KW", "enc": "A128GCM", "p2s": salt, "p2c": c.p2c}, 24)
+			_, plaintext, _, err := Decrypt(context.Background(), token, c.decrypters, opts)
+			if !errors.Is(err, c.want) || plaintext != nil {
+				t.Errorf("[RFC 8725bis 3.13] want %v, got %v", c.want, err)
+			}
+			if errors.Is(err, joseerror.ErrOutOfBounds) && called != 0 {
+				t.Errorf("[RFC 8725bis 3.13] a token over the bound must be refused before any decrypter runs, but %d ran", called)
+			}
+		})
 	}
 }
