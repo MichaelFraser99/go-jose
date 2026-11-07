@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"errors"
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/ecdhes"
 	"github.com/MichaelFraser99/go-jose/internal/httputils"
 	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
 	"github.com/MichaelFraser99/go-jose/internal/jose/jwk"
@@ -63,19 +64,49 @@ func ValidateHeader(ctx context.Context, header map[string]any, client *http.Cli
 
 	var jwkRetrievers []model.Retriever
 	if params.jwk != nil && opts.UseTokenProvidedKeys {
-		jwkRetrievers = append(jwkRetrievers, carried(jwk.InlineJWK(*params.jwk, params.kid, *alg, opts.IgnoreKeyUse)))
+		jwkRetrievers = append(jwkRetrievers, carried(jwk.InlineJWK(*params.jwk, params.kid, *alg, opts.IgnoreKeyUse, opts.StrictKeyOperations)))
 	}
 	if params.x5c != nil && opts.X509Roots != nil {
 		jwkRetrievers = append(jwkRetrievers, carried(x5.InlineCertificate(*params.x5c, params.x5t, params.x5ts256, opts.X509Roots, opts.X509ExtKeyUsages)))
 	}
 	if params.jku != nil && opts.UseTokenProvidedKeys && client != nil {
-		jwkRetrievers = append(jwkRetrievers, jwk.RetrieveJKU(*params.jku, httputils.Fetcher(ctx, client, opts.FetchTimeout), params.kid, *alg, opts.IgnoreKeyUse))
+		jwkRetrievers = append(jwkRetrievers, jwk.RetrieveJKU(*params.jku, httputils.Fetcher(ctx, client, opts.FetchTimeout), params.kid, *alg, opts.IgnoreKeyUse, opts.StrictKeyOperations))
 	}
 	if params.x5u != nil && opts.X509Roots != nil && client != nil {
 		jwkRetrievers = append(jwkRetrievers, x5.RetrieveX5U(*params.x5u, httputils.Fetcher(ctx, client, opts.FetchTimeout), params.x5t, params.x5ts256, opts.X509Roots, opts.X509ExtKeyUsages))
 	}
 
 	return jwkRetrievers, nil
+}
+
+func checkKeyAgreement(header map[string]any) error {
+	alg, _ := header["alg"].(string)
+	if !slices.Contains(keyAgreementAlgorithms, jwa.GetAlgorithm(alg)) {
+		return nil
+	}
+	if err := checkEphemeralKey(header); err != nil {
+		return err
+	}
+	_, _, err := ecdhes.PartyInfo(header)
+	return err
+}
+
+func checkEphemeralKey(header map[string]any) error {
+	raw, present := header["epk"]
+	if !present {
+		return fmt.Errorf("%wthe 'epk' header is required for ECDH-ES (RFC 7518 section 4.6.1.1)", joseerror.ErrMissingClaim)
+	}
+	epk, ok := raw.(map[string]any)
+	if !ok {
+		return fmt.Errorf("%wthe 'epk' header must be a JSON object", joseerror.ErrMalformedClaim)
+	}
+	if _, err := ecdhes.EphemeralPublicKey(epk); err != nil {
+		if errors.Is(err, joseerror.ErrUnsupportedAlgorithm) {
+			return err
+		}
+		return fmt.Errorf("%wthe 'epk' header is not a valid public key: %w", joseerror.ErrMalformedClaim, err)
+	}
+	return nil
 }
 
 func malformed(err error) error {
@@ -87,7 +118,10 @@ var KeyManagementAlgorithms = []jwa.Algorithm{
 	jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512,
 	jwa.A128KW, jwa.A192KW, jwa.A256KW,
 	jwa.Dir,
+	jwa.ECDHES, jwa.ECDHESA128KW, jwa.ECDHESA192KW, jwa.ECDHESA256KW,
 }
+
+var keyAgreementAlgorithms = []jwa.Algorithm{jwa.ECDHES, jwa.ECDHESA128KW, jwa.ECDHESA192KW, jwa.ECDHESA256KW}
 
 // ValidateJWEHeader checks a decoded JWE Protected Header, as RFC 7516 section
 // 5.2 step 5 requires, and returns the alg and enc it names.
@@ -100,9 +134,12 @@ var KeyManagementAlgorithms = []jwa.Algorithm{
 // decompress. The parameters RFC 7516 shares with RFC 7515 have the shapes
 // CheckHeaderShape describes, except that "b64" (RFC 7797, JWS only) is not
 // read, and "crit" may name no parameter RFC 7516 or RFC 7518 defines for JWE
-// (RFC 7516 section 4.1.13). AcceptedTypes, RequireKeyIdentifier and
-// UnderstoodCriticalHeaders apply as they do to a JWS, except that "b64" in
-// UnderstoodCriticalHeaders is ignored, as RFC 7797 defines it for JWS only.
+// (RFC 7516 section 4.1.13). For an ECDH-ES alg, "epk" must be a key
+// ecdhes.EphemeralPublicKey accepts, and "apu" and "apv" must be distinct
+// base64url strings (RFC 7518 section 4.6); no other alg reads them.
+// AcceptedTypes, RequireKeyIdentifier and UnderstoodCriticalHeaders apply as
+// they do to a JWS, except that "b64" in UnderstoodCriticalHeaders is ignored,
+// as RFC 7797 defines it for JWS only.
 func ValidateJWEHeader(header map[string]any, opts *model.JoseOptions) (jwa.Algorithm, jwa.Encryption, error) {
 	if opts == nil {
 		opts = &model.JoseOptions{}
@@ -116,6 +153,12 @@ func ValidateJWEHeader(header map[string]any, opts *model.JoseOptions) (jwa.Algo
 		return jwa.Unknown, jwa.UnknownEncryption, malformed(err)
 	}
 	if _, err := readHeaderShape(header, jweMode); err != nil {
+		return jwa.Unknown, jwa.UnknownEncryption, malformed(err)
+	}
+	if err := checkKeyAgreement(header); err != nil {
+		if errors.Is(err, joseerror.ErrUnsupportedAlgorithm) {
+			return jwa.Unknown, jwa.UnknownEncryption, err
+		}
 		return jwa.Unknown, jwa.UnknownEncryption, malformed(err)
 	}
 
@@ -157,8 +200,10 @@ func ValidateJWEHeader(header map[string]any, opts *model.JoseOptions) (jwa.Algo
 // about to emit, as ValidateJWEHeader checks it on receipt, without its
 // allow-lists or expectations.
 func CheckJWEHeaderShape(header map[string]any) error {
-	_, err := readHeaderShape(header, jweMode)
-	return err
+	if _, err := readHeaderShape(header, jweMode); err != nil {
+		return err
+	}
+	return checkKeyAgreement(header)
 }
 
 type carriedSourceError struct {

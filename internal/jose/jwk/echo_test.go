@@ -21,7 +21,7 @@ func TestInlineJWK_ARefusedUseIsEchoedQuotedAndBounded(t *testing.T) {
 	}
 	jwk["use"] = strings.Repeat("e", 1000) + "\r\nforged log line"
 
-	_, err = InlineJWK(jwk, nil, "RS256", false)()
+	_, err = InlineJWK(jwk, nil, "RS256", false, false)()
 	if err == nil {
 		t.Fatal("[RFC 7517 4.2] a key whose use is not sig must not verify")
 	}

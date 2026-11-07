@@ -28,7 +28,7 @@ func TestReadHeaderShape_AJWECritMayNameNoParameterRFC7516OrRFC7518DefinesForJWE
 		"cty":      "JWT",
 		"epk":      map[string]any{"kty": "OKP"},
 		"apu":      "AAAA",
-		"apv":      "AAAA",
+		"apv":      "AQID",
 		"iv":       "AAAA",
 		"tag":      "AAAA",
 		"p2s":      "AAAAAAAAAAA",

@@ -92,12 +92,15 @@ func hasValidator(alg jwa.Algorithm) bool {
 // says MUST NOT happen. Every refusal carries ErrInvalidPublicKey. To verify with such a
 // key anyway, read it with jwk.PublicFromJwk and pass it to GetValidator,
 // which applies no key-use rule.
-func GetValidatorFromJwk(alg jwa.Algorithm, publicJwk map[string]any) (model.Validator, error) {
+//
+// opts - may be nil. With StrictKeyOperations on, a jwk that section 4.3 says
+// SHOULD NOT be published is refused too. IgnoreKeyUse does not apply here.
+func GetValidatorFromJwk(alg jwa.Algorithm, publicJwk map[string]any, opts *model.JoseOptions) (model.Validator, error) {
 	switch alg {
 	case jwa.ES256, jwa.ES384, jwa.ES512, jwa.RS256, jwa.RS384, jwa.RS512, jwa.PS256, jwa.PS384, jwa.PS512, jwa.EdDSA, jwa.Ed25519, jwa.MLDSA44, jwa.MLDSA65, jwa.MLDSA87:
 	case jwa.HS256, jwa.HS384, jwa.HS512:
 		return nil, fmt.Errorf("%wvalidators cannot be created for symmetric algorithms", joseerror.ErrUnsupportedAlgorithm)
-	case jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512, jwa.A128KW, jwa.A192KW, jwa.A256KW, jwa.Dir, jwa.Unknown:
+	case jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512, jwa.A128KW, jwa.A192KW, jwa.A256KW, jwa.Dir, jwa.ECDHES, jwa.ECDHESA128KW, jwa.ECDHESA192KW, jwa.ECDHESA256KW, jwa.Unknown:
 		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg.String())
 	default:
 		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg.String())
@@ -111,7 +114,7 @@ func GetValidatorFromJwk(alg jwa.Algorithm, publicJwk map[string]any) (model.Val
 			return nil, fmt.Errorf("%wthe jwk's alg %s does not name %s", joseerror.ErrInvalidPublicKey, named, alg.String())
 		}
 	}
-	if err := internal_jwk.CheckKeyUse(publicJwk, joseerror.ErrInvalidPublicKey, joseerror.ErrInvalidPublicKey); err != nil {
+	if err := internal_jwk.CheckKeyUse(publicJwk, joseerror.ErrInvalidPublicKey, joseerror.ErrInvalidPublicKey, opts != nil && opts.StrictKeyOperations); err != nil {
 		return nil, err
 	}
 	publicKey, err := jwk.PublicFromJwk(publicJwk)

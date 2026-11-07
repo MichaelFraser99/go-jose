@@ -70,6 +70,7 @@ func TestVerifyCompactSerialization_SelectsAHeaderKeyByKidAlgAndUse(t *testing.T
 		jwk          map[string]any
 		kid          string
 		ignoreKeyUse bool
+		strict       bool
 		verifies     bool
 		clause       string
 	}{
@@ -97,6 +98,24 @@ func TestVerifyCompactSerialization_SelectsAHeaderKeyByKidAlgAndUse(t *testing.T
 		"an inline key marked use enc verifies when key use is ignored": {
 			key: ecKey, alg: jwa.ES256, jwk: map[string]any{"use": "enc", "key_ops": []any{"encrypt"}}, ignoreKeyUse: true, verifies: true, clause: "RFC 7517 4.3",
 		},
+		"an inline key with unrelated key_ops verifies by default": {
+			key: ecKey, alg: jwa.ES256, jwk: map[string]any{"key_ops": []any{"verify", "decrypt"}}, verifies: true, clause: "RFC 7517 4.3",
+		},
+		"an inline key with unrelated key_ops does not verify when key operations are strict": {
+			key: ecKey, alg: jwa.ES256, jwk: map[string]any{"key_ops": []any{"verify", "decrypt"}}, strict: true, clause: "RFC 7517 4.3",
+		},
+		"a jku key with use and key_ops verifies by default": {
+			jku: true, key: ecKey, alg: jwa.ES256, jwk: map[string]any{"use": "sig", "key_ops": []any{"verify"}}, verifies: true, clause: "RFC 7517 4.3",
+		},
+		"a jku key with use and key_ops does not verify when key operations are strict": {
+			jku: true, key: ecKey, alg: jwa.ES256, jwk: map[string]any{"use": "sig", "key_ops": []any{"verify"}}, strict: true, clause: "RFC 7517 4.3",
+		},
+		"a jku key of sign with verify verifies when key operations are strict": {
+			jku: true, key: ecKey, alg: jwa.ES256, jwk: map[string]any{"key_ops": []any{"sign", "verify"}}, strict: true, verifies: true, clause: "RFC 7517 4.3",
+		},
+		"a jku key with unrelated key_ops verifies when key use is ignored, however strict": {
+			jku: true, key: ecKey, alg: jwa.ES256, jwk: map[string]any{"key_ops": []any{"verify", "wrapKey"}}, ignoreKeyUse: true, strict: true, verifies: true, clause: "RFC 7517 4.3",
+		},
 	}
 
 	for name, tc := range tests {
@@ -107,7 +126,7 @@ func TestVerifyCompactSerialization_SelectsAHeaderKeyByKidAlgAndUse(t *testing.T
 			if tc.kid != "" {
 				header["kid"] = tc.kid
 			}
-			opts := &model.JoseOptions{UseTokenProvidedKeys: true, IgnoreKeyUse: tc.ignoreKeyUse}
+			opts := &model.JoseOptions{UseTokenProvidedKeys: true, IgnoreKeyUse: tc.ignoreKeyUse, StrictKeyOperations: tc.strict}
 			if tc.jku {
 				server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 					w.Header().Set("Content-Type", "application/json")

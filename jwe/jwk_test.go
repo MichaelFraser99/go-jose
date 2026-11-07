@@ -96,11 +96,11 @@ func TestGetEncrypterFromJwk_RoundTripsEachAlgorithm(t *testing.T) {
 	for alg, f := range fixtures {
 		t.Run(alg.String(), func(t *testing.T) {
 			declared := map[string]any{"alg": alg.String(), "use": "enc"}
-			encrypter, err := GetEncrypterFromJwk(alg, with(f.public, declared))
+			encrypter, err := GetEncrypterFromJwk(alg, with(f.public, declared), nil)
 			if err != nil {
 				t.Fatalf("[RFC 7517 4.2] a %s jwk declared for enc must build an Encrypter, got %v", alg, err)
 			}
-			decrypter, err := GetDecrypterFromJwk(alg, with(f.private, map[string]any{"alg": alg.String(), "key_ops": []any{"unwrapKey"}}))
+			decrypter, err := GetDecrypterFromJwk(alg, with(f.private, map[string]any{"alg": alg.String(), "key_ops": []any{"unwrapKey"}}), nil)
 			if err != nil {
 				t.Fatalf("[RFC 7517 4.3] a %s jwk whose key_ops include unwrapKey must build a Decrypter, got %v", alg, err)
 			}
@@ -131,7 +131,7 @@ func TestGetDecrypterFromJwk_DecryptsTheRFC7520Examples(t *testing.T) {
 	for id, clause := range map[string]string{"RFC7520-5.2": "RFC 7520 5.2", "RFC7520-5.8": "RFC 7520 5.8"} {
 		t.Run(id, func(t *testing.T) {
 			example := byID[id]
-			decrypter, err := GetDecrypterFromJwk(jwa.GetAlgorithm(example.Alg), example.RecipientJWK)
+			decrypter, err := GetDecrypterFromJwk(jwa.GetAlgorithm(example.Alg), example.RecipientJWK, nil)
 			if err != nil {
 				t.Fatalf("[%s] the published recipient jwk must build a %s Decrypter, got %v", clause, example.Alg, err)
 			}
@@ -155,13 +155,13 @@ type jwkCase struct {
 func checkRefusedBoth(t *testing.T, name string, encrypterJwk, decrypterJwk jwkCase) {
 	t.Helper()
 	t.Run(name+"/encrypter", func(t *testing.T) {
-		encrypter, err := GetEncrypterFromJwk(encrypterJwk.alg, encrypterJwk.jwk)
+		encrypter, err := GetEncrypterFromJwk(encrypterJwk.alg, encrypterJwk.jwk, nil)
 		if !errors.Is(err, joseerror.ErrInvalidPublicKey) || errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || encrypter != nil {
 			t.Errorf("[%s] want ErrInvalidPublicKey alone and a nil Encrypter, got %v and %v", encrypterJwk.clause, err, encrypter)
 		}
 	})
 	t.Run(name+"/decrypter", func(t *testing.T) {
-		decrypter, err := GetDecrypterFromJwk(decrypterJwk.alg, decrypterJwk.jwk)
+		decrypter, err := GetDecrypterFromJwk(decrypterJwk.alg, decrypterJwk.jwk, nil)
 		if !errors.Is(err, joseerror.ErrInvalidPrivateKey) || errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || decrypter != nil {
 			t.Errorf("[%s] want ErrInvalidPrivateKey alone and a nil Decrypter, got %v and %v", decrypterJwk.clause, err, decrypter)
 		}
@@ -186,14 +186,96 @@ func TestGetEncrypterFromJwk_TheFixturesAreAcceptedWithoutTheirFault(t *testing.
 			"an unknown op":             {{"use": "enc", "key_ops": []any{"wrapKey", "x-custom"}}, {"use": "enc", "key_ops": []any{"unwrapKey", "x-custom"}}},
 		} {
 			t.Run(name+"/"+variant, func(t *testing.T) {
-				if e, err := GetEncrypterFromJwk(c.alg, with(c.public, members[0])); err != nil || e == nil {
+				if e, err := GetEncrypterFromJwk(c.alg, with(c.public, members[0]), nil); err != nil || e == nil {
 					t.Errorf("[RFC 7517 4.3] the control jwk must build an Encrypter, got %v", err)
 				}
-				if d, err := GetDecrypterFromJwk(c.alg, with(c.private, members[1])); err != nil || d == nil {
+				if d, err := GetDecrypterFromJwk(c.alg, with(c.private, members[1]), nil); err != nil || d == nil {
 					t.Errorf("[RFC 7517 4.3] the control jwk must build a Decrypter, got %v", err)
 				}
 			})
 		}
+	}
+}
+
+func TestGetEncrypterFromJwk_StrictKeyOperationsRefusesWhatSection43SaysShouldNotBePublished(t *testing.T) {
+	secret := randomBytes(t, 16)
+	ecPublic, ecPrivate := ecdhJwkFixtures(t)
+	strict := &model.JoseOptions{StrictKeyOperations: true}
+	for name, c := range map[string]struct {
+		alg             jwa.Algorithm
+		public, private map[string]any
+		refused         bool
+	}{
+		"bare": {alg: jwa.A128KW, public: octJwkFixture(secret), private: octJwkFixture(secret)},
+		"alg and use": {
+			alg:    jwa.A128KW,
+			public: with(octJwkFixture(secret), map[string]any{"alg": "A128KW", "use": "enc"}), private: with(octJwkFixture(secret), map[string]any{"alg": "A128KW", "use": "enc"}),
+		},
+		"key_ops of one operation": {
+			alg:    jwa.RSAOAEP,
+			public: with(rsaPublicJwkFixture(t), map[string]any{"key_ops": []any{"wrapKey"}}), private: with(rsaPrivateJwkFixture(t), map[string]any{"key_ops": []any{"unwrapKey"}}),
+		},
+		"key_ops of wrapKey with unwrapKey": {
+			alg:    jwa.A128KW,
+			public: with(octJwkFixture(secret), map[string]any{"key_ops": []any{"unwrapKey", "wrapKey"}}), private: with(octJwkFixture(secret), map[string]any{"key_ops": []any{"wrapKey", "unwrapKey"}}),
+		},
+		"an empty key_ops on an ECDH-ES public key": {
+			alg:    jwa.ECDHES,
+			public: with(ecPublic, map[string]any{"key_ops": []any{}}), private: with(ecPrivate, map[string]any{"key_ops": []any{"deriveBits"}}),
+		},
+		"use beside key_ops": {
+			alg:    jwa.A128KW,
+			public: with(octJwkFixture(secret), map[string]any{"use": "enc", "key_ops": []any{"wrapKey"}}), private: with(octJwkFixture(secret), map[string]any{"use": "enc", "key_ops": []any{"unwrapKey"}}),
+			refused: true,
+		},
+		"use beside an empty key_ops": {
+			alg:    jwa.ECDHES,
+			public: with(ecPublic, map[string]any{"use": "enc", "key_ops": []any{}}), private: with(ecPrivate, map[string]any{"use": "enc", "key_ops": []any{"deriveKey"}}),
+			refused: true,
+		},
+		"key_ops pairing wrapKey with sign": {
+			alg:    jwa.A128KW,
+			public: with(octJwkFixture(secret), map[string]any{"key_ops": []any{"wrapKey", "sign"}}), private: with(octJwkFixture(secret), map[string]any{"key_ops": []any{"unwrapKey", "sign"}}),
+			refused: true,
+		},
+		"key_ops pairing wrapKey with encrypt": {
+			alg:    jwa.RSAOAEP,
+			public: with(rsaPublicJwkFixture(t), map[string]any{"key_ops": []any{"encrypt", "wrapKey"}}), private: with(rsaPrivateJwkFixture(t), map[string]any{"key_ops": []any{"decrypt", "unwrapKey"}}),
+			refused: true,
+		},
+		"key_ops of both directions and an unknown value": {
+			alg:    jwa.A128KW,
+			public: with(octJwkFixture(secret), map[string]any{"key_ops": []any{"wrapKey", "unwrapKey", "x-custom"}}), private: with(octJwkFixture(secret), map[string]any{"key_ops": []any{"wrapKey", "unwrapKey", "x-custom"}}),
+			refused: true,
+		},
+		"key_ops pairing key agreement with verify, or deriveKey with deriveBits": {
+			alg:    jwa.ECDHES,
+			public: with(ecPublic, map[string]any{"key_ops": []any{"deriveKey", "verify"}}), private: with(ecPrivate, map[string]any{"key_ops": []any{"deriveKey", "deriveBits"}}),
+			refused: true,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if e, err := GetEncrypterFromJwk(c.alg, c.public, nil); err != nil || e == nil {
+				t.Errorf("[RFC 7517 4.3] no MUST forbids this jwk, so it must build an Encrypter by default, got %v", err)
+			}
+			if d, err := GetDecrypterFromJwk(c.alg, c.private, nil); err != nil || d == nil {
+				t.Errorf("[RFC 7517 4.3] no MUST forbids this jwk, so it must build a Decrypter by default, got %v", err)
+			}
+			e, err := GetEncrypterFromJwk(c.alg, c.public, strict)
+			if c.refused && (!errors.Is(err, joseerror.ErrInvalidPublicKey) || e != nil) {
+				t.Errorf("[RFC 7517 4.3] this jwk SHOULD NOT be published, so StrictKeyOperations must refuse it with ErrInvalidPublicKey and no Encrypter, got %v", err)
+			}
+			if !c.refused && (err != nil || e == nil) {
+				t.Errorf("[RFC 7517 4.3] section 4.3 discourages nothing in this jwk, so StrictKeyOperations must accept it, got %v", err)
+			}
+			d, err := GetDecrypterFromJwk(c.alg, c.private, strict)
+			if c.refused && (!errors.Is(err, joseerror.ErrInvalidPrivateKey) || d != nil) {
+				t.Errorf("[RFC 7517 4.3] this jwk SHOULD NOT be published, so StrictKeyOperations must refuse it with ErrInvalidPrivateKey and no Decrypter, got %v", err)
+			}
+			if !c.refused && (err != nil || d == nil) {
+				t.Errorf("[RFC 7517 4.3] section 4.3 discourages nothing in this jwk, so StrictKeyOperations must accept it, got %v", err)
+			}
+		})
 	}
 }
 
@@ -358,11 +440,11 @@ func TestGetEncrypterFromJwk_RefusesDirAndAlgorithmsThatAreNotForKeyManagement(t
 			"RSA": rsaPrivateJwkFixture(t),
 		} {
 			t.Run(alg.String()+"/"+name, func(t *testing.T) {
-				encrypter, err := GetEncrypterFromJwk(alg, key)
+				encrypter, err := GetEncrypterFromJwk(alg, key, nil)
 				if !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || encrypter != nil {
 					t.Errorf("[RFC 7518 4.1] want ErrUnsupportedAlgorithm and a nil Encrypter, got %v and %v", err, encrypter)
 				}
-				decrypter, err := GetDecrypterFromJwk(alg, key)
+				decrypter, err := GetDecrypterFromJwk(alg, key, nil)
 				if !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || decrypter != nil {
 					t.Errorf("[RFC 7518 4.1] want ErrUnsupportedAlgorithm and a nil Decrypter, got %v and %v", err, decrypter)
 				}
@@ -373,8 +455,8 @@ func TestGetEncrypterFromJwk_RefusesDirAndAlgorithmsThatAreNotForKeyManagement(t
 
 func TestGetEncrypterFromJwk_RefusesDirWithAPointerToDirectKey(t *testing.T) {
 	jwk := map[string]any{"kty": "oct", "k": b64(randomBytes(t, 16)), "alg": "dir", "use": "enc"}
-	_, encErr := GetEncrypterFromJwk(jwa.Dir, jwk)
-	_, decErr := GetDecrypterFromJwk(jwa.Dir, jwk)
+	_, encErr := GetEncrypterFromJwk(jwa.Dir, jwk, nil)
+	_, decErr := GetDecrypterFromJwk(jwa.Dir, jwk, nil)
 	for name, err := range map[string]error{"GetEncrypterFromJwk": encErr, "GetDecrypterFromJwk": decErr} {
 		if err == nil || !strings.Contains(err.Error(), "jwe.DirectKey") {
 			t.Errorf("[RFC 8725 3.1] %s: a jwk names no enc for a dir key, so the refusal must point to jwe.DirectKey, got %v", name, err)
@@ -401,20 +483,20 @@ func TestGetEncrypterFromJwk_AJwkOfTheWrongShapeIsRefusedNotPanicked(t *testing.
 						t.Fatalf("[RFC 7517 4] a %s holding %s comes from a peer and must be refused, not panic: %v", member, shapeName, r)
 					}
 				}()
-				if e, err := GetEncrypterFromJwk(jwa.A128KW, jwk); err == nil || e != nil {
+				if e, err := GetEncrypterFromJwk(jwa.A128KW, jwk, nil); err == nil || e != nil {
 					t.Errorf("[RFC 7517 4] a %s holding %s must be refused with a nil Encrypter, got %v", member, shapeName, err)
 				}
-				if d, err := GetDecrypterFromJwk(jwa.A128KW, jwk); err == nil || d != nil {
+				if d, err := GetDecrypterFromJwk(jwa.A128KW, jwk, nil); err == nil || d != nil {
 					t.Errorf("[RFC 7517 4] a %s holding %s must be refused with a nil Decrypter, got %v", member, shapeName, err)
 				}
 			})
 		}
 	}
 	for _, jwk := range []map[string]any{nil, {}} {
-		if e, err := GetEncrypterFromJwk(jwa.RSAOAEP, jwk); err == nil || e != nil {
+		if e, err := GetEncrypterFromJwk(jwa.RSAOAEP, jwk, nil); err == nil || e != nil {
 			t.Errorf("[RFC 7517 4.1] an empty jwk must be refused with a nil Encrypter, got %v", err)
 		}
-		if d, err := GetDecrypterFromJwk(jwa.RSAOAEP, jwk); err == nil || d != nil {
+		if d, err := GetDecrypterFromJwk(jwa.RSAOAEP, jwk, nil); err == nil || d != nil {
 			t.Errorf("[RFC 7517 4.1] an empty jwk must be refused with a nil Decrypter, got %v", err)
 		}
 	}

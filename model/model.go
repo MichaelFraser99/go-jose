@@ -120,6 +120,20 @@ type JoseOptions struct {
 	// so turn this on to accept keys whose publisher marks them inconsistently.
 	IgnoreKeyUse bool
 
+	// StrictKeyOperations refuses a jwk that RFC 7517 section 4.3 says SHOULD NOT
+	// be published: one carrying both "use" and "key_ops", or one whose "key_ops"
+	// names unrelated operations. Section 4.3 relates only "sign" with "verify",
+	// "encrypt" with "decrypt", and "wrapKey" with "unwrapKey". Any other
+	// combination is refused, including "deriveKey" with "deriveBits", which
+	// WebCrypto gives an ECDH private key. Off by default, including when no
+	// options are passed, because no MUST forbids such a jwk.
+	//
+	// It applies to jws.GetValidatorFromJwk, jwe.GetEncrypterFromJwk,
+	// jwe.GetDecrypterFromJwk, and the jwk and jku keys of a token. A token's
+	// keys are not checked when IgnoreKeyUse is on, as no "use" or "key_ops"
+	// rule applies to them then.
+	StrictKeyOperations bool
+
 	// X509ExtKeyUsages names the extended key usages that permit an x5c or x5u
 	// certificate to verify a JWS. RFC 5280 section 4.2.1.12 says a certificate whose
 	// extension is present MUST only be used for a purpose it names, and no purpose is

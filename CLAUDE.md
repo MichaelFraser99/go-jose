@@ -6,7 +6,7 @@ This file gives guidance to Claude Code (claude.ai/code) when it works in this r
 
 A zero-dependency Go implementation of the JOSE standards: JWS (RFC 7515), JWE (RFC 7516), JWK (RFC 7517), JWA (RFC 7518) and JWT (RFC 7519). It is a library, not a service.
 
-JWE is the Compact Serialization only, with the RSA-OAEP family, AES Key Wrap and `dir` for key management and all six RFC 7518 section 5 content encryption algorithms. `RSA1_5` is left out on purpose (RFC 8725 section 3.2). A `dir` key is a `jwe.DirectKey` bound to one `enc` (RFC 8725 section 3.1), and `jwe.Decrypt` returns the decrypter that succeeded so a caller never has to trust `kid`. ECDH-ES, AES GCM key wrap, PBES2, `zip`, nested JWTs and HPKE are planned under issue #72 and not yet implemented.
+JWE is the Compact Serialization only, with the RSA-OAEP family, ECDH-ES (P-256, P-384, P-521 and X25519, direct and with AES Key Wrap), AES Key Wrap and `dir` for key management and all six RFC 7518 section 5 content encryption algorithms. `RSA1_5` is left out on purpose (RFC 8725 section 3.2). A `dir` key is a `jwe.DirectKey` bound to one `enc` (RFC 8725 section 3.1), and `jwe.Decrypt` returns the decrypter that succeeded so a caller never has to trust `kid`. AES GCM key wrap, PBES2, `zip`, nested JWTs and HPKE are planned under issue #72 and not yet implemented.
 
 ## Commands
 
@@ -70,6 +70,10 @@ A recipient MUST validate an `x5c` chain per RFC 5280, and RFC 5280 path validat
 
 A zero-valued field and a `nil` `*JoseOptions` must mean the same thing. `UseTokenProvidedKeys` is the example: it is off when unset and off when no options are passed. In v0.10.0 a `nil` options pointer turned it on while a constructed struct turned it off, so setting any unrelated option silently changed which keys verified a token. Keep new fields in the same shape, so that the zero value is the behaviour the documentation describes.
 
+### A SHOULD NOT on a peer's data is accepted by default, with a flag to refuse it
+
+When an RFC says that a jwk, header or token SHOULD NOT hold something, accept it by default. Add a `JoseOptions` bool that refuses it, off when unset. A MUST NOT is refused always. `StrictKeyOperations` is the example: RFC 7517 section 4.3 says that `use` and `key_ops` SHOULD NOT be used together, and that unrelated operations SHOULD NOT be combined. Do not refuse either by default.
+
 ### Never ask a caller's ML-DSA key for its parameters
 
 `crypto/mldsa` panics when `Parameters()` is called on a zero-value `*mldsa.PrivateKey` or `*mldsa.PublicKey`, and a zero-value private key reports the all-zero seed, which is the published RFC 9964 example key. So `common.UsableMLDSAPrivateKey` and `common.UsableMLDSAPublicKey` rebuild a key for the parameter set the algorithm names, and require the rebuilt key to match. Route every new ML-DSA entry point through them.
@@ -89,6 +93,10 @@ RFC 7516 section 11.5 requires a recipient not to reveal which step of decryptio
 ### A JWE header's key parameters name the recipient's public key
 
 In a JWS, `jku`, `jwk`, `x5u` and `x5c` name the key that verifies. In a JWE they name the public key the sender encrypted to, which cannot decrypt. So `jwe.Decrypt` never fetches or reads them, and the caller's decrypters are the only keys. Do not route a JWE header through `header.ValidateHeader`, which builds retrievers for them. `header.ValidateJWEHeader` is the JWE path.
+
+### An ECDH-ES `epk` is checked twice, for different reasons
+
+`header.ValidateJWEHeader` checks that the `epk` is a valid public key on a supported curve, with no private member. Those faults depend on the token alone, so they are `ErrMalformedToken` and are refused before any decrypter runs. In `ecdhes.Decrypter`, `crypto/ecdh` then refuses an `epk` on a different curve from the recipient's key, as RFC 8725 section 3.4 requires. That fault depends on the recipient's key, so it is the uniform `ErrDecryptionFailed`. Keep the header check: it stops an invalid point reaching `crypto/ecdh`. Do not add a curve comparison before the key agreement, because `crypto/ecdh` already refuses the mismatch and no test can reach a second check. An X25519 key is never a signing key (RFC 8037 section 3.2), so no signer or validator may accept an `*ecdh` key.
 
 ## Conventions
 

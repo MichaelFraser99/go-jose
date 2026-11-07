@@ -2,6 +2,7 @@ package common
 
 import (
 	"crypto"
+	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -243,23 +244,206 @@ func JwkFromEdDSAPrivateKey(privateKey *ed25519.PrivateKey) (map[string]any, err
 	return withThumbprint(jwk)
 }
 
-func requireEd25519Subtype(jwk map[string]any, class error) error {
+func okpSubtype(jwk map[string]any, class error) (string, error) {
 	raw, present := jwk["crv"]
 	if !present {
-		return fmt.Errorf("%wan OKP jwk must carry a 'crv' naming its subtype", class)
+		return "", fmt.Errorf("%wan OKP jwk must carry a 'crv' naming its subtype", class)
 	}
 	crv, ok := raw.(string)
 	if !ok {
-		return fmt.Errorf("%wthe 'crv' claim must be a string", class)
+		return "", fmt.Errorf("%wthe 'crv' claim must be a string", class)
 	}
-	if crv != "Ed25519" {
-		return fmt.Errorf("%wEd25519 is the only OKP subtype supported", jose_errors.ErrUnsupportedAlgorithm)
+	if crv != "Ed25519" && crv != "X25519" {
+		return "", fmt.Errorf("%wthe 'crv' of an OKP jwk is not one of Ed25519 and X25519", jose_errors.ErrUnsupportedAlgorithm)
+	}
+	return crv, nil
+}
+
+func requireOKPSubtype(jwk map[string]any, want string, class error) error {
+	crv, err := okpSubtype(jwk, class)
+	if err != nil {
+		return err
+	}
+	if crv != want {
+		return fmt.Errorf("%wan OKP jwk of subtype %s is not a %s key", jose_errors.ErrUnsupportedAlgorithm, crv, want)
 	}
 	return nil
 }
 
+// OKPPublicKeyFromJwk reads the jwk of an OKP public key. RFC 8037 section 2
+// names the subtype in "crv": Ed25519 is returned as an *ed25519.PublicKey and
+// X25519 as an *ecdh.PublicKey. Any other subtype is refused with
+// ErrUnsupportedAlgorithm.
+func OKPPublicKeyFromJwk(jwk map[string]any) (crypto.PublicKey, error) {
+	crv, err := okpSubtype(jwk, jose_errors.ErrInvalidPublicKey)
+	if err != nil {
+		return nil, err
+	}
+	if crv == "X25519" {
+		key, err := X25519PublicKeyFromJwk(jwk)
+		if err != nil {
+			return nil, err
+		}
+		return key, nil
+	}
+	key, err := EdDSAPublicKeyFromJwk(jwk)
+	if err != nil {
+		return nil, err
+	}
+	return key, nil
+}
+
+// OKPPrivateKeyFromJwk reads the jwk of an OKP private key. RFC 8037 section 2
+// names the subtype in "crv": Ed25519 is returned as an *ed25519.PrivateKey and
+// X25519 as an *ecdh.PrivateKey. Any other subtype is refused with
+// ErrUnsupportedAlgorithm.
+func OKPPrivateKeyFromJwk(jwk map[string]any) (crypto.PrivateKey, error) {
+	crv, err := okpSubtype(jwk, jose_errors.ErrInvalidPrivateKey)
+	if err != nil {
+		return nil, err
+	}
+	if crv == "X25519" {
+		key, err := X25519PrivateKeyFromJwk(jwk)
+		if err != nil {
+			return nil, err
+		}
+		return key, nil
+	}
+	key, err := EdDSAPrivateKeyFromJwk(jwk)
+	if err != nil {
+		return nil, err
+	}
+	return key, nil
+}
+
+const x25519KeySize = 32
+
+// X25519PublicKeyFromJwk reads the jwk of an X25519 public key. RFC 8037
+// section 2 carries the key as "x", and RFC 7748 section 5 makes it 32 octets
+// that are accepted even when not canonical.
+func X25519PublicKeyFromJwk(jwk map[string]any) (*ecdh.PublicKey, error) {
+	if err := requireOKPSubtype(jwk, "X25519", jose_errors.ErrInvalidPublicKey); err != nil {
+		return nil, err
+	}
+	xBytes, err := jsonutils.ExtractAndDecodeBase64urlString(jwk, "x")
+	if err != nil {
+		return nil, fmt.Errorf("error extracting 'x' parameter from jwk: %w", err)
+	}
+	return x25519PublicKey(xBytes, jose_errors.ErrInvalidPublicKey)
+}
+
+// X25519PrivateKeyFromJwk reads the jwk of an X25519 private key. RFC 8037
+// section 2 carries the private key of the pair as "d" and its public key as
+// "x", and RFC 7748 section 5 makes each 32 octets. That public key is the
+// X25519 of "d" and the base point (RFC 7748 section 6.1), so an "x" that is
+// not exactly that output is refused.
+func X25519PrivateKeyFromJwk(jwk map[string]any) (*ecdh.PrivateKey, error) {
+	if err := requireOKPSubtype(jwk, "X25519", jose_errors.ErrInvalidPrivateKey); err != nil {
+		return nil, err
+	}
+	xBytes, err := jsonutils.ExtractAndDecodeBase64urlString(jwk, "x")
+	if err != nil {
+		return nil, fmt.Errorf("error extracting 'x' parameter from jwk: %w", err)
+	}
+	dBytes, err := jsonutils.ExtractAndDecodeBase64urlString(jwk, "d")
+	if err != nil {
+		return nil, fmt.Errorf("error extracting 'd' parameter from jwk: %w", err)
+	}
+
+	private, err := ecdh.X25519().NewPrivateKey(dBytes)
+	if err != nil {
+		return nil, fmt.Errorf("%wthe 'd' parameter of an X25519 jwk is %d octets, got %d: %w", jose_errors.ErrInvalidPrivateKey, x25519KeySize, len(dBytes), err)
+	}
+	public, err := x25519PublicKey(xBytes, jose_errors.ErrInvalidPrivateKey)
+	if err != nil {
+		return nil, err
+	}
+	if !private.PublicKey().Equal(public) {
+		return nil, fmt.Errorf("%wthe 'x' of an X25519 jwk is not the public key of its 'd'", jose_errors.ErrInvalidPrivateKey)
+	}
+	return private, nil
+}
+
+func x25519PublicKey(xBytes []byte, class error) (*ecdh.PublicKey, error) {
+	public, err := ecdh.X25519().NewPublicKey(xBytes)
+	if err != nil {
+		return nil, fmt.Errorf("%wthe 'x' parameter of an X25519 jwk is %d octets, got %d: %w", class, x25519KeySize, len(xBytes), err)
+	}
+	return public, nil
+}
+
+// JwkFromECDHPublicKey builds the jwk of a crypto/ecdh public key. An X25519
+// key becomes an OKP jwk with "crv" X25519 and "x" (RFC 8037 section 2). A
+// P-256, P-384 or P-521 key becomes the EC jwk JwkFromECDSAPublicKey builds
+// for the same point (RFC 7518 section 6.2.1).
+func JwkFromECDHPublicKey(publicKey *ecdh.PublicKey) (map[string]any, error) {
+	if publicKey == nil {
+		return nil, fmt.Errorf("%wan ECDH public key needs a curve and a point", jose_errors.ErrInvalidPublicKey)
+	}
+	if publicKey.Curve() == ecdh.X25519() {
+		return withThumbprint(map[string]any{
+			"kty": "OKP",
+			"crv": "X25519",
+			"x":   base64.RawURLEncoding.EncodeToString(publicKey.Bytes()),
+		})
+	}
+	curve, err := ellipticCurveOfECDH(publicKey.Curve(), jose_errors.ErrInvalidPublicKey)
+	if err != nil {
+		return nil, err
+	}
+	ecdsaKey, err := ecdsa.ParseUncompressedPublicKey(curve, publicKey.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("%wthe point of an ECDH key is not on its curve: %w", jose_errors.ErrInvalidPublicKey, err)
+	}
+	return JwkFromECDSAPublicKey(ecdsaKey)
+}
+
+// JwkFromECDHPrivateKey builds the jwk of a crypto/ecdh private key. An X25519
+// key becomes an OKP jwk with "crv" X25519, "x" and "d" (RFC 8037 section 2).
+// A P-256, P-384 or P-521 key becomes the EC jwk JwkFromECDSAPrivateKey builds
+// for the same scalar (RFC 7518 section 6.2.2).
+func JwkFromECDHPrivateKey(privateKey *ecdh.PrivateKey) (map[string]any, error) {
+	if privateKey == nil {
+		return nil, fmt.Errorf("%wan ECDH private key needs a curve and a scalar", jose_errors.ErrInvalidPrivateKey)
+	}
+	if privateKey.Curve() == ecdh.X25519() {
+		jwk, err := withThumbprint(map[string]any{
+			"kty": "OKP",
+			"crv": "X25519",
+			"x":   base64.RawURLEncoding.EncodeToString(privateKey.PublicKey().Bytes()),
+		})
+		if err != nil {
+			return nil, err
+		}
+		jwk["d"] = base64.RawURLEncoding.EncodeToString(privateKey.Bytes())
+		return jwk, nil
+	}
+	curve, err := ellipticCurveOfECDH(privateKey.Curve(), jose_errors.ErrInvalidPrivateKey)
+	if err != nil {
+		return nil, err
+	}
+	ecdsaKey, err := ecdsa.ParseRawPrivateKey(curve, privateKey.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("%wthe scalar of an ECDH key is not in [1, n-1]: %w", jose_errors.ErrInvalidPrivateKey, err)
+	}
+	return JwkFromECDSAPrivateKey(ecdsaKey)
+}
+
+func ellipticCurveOfECDH(curve ecdh.Curve, class error) (elliptic.Curve, error) {
+	switch curve {
+	case ecdh.P256():
+		return elliptic.P256(), nil
+	case ecdh.P384():
+		return elliptic.P384(), nil
+	case ecdh.P521():
+		return elliptic.P521(), nil
+	default:
+		return nil, fmt.Errorf("%wthe curve of an ECDH key is one of X25519, P-256, P-384 and P-521", class)
+	}
+}
+
 func EdDSAPublicKeyFromJwk(jwk map[string]any) (*ed25519.PublicKey, error) {
-	if err := requireEd25519Subtype(jwk, jose_errors.ErrInvalidPublicKey); err != nil {
+	if err := requireOKPSubtype(jwk, "Ed25519", jose_errors.ErrInvalidPublicKey); err != nil {
 		return nil, err
 	}
 
@@ -276,7 +460,7 @@ func EdDSAPublicKeyFromJwk(jwk map[string]any) (*ed25519.PublicKey, error) {
 }
 
 func EdDSAPrivateKeyFromJwk(jwk map[string]any) (*ed25519.PrivateKey, error) {
-	if err := requireEd25519Subtype(jwk, jose_errors.ErrInvalidPrivateKey); err != nil {
+	if err := requireOKPSubtype(jwk, "Ed25519", jose_errors.ErrInvalidPrivateKey); err != nil {
 		return nil, err
 	}
 

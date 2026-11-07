@@ -473,7 +473,7 @@ func TestGetValidatorFromJwk(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.algorithm.String(), func(t *testing.T) {
 			jwkMap, sig := tt.jwk()
-			validator, err := GetValidatorFromJwk(tt.algorithm, jwkMap)
+			validator, err := GetValidatorFromJwk(tt.algorithm, jwkMap, nil)
 			tt.verify(t, validator, sig, err)
 		})
 	}

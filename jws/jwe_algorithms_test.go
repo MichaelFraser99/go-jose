@@ -18,7 +18,7 @@ import (
 	"github.com/MichaelFraser99/go-jose/model"
 )
 
-var jweKeyManagementAlgorithms = []jwa.Algorithm{jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512, jwa.A128KW, jwa.A192KW, jwa.A256KW, jwa.Dir}
+var jweKeyManagementAlgorithms = []jwa.Algorithm{jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512, jwa.A128KW, jwa.A192KW, jwa.A256KW, jwa.Dir, jwa.ECDHES, jwa.ECDHESA128KW, jwa.ECDHESA192KW, jwa.ECDHESA256KW}
 
 func TestAJWEKeyManagementAlgorithmCannotSignOrVerifyAJWS(t *testing.T) {
 	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -40,7 +40,7 @@ func TestAJWEKeyManagementAlgorithmCannotSignOrVerifyAJWS(t *testing.T) {
 			if validator, err := jws.GetValidator(alg, &rsaKey.PublicKey); !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || validator != nil {
 				t.Errorf("[RFC 7518 4.1] GetValidator must refuse %s, got %#v and %v", alg, validator, err)
 			}
-			if validator, err := jws.GetValidatorFromJwk(alg, *publicJwk); !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || validator != nil {
+			if validator, err := jws.GetValidatorFromJwk(alg, *publicJwk, nil); !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || validator != nil {
 				t.Errorf("[RFC 7518 4.1] GetValidatorFromJwk must refuse %s, got %#v and %v", alg, validator, err)
 			}
 			called := false

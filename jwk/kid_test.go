@@ -2,6 +2,7 @@ package jwk
 
 import (
 	"crypto"
+	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -50,6 +51,15 @@ func keyPairs(t *testing.T) map[string]struct {
 		public  crypto.PublicKey
 		private crypto.PrivateKey
 	}{public: &edPub, private: &edPriv}
+
+	xKey, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("failed to generate X25519: %v", err)
+	}
+	pairs["X25519"] = struct {
+		public  crypto.PublicKey
+		private crypto.PrivateKey
+	}{public: xKey.PublicKey(), private: xKey}
 
 	return pairs
 }

@@ -59,6 +59,18 @@ const (
 	// Dir is direct use of a shared symmetric key as the CEK, as RFC 7518 section
 	// 4.5 defines it.
 	Dir
+	// ECDHES is ECDH-ES key agreement used directly as the CEK, as RFC 7518
+	// section 4.6 defines it.
+	ECDHES
+	// ECDHESA128KW is ECDH-ES key agreement whose result wraps the CEK with
+	// A128KW, as RFC 7518 section 4.6 defines it.
+	ECDHESA128KW
+	// ECDHESA192KW is ECDH-ES key agreement whose result wraps the CEK with
+	// A192KW, as RFC 7518 section 4.6 defines it.
+	ECDHESA192KW
+	// ECDHESA256KW is ECDH-ES key agreement whose result wraps the CEK with
+	// A256KW, as RFC 7518 section 4.6 defines it.
+	ECDHESA256KW
 )
 
 func (a Algorithm) String() string {
@@ -115,6 +127,14 @@ func (a Algorithm) String() string {
 		return "A256KW"
 	case Dir:
 		return "dir"
+	case ECDHES:
+		return "ECDH-ES"
+	case ECDHESA128KW:
+		return "ECDH-ES+A128KW"
+	case ECDHESA192KW:
+		return "ECDH-ES+A192KW"
+	case ECDHESA256KW:
+		return "ECDH-ES+A256KW"
 	default:
 		return ""
 	}
@@ -176,6 +196,14 @@ func GetAlgorithm(alg string) Algorithm {
 		return A256KW
 	case "dir":
 		return Dir
+	case "ECDH-ES":
+		return ECDHES
+	case "ECDH-ES+A128KW":
+		return ECDHESA128KW
+	case "ECDH-ES+A192KW":
+		return ECDHESA192KW
+	case "ECDH-ES+A256KW":
+		return ECDHESA256KW
 	default:
 		return Unknown
 	}

@@ -31,9 +31,12 @@ const defaultMaxKeysTried = 100
 // An "alg" or "enc" in head must name the algorithm in use, else
 // ErrUnsupportedAlgorithm. A "zip" is refused with ErrUnsupportedAlgorithm: RFC
 // 8725 section 3.6 advises against compressing before encryption. The header
-// emitted must have the shapes Decrypt accepts, else ErrMalformedClaim or
-// ErrMissingCriticalClaim. The AAD is the base64url-encoded header (section 5.1
-// step 14), and the Initialization Vector is random.
+// emitted must have the shapes Decrypt accepts, including the "epk" an ECDH-ES
+// alg requires, else the ErrMalformedClaim, ErrMissingClaim,
+// ErrMissingCriticalClaim or ErrUnsupportedAlgorithm naming the fault. A JWE
+// Encrypted Key of a length Decrypt refuses for alg, such as a non-empty one
+// for dir or ECDH-ES, is ErrEncryptionError. The AAD is the base64url-encoded
+// header (section 5.1 step 14), and the Initialization Vector is random.
 func Encrypt(encrypter model.Encrypter, enc jwa.Encryption, plaintext []byte, head map[string]any) (string, error) {
 	return encrypt(rand.Reader, encrypter, enc, plaintext, head)
 }
@@ -75,8 +78,8 @@ func encrypt(random io.Reader, encrypter model.Encrypter, enc jwa.Encryption, pl
 	if _, found := h["zip"]; found {
 		return "", fmt.Errorf("%wthe encrypter added a 'zip' header to plaintext that was not compressed", joseerror.ErrEncryptionError)
 	}
-	if alg == jwa.Dir && len(encryptedKey) != 0 {
-		return "", fmt.Errorf("%wthe JWE Encrypted Key of a dir JWE is empty (RFC 7516 section 5.1 step 5)", joseerror.ErrEncryptionError)
+	if least, most := encryptedKeySize(alg, contentenc.KeySize(enc)); len(encryptedKey) < least || len(encryptedKey) > most {
+		return "", fmt.Errorf("%wthe encrypter returned a JWE Encrypted Key of %d octets, and Decrypt accepts %d to %d for %s", joseerror.ErrEncryptionError, len(encryptedKey), least, most, alg.String())
 	}
 
 	headBytes, err := json.Marshal(h)
@@ -132,6 +135,12 @@ func checkProducerHeader(headBytes []byte) error {
 //     AllowedContentEncryptionAlgorithms when set, else ErrUnsupportedAlgorithm.
 //   - "zip" is ErrUnsupportedAlgorithm: section 4.1.3 requires it to be
 //     processed, and this library does not decompress.
+//   - For an ECDH-ES alg, "epk" must be present and be an EC or OKP public key
+//     with its point on its curve and no private member (RFC 7518 section
+//     4.6.1.1, RFC 8725 section 3.4); an "epk" on a curve this library does not
+//     implement, such as X448, is ErrUnsupportedAlgorithm. "apu" and "apv" must
+//     be base64url strings and must differ (section 4.6.2). No other alg reads
+//     "epk", "apu" or "apv".
 //   - "crit" follows RFC 7515 section 4.1.11, as section 4.1.13 requires, and
 //     may name no parameter RFC 7516 or RFC 7518 defines for JWE.
 //   - The parameters shared with RFC 7515 have the shapes jws.Verify requires,
@@ -139,12 +148,13 @@ func checkProducerHeader(headBytes []byte) error {
 //     as they do there. "b64" (RFC 7797) is a JWS parameter and is not read.
 //
 // The Initialization Vector and Authentication Tag must be the lengths enc
-// defines. The JWE Encrypted Key of a dir JWE must be empty, and that of an
-// A128KW, A192KW or A256KW JWE must be 8 octets longer than enc's key (section
-// 5.2 step 10, RFC 3394 section 2.2.1). That of an RSA-OAEP JWE is as long as
-// the recipient's modulus (RFC 8017 section 7.1.2), so it must be 256 to 1024
-// octets, the moduli this library accepts. Any other length is
-// ErrMalformedToken, and is refused before any decrypter is tried.
+// defines. The JWE Encrypted Key of a dir or ECDH-ES JWE must be empty, and
+// that of an A128KW, A192KW, A256KW or ECDH-ES key wrap JWE must be 8 octets
+// longer than enc's key (section 5.2 step 10, RFC 3394 section 2.2.1). That of
+// an RSA-OAEP JWE is as long as the recipient's modulus (RFC 8017 section
+// 7.1.2), so it must be 256 to 1024 octets, the moduli this library accepts.
+// Any other length is ErrMalformedToken, and is refused before any decrypter
+// is tried.
 //
 // Only the decrypters passed are tried. A "jku", "jwk", "x5u" or "x5c" in the
 // header names the recipient's public key, which cannot decrypt, so none is
@@ -321,11 +331,11 @@ func checkOptions(opts *model.JoseOptions) error {
 
 func encryptedKeySize(alg jwa.Algorithm, cekSize int) (least, most int) {
 	switch alg {
-	case jwa.A128KW, jwa.A192KW, jwa.A256KW:
+	case jwa.A128KW, jwa.A192KW, jwa.A256KW, jwa.ECDHESA128KW, jwa.ECDHESA192KW, jwa.ECDHESA256KW:
 		return cekSize + 8, cekSize + 8
 	case jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512:
 		return common.MinimumRSAModulusBits / 8, common.MaximumRSAModulusBits / 8
-	case jwa.Dir, jwa.ES256, jwa.ES384, jwa.ES512, jwa.RS256, jwa.RS384, jwa.RS512, jwa.PS256, jwa.PS384, jwa.PS512, jwa.HS256, jwa.HS384, jwa.HS512, jwa.EdDSA, jwa.Ed25519, jwa.MLDSA44, jwa.MLDSA65, jwa.MLDSA87, jwa.Unknown:
+	case jwa.Dir, jwa.ECDHES, jwa.ES256, jwa.ES384, jwa.ES512, jwa.RS256, jwa.RS384, jwa.RS512, jwa.PS256, jwa.PS384, jwa.PS512, jwa.HS256, jwa.HS384, jwa.HS512, jwa.EdDSA, jwa.Ed25519, jwa.MLDSA44, jwa.MLDSA65, jwa.MLDSA87, jwa.Unknown:
 	}
 	return 0, 0
 }

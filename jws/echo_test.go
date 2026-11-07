@@ -42,7 +42,7 @@ func TestGetValidatorFromJwk_ARefusedAlgIsEchoedQuotedAndBounded(t *testing.T) {
 			}
 			jwk["alg"] = test.alg
 
-			_, err = GetValidatorFromJwk(jwa.RS256, jwk)
+			_, err = GetValidatorFromJwk(jwa.RS256, jwk, nil)
 			if err == nil {
 				t.Fatal("[RFC 8725 3.1] a jwk whose alg is not RS256 must not build an RS256 validator")
 			}
