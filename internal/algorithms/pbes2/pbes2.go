@@ -79,9 +79,10 @@ func checkPassword(alg jwa.Algorithm, password []byte, class error) error {
 }
 
 // NewEncrypter returns an Encrypter for alg that derives a key from password
-// with count PBKDF2 iterations, or DefaultCount when count is 0. A count other
-// than 0 must be at least RecommendedCount, as RFC 7518 section 4.8.1.2
-// recommends. password must not be empty, and is copied.
+// with count PBKDF2 iterations, or DefaultCount when count is 0. A negative
+// count is refused, since RFC 7518 section 4.8.1.2 requires a positive one. A
+// count below RecommendedCount is accepted, as the section only recommends
+// that minimum. password must not be empty, and is copied.
 func NewEncrypter(alg jwa.Algorithm, password []byte, count int) (*Encrypter, error) {
 	if err := checkPassword(alg, password, joseerror.ErrInvalidPublicKey); err != nil {
 		return nil, err
@@ -89,8 +90,8 @@ func NewEncrypter(alg jwa.Algorithm, password []byte, count int) (*Encrypter, er
 	if count == 0 {
 		count = DefaultCount
 	}
-	if count < RecommendedCount {
-		return nil, fmt.Errorf("%w%s requires an iteration count of at least %d (RFC 7518 section 4.8.1.2), got %d", joseerror.ErrInvalidPublicKey, alg, RecommendedCount, count)
+	if count < 0 {
+		return nil, fmt.Errorf("%w%s requires a positive iteration count (RFC 7518 section 4.8.1.2), got %d", joseerror.ErrInvalidPublicKey, alg, count)
 	}
 	return &Encrypter{alg: alg, password: slices.Clone(password), count: count}, nil
 }

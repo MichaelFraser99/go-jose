@@ -574,7 +574,9 @@ encrypter, err := jwe.GetEncrypter(jwa.PBES2HS256A128KW, jwe.PasswordKey{Passwor
 decrypter, err := jwe.GetDecrypter(jwa.PBES2HS256A128KW, jwe.PasswordKey{Password: []byte(password)})
 ```
 
-`Count` is the number of PBKDF2 iterations, which `Encrypt` writes to the `p2c` header. If `Count` is 0, it is 600,000. draft-ietf-oauth-rfc8725bis section 3.13 cites this figure from OWASP for HMAC SHA-256. Any other `Count` must be at least 1000, the minimum that RFC 7518 section 4.8.1.2 recommends. A decrypter ignores `Count`, because each token names its own `p2c`. `Encrypt` writes a random 16-octet salt to the `p2s` header for each token. Do not set `p2s` or `p2c` yourself: `Encrypt` refuses them with `ErrMalformedClaim`.
+`Count` is the number of PBKDF2 iterations, which `Encrypt` writes to the `p2c` header. If `Count` is 0, it is 600,000. draft-ietf-oauth-rfc8725bis section 3.13 cites this figure from OWASP for HMAC SHA-256. A negative `Count` is refused, because section 4.8.1.2 requires a positive `p2c`. A decrypter ignores `Count`, because each token names its own `p2c`. `Encrypt` writes a random 16-octet salt to the `p2s` header for each token. Do not set `p2s` or `p2c` yourself: `Encrypt` refuses them with `ErrMalformedClaim`.
+
+CAUTION: Do not set a `Count` below 1000. RFC 7518 section 4.8.1.2 recommends at least 1000, and a lower count makes the password cheap to guess from any captured token. `Encrypt` accepts a lower count, because the section does not require the minimum. A recipient that sets `RequireRecommendedPBES2Count` refuses such a token.
 
 The sender chooses `p2c`, and each PBES2 decrypter that `Decrypt` tries runs that many iterations. So `JoseOptions.MaxPBES2Count` limits the iterations of one call to `Decrypt`. The limit is `p2c` multiplied by the number of decrypters of the token's `alg`. If that is more than `MaxPBES2Count`, `Decrypt` refuses the token with `ErrOutOfBounds` before any decrypter runs. The default is 1,200,000, which is twice the OWASP figure, as draft-ietf-oauth-rfc8725bis section 3.13 recommends. Thus one password decrypter accepts the default `Count` of 600,000, and so do two.
 

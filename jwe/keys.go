@@ -51,10 +51,12 @@ func (d *directDecrypter) Public() crypto.PublicKey {
 // encoding, as section 4.8 requires. Password must not be empty.
 //
 // Count is the "p2c" each token is encrypted with. Zero means 600,000, the
-// figure draft-ietf-oauth-rfc8725bis section 3.13 cites from OWASP. Any other
-// value must be at least 1000, the minimum RFC 7518 section 4.8.1.2
-// recommends. A recipient using jwe.Decrypt's default refuses more than
-// 1,200,000. A decrypter reads the count from each token and ignores Count.
+// figure draft-ietf-oauth-rfc8725bis section 3.13 cites from OWASP. A negative
+// Count is refused, as section 4.8.1.2 requires a positive "p2c". A Count
+// below 1000 is accepted, because the section only recommends that minimum,
+// but each iteration fewer makes the password cheaper to guess from a token,
+// and a recipient with RequireRecommendedPBES2Count set refuses it. A
+// recipient using jwe.Decrypt's default refuses more than 1,200,000. A decrypter reads the count from each token and ignores Count.
 // Pass it by value.
 type PasswordKey struct {
 	Password []byte

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"slices"
 	"testing"
 
@@ -255,7 +256,7 @@ func TestGetEncrypter_APasswordKeyCountIsTheP2C(t *testing.T) {
 	password := []byte("password")
 	for _, c := range []struct {
 		count, want int
-	}{{0, 600_000}, {1000, 1000}, {4096, 4096}, {2_000_000, 2_000_000}} {
+	}{{0, 600_000}, {1, 1}, {999, 999}, {1000, 1000}, {4096, 4096}, {2_000_000, 2_000_000}} {
 		encrypter, err := GetEncrypter(jwa.PBES2HS256A128KW, PasswordKey{Password: password, Count: c.count})
 		if err != nil {
 			t.Fatal(err)
@@ -268,9 +269,9 @@ func TestGetEncrypter_APasswordKeyCountIsTheP2C(t *testing.T) {
 			t.Errorf("[RFC 7518 4.8.1.2] a Count of %d must write a p2c of %d, got %v", c.count, c.want, head["p2c"])
 		}
 	}
-	for _, count := range []int{-1, 1, 999} {
+	for _, count := range []int{-1, math.MinInt} {
 		if encrypter, err := GetEncrypter(jwa.PBES2HS256A128KW, PasswordKey{Password: password, Count: count}); !errors.Is(err, joseerror.ErrInvalidPublicKey) || encrypter != nil {
-			t.Errorf("[RFC 7518 4.8.1.2] a Count of %d is below the recommended 1000, so this library must not encrypt with it, got %v", count, err)
+			t.Errorf("[RFC 7518 4.8.1.2] p2c must be a positive integer, so a Count of %d must be refused, got %v", count, err)
 		}
 		if decrypter, err := GetDecrypter(jwa.PBES2HS256A128KW, PasswordKey{Password: password, Count: count}); err != nil || decrypter == nil {
 			t.Errorf("a decrypter reads p2c from each token, so a Count of %d must be ignored, got %v", count, err)
