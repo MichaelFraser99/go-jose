@@ -78,6 +78,19 @@ func TestGetEncrypterAndGetDecrypter_RefuseAKeyTheAlgorithmCannotUse(t *testing.
 		{name: "a 65-octet A256CBC-HS512 dir key", alg: jwa.Dir, public: DirectKey{Key: make([]byte, 65), Enc: jwa.A256CBCHS512}, private: DirectKey{Key: make([]byte, 65), Enc: jwa.A256CBCHS512}, clause: "RFC 7518 5.2.5"},
 		{name: "bytes rather than a DirectKey for dir", alg: jwa.Dir, public: make([]byte, 16), private: make([]byte, 16), clause: "RFC 8725 3.1"},
 		{name: "nothing for dir", alg: jwa.Dir, clause: "RFC 7518 4.5"},
+		{name: "a 15-octet A128GCMKW key", alg: jwa.A128GCMKW, public: make([]byte, 15), private: make([]byte, 15), clause: "RFC 7518 4.7"},
+		{name: "a 16-octet A192GCMKW key", alg: jwa.A192GCMKW, public: make([]byte, 16), private: make([]byte, 16), clause: "RFC 7518 4.7"},
+		{name: "a 24-octet A256GCMKW key", alg: jwa.A256GCMKW, public: make([]byte, 24), private: make([]byte, 24), clause: "RFC 7518 4.7"},
+		{name: "an empty A256GCMKW key", alg: jwa.A256GCMKW, public: []byte{}, private: []byte{}, clause: "RFC 7518 4.7"},
+		{name: "a string for A128GCMKW", alg: jwa.A128GCMKW, public: "0123456789abcdef", private: "0123456789abcdef", clause: "RFC 7518 4.7"},
+		{name: "a PasswordKey for A128GCMKW", alg: jwa.A128GCMKW, public: PasswordKey{Password: make([]byte, 16)}, private: PasswordKey{Password: make([]byte, 16)}, clause: "RFC 7518 4.7"},
+		{name: "a DirectKey for A128GCMKW", alg: jwa.A128GCMKW, public: DirectKey{Key: make([]byte, 16), Enc: jwa.A128GCM}, private: DirectKey{Key: make([]byte, 16), Enc: jwa.A128GCM}, clause: "RFC 7518 4.7"},
+		{name: "bytes rather than a PasswordKey for PBES2", alg: jwa.PBES2HS256A128KW, public: []byte("password"), private: []byte("password"), clause: "RFC 7518 4.8"},
+		{name: "a string for PBES2", alg: jwa.PBES2HS384A192KW, public: "password", private: "password", clause: "RFC 7518 4.8"},
+		{name: "a pointer to a PasswordKey for PBES2", alg: jwa.PBES2HS512A256KW, public: &PasswordKey{Password: []byte("password")}, private: &PasswordKey{Password: []byte("password")}, clause: "RFC 7518 4.8"},
+		{name: "an empty password", alg: jwa.PBES2HS256A128KW, public: PasswordKey{Password: []byte{}}, private: PasswordKey{Password: []byte{}}, clause: "RFC 7518 4.8"},
+		{name: "a nil password", alg: jwa.PBES2HS512A256KW, public: PasswordKey{}, private: PasswordKey{}, clause: "RFC 7518 4.8"},
+		{name: "a PasswordKey for A128KW", alg: jwa.A128KW, public: PasswordKey{Password: make([]byte, 16)}, private: PasswordKey{Password: make([]byte, 16)}, clause: "RFC 7518 4.4"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

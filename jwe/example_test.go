@@ -62,6 +62,29 @@ func ExampleDecrypt() {
 	// Output: RSA-OAEP-256 A256GCM {"order":42}
 }
 
+func ExamplePasswordKey() {
+	key := jwe.PasswordKey{Password: []byte("correct horse battery staple")}
+	encrypter, err := jwe.GetEncrypter(jwa.PBES2HS256A128KW, key)
+	if err != nil {
+		panic(err)
+	}
+	token, err := jwe.Encrypt(encrypter, jwa.A128GCM, []byte("for your eyes only"), nil)
+	if err != nil {
+		panic(err)
+	}
+
+	decrypter, err := jwe.GetDecrypter(jwa.PBES2HS256A128KW, key)
+	if err != nil {
+		panic(err)
+	}
+	head, plaintext, _, err := jwe.Decrypt(context.Background(), token, []model.Decrypter{decrypter}, nil)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(head["p2c"], string(plaintext))
+	// Output: 600000 for your eyes only
+}
+
 func ExampleDecrypt_identifyTheSender() {
 	tenantAKey, tenantBKey := make([]byte, 32), make([]byte, 32)
 	if _, err := rand.Read(tenantAKey); err != nil {

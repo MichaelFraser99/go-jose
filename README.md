@@ -528,17 +528,19 @@ The `jwe` package encrypts and decrypts the JWE Compact Serialization of RFC 751
 | `RSA-OAEP`, `RSA-OAEP-256`, `RSA-OAEP-384`, `RSA-OAEP-512` | `*rsa.PublicKey` | `*rsa.PrivateKey`, or a `crypto.Decrypter` with an `*rsa.PublicKey` |
 | `ECDH-ES`, `ECDH-ES+A128KW`, `ECDH-ES+A192KW`, `ECDH-ES+A256KW` | `*ecdsa.PublicKey` on P-256, P-384 or P-521, or `*ecdh.PublicKey` on one of those curves or X25519 | the matching `*ecdsa.PrivateKey` or `*ecdh.PrivateKey` |
 | `A128KW`, `A192KW`, `A256KW` | `[]byte` of 16, 24 or 32 octets | the same `[]byte` |
+| `A128GCMKW`, `A192GCMKW`, `A256GCMKW` | `[]byte` of 16, 24 or 32 octets | the same `[]byte` |
+| `PBES2-HS256+A128KW`, `PBES2-HS384+A192KW`, `PBES2-HS512+A256KW` | `jwe.PasswordKey{Password: password, Count: count}` | a `jwe.PasswordKey` with the same `Password` |
 | `dir` | `jwe.DirectKey{Key: secret, Enc: enc}` | the same `jwe.DirectKey` |
 
 An RSA key must have a modulus of 2048 to 8192 bits. RFC 7518 section 4.3 makes 2048 bits a MUST. `RSA-OAEP-384` and `RSA-OAEP-512` are not in RFC 7518. The IANA "JSON Web Signature and Encryption Algorithms" registry defines them, with SHA-384 and SHA-512 for both OAEP and MGF1.
 
 A `dir` key is bound to one `enc`, as RFC 8725 section 3.1 requires of every key. `Key` must be the length that `Enc` requires. `Encrypt` refuses any other `enc`, and `Decrypt` cannot decrypt a token with any other `enc`. Without this binding, a 32-octet key could decrypt both `A128CBC-HS256` and `A256GCM` tokens, and the token would choose.
 
-CAUTION: Do not encrypt more than 2^32 tokens under one `dir` key with an AES GCM `enc`. RFC 7518 section 8.4 makes this limit a MUST. With `dir`, every token uses the shared key and a random IV, and this library does not count the tokens. The other algorithms make a new key for each token.
+CAUTION: Do not encrypt more than 2^32 tokens under one `dir` key with an AES GCM `enc`, or under one `A128GCMKW`, `A192GCMKW` or `A256GCMKW` key. RFC 7518 section 8.4 makes this limit a MUST. With these keys, every token uses the shared key and a random IV, and this library does not count the tokens. The other algorithms make a new key for each token.
 
 The `enc` values are `A128CBC-HS256`, `A192CBC-HS384`, `A256CBC-HS512`, `A128GCM`, `A192GCM` and `A256GCM`, from RFC 7518 section 5. In Go they are `jwa.A128CBCHS256` to `jwa.A256GCM`, of type `jwa.Encryption`.
 
-To build an encrypter or decrypter from a JWK, call `jwe.GetEncrypterFromJwk` or `jwe.GetDecrypterFromJwk`. For the `RSA-OAEP` algorithms, give an RSA JWK: the public key for an encrypter, and the private key for a decrypter. For the `ECDH-ES` algorithms, give an EC JWK on P-256, P-384 or P-521, or an OKP JWK on X25519. For `A128KW`, `A192KW` and `A256KW`, give an `oct` JWK whose `k` is 16, 24 or 32 octets.
+To build an encrypter or decrypter from a JWK, call `jwe.GetEncrypterFromJwk` or `jwe.GetDecrypterFromJwk`. For the `RSA-OAEP` algorithms, give an RSA JWK: the public key for an encrypter, and the private key for a decrypter. For the `ECDH-ES` algorithms, give an EC JWK on P-256, P-384 or P-521, or an OKP JWK on X25519. For `A128KW` to `A256KW` and `A128GCMKW` to `A256GCMKW`, give an `oct` JWK whose `k` is 16, 24 or 32 octets. A JWK does not hold a password, so both functions refuse the PBES2 algorithms with `ErrUnsupportedAlgorithm`. For PBES2, build a `jwe.PasswordKey`.
 
 These functions enforce what the JWK declares about itself:
 
@@ -551,7 +553,7 @@ Both functions take a `*model.JoseOptions` as the last argument, and it can be n
 
 A refused JWK gives `ErrInvalidPublicKey` from `GetEncrypterFromJwk` and `ErrInvalidPrivateKey` from `GetDecrypterFromJwk`. A JWK cannot hold a `dir` key, because no JWK member names the `enc` that the key is bound to. For `dir`, build a `jwe.DirectKey`.
 
-CAUTION: Do not log or publish what `Public()` returns for an `A128KW`, `A192KW`, `A256KW` or `dir` encrypter or decrypter. A shared key has no public half, so `Public()` returns the secret itself, as it does for an HMAC signer.
+CAUTION: Do not log or publish what `Public()` returns for an `A128KW` to `A256KW`, `A128GCMKW` to `A256GCMKW`, PBES2 or `dir` encrypter or decrypter. A shared key or password has no public half, so `Public()` returns the secret itself, as it does for an HMAC signer.
 
 With `ECDH-ES`, the key that the two parties agree is the content encryption key, and the encrypted key is empty. With `ECDH-ES+A128KW` to `ECDH-ES+A256KW`, the agreed key wraps a random content encryption key. `Encrypt` makes a new ephemeral key for each token, as RFC 7518 section 4.6 requires, and writes its public half to the `epk` header. Do not set `epk` yourself: `Encrypt` refuses it with `ErrMalformedClaim`.
 
@@ -559,7 +561,40 @@ To bind the agreed key to the two parties, set `apu` and `apv` in the header tha
 
 `Decrypt` refuses an ECDH-ES token with `ErrMalformedToken` if its `epk` is absent, has a point that is not on its curve, or carries a private member such as `d`. RFC 8725 section 3.4 requires this check. It also refuses an `epk` that cannot agree a key: one whose `kty` is not `EC` or `OKP`, or an `OKP` key whose `crv` is not `X25519` or `X448`. An `epk` on a curve that this library does not implement, such as `X448` or `secp256k1`, is refused with `ErrUnsupportedAlgorithm`. An `epk` on a different curve from the decrypter's key fails with `ErrDecryptionFailed`, like any other key that cannot decrypt the token.
 
-This library does not implement `RSA1_5`, and it will not. RFC 8725 section 3.2 advises against it because of padding oracle attacks. `A128GCMKW` to `A256GCMKW`, `PBES2` and `zip` are not implemented yet.
+### AES GCM key wrap
+
+`A128GCMKW`, `A192GCMKW` and `A256GCMKW` encrypt a random content encryption key with AES GCM under a shared key (RFC 7518 section 4.7). `Encrypt` writes the IV and the authentication tag of that encryption to the `iv` and `tag` headers. Do not set `iv` or `tag` yourself: `Encrypt` refuses them with `ErrMalformedClaim`. `Decrypt` refuses a token whose `iv` is not 12 octets or whose `tag` is not 16 octets, as malformed. The encrypted key is as long as the key of the `enc`.
+
+### Passwords (PBES2)
+
+The PBES2 algorithms derive a key from a password with PBKDF2, and wrap the content encryption key under it with AES Key Wrap (RFC 7518 section 4.8). A text password must be its UTF-8 encoding, as section 4.8 requires. An empty password is refused.
+
+```go
+encrypter, err := jwe.GetEncrypter(jwa.PBES2HS256A128KW, jwe.PasswordKey{Password: []byte(password)})
+decrypter, err := jwe.GetDecrypter(jwa.PBES2HS256A128KW, jwe.PasswordKey{Password: []byte(password)})
+```
+
+`Count` is the number of PBKDF2 iterations, which `Encrypt` writes to the `p2c` header. If `Count` is 0, it is 600,000. draft-ietf-oauth-rfc8725bis section 3.13 cites this figure from OWASP for HMAC SHA-256. Any other `Count` must be at least 1000, the minimum that RFC 7518 section 4.8.1.2 recommends. A decrypter ignores `Count`, because each token names its own `p2c`. `Encrypt` writes a random 16-octet salt to the `p2s` header for each token. Do not set `p2s` or `p2c` yourself: `Encrypt` refuses them with `ErrMalformedClaim`.
+
+The sender chooses `p2c`, and each PBES2 decrypter that `Decrypt` tries runs that many iterations. So `Decrypt` refuses a `p2c` above `JoseOptions.MaxPBES2Count` with `ErrOutOfBounds`, before any decrypter runs. The default is 1,200,000, which is twice the OWASP figure, as draft-ietf-oauth-rfc8725bis section 3.13 recommends. If you raise `Count` above 1,200,000, the recipient must raise `MaxPBES2Count` too. The cost of a token grows with the number of PBES2 decrypters that you give, so give `Decrypt` only the passwords that a token can use.
+
+`Decrypt` accepts a `p2c` below 1000 by default, because RFC 7518 section 4.8.1.2 only recommends the minimum. A low count makes the password cheap to guess from a token, but the token has already been sent, so a refusal cannot undo this. Set `JoseOptions.RequireRecommendedPBES2Count` to refuse such a token with `ErrOutOfBounds`. Then the producer must raise its count.
+
+`Decrypt` refuses, as malformed, a `p2s` of fewer than 8 octets (a MUST in section 4.8.1.1) and a `p2c` that is not a positive integer.
+
+### Compression
+
+`Encrypt` refuses a `zip` header, because draft-ietf-oauth-rfc8725bis section 3.6 says that compression SHOULD NOT be used when a JWE is made.
+
+`Decrypt` refuses a token with a `zip` header by default, with `ErrUnsupportedAlgorithm`. To decrypt such a token, set `JoseOptions.MaxDecompressedSize` to the largest plaintext that you accept, in octets. draft-ietf-oauth-rfc8725bis section 3.15 recommends a limit, and gives 250 KB as an example. `Decrypt` then inflates a `DEF` plaintext (RFC 1951) after the token is authenticated:
+
+- A plaintext that inflates to more than `MaxDecompressedSize` octets is refused with `ErrOutOfBounds`. `Decrypt` stops when it reaches the limit, so a small token cannot make it allocate more.
+- A plaintext that is not a DEFLATE stream is refused with `ErrMalformedToken`.
+- A `zip` other than `DEF` is refused with `ErrUnsupportedAlgorithm`, and a `zip` that is not a string with `ErrMalformedToken`.
+
+### RSA1_5
+
+This library does not implement `RSA1_5`, and it will not. RFC 8725 section 3.2 advises against it because of padding oracle attacks.
 
 ### Encrypt
 
@@ -568,7 +603,7 @@ encrypter, err := jwe.GetEncrypter(jwa.RSAOAEP256, recipientPublicKey)
 token, err := jwe.Encrypt(encrypter, jwa.A256GCM, plaintext, map[string]any{"kid": "recipient-key-1"})
 ```
 
-`Encrypt` sets `alg` and `enc` in the header. If your header has an `alg` or `enc` that is different, `Encrypt` refuses it with `ErrUnsupportedAlgorithm`. `Encrypt` also refuses a `zip` header. RFC 8725 section 3.6 advises against compression before encryption.
+`Encrypt` sets `alg` and `enc` in the header. If your header has an `alg` or `enc` that is different, `Encrypt` refuses it with `ErrUnsupportedAlgorithm`. `Encrypt` also refuses a `zip` header. See [Compression](#compression).
 
 Each call makes a new random content encryption key and a new random initialization vector.
 
@@ -585,7 +620,7 @@ If a decrypter returns an error, or a key of the wrong length, `Decrypt` uses a 
 
 One other `ErrDecryptionFailed` message exists: if no decrypter has the token's `alg`, the message says so. This message, and the time that `Decrypt` takes, show which `alg` values you hold keys for. They show nothing about a key or the plaintext.
 
-`Decrypt` does not compare the `kid` header with the decrypter that succeeded. With a shared key (`A128KW` to `A256KW`, or `dir`), the key identifies the sender. A sender who holds one of your keys can put the `kid` of a different key in the header. To identify the sender, compare `used` with the decrypters that you gave. Do not use `kid` for this. Every decrypter from `GetDecrypter` is a pointer, so `==` is safe. If you write your own `model.Decrypter`, make it a pointer or another comparable type. Comparing two interface values that hold a struct with a slice or map field panics.
+`Decrypt` does not compare the `kid` header with the decrypter that succeeded. With a shared key or password (`A128KW` to `A256KW`, `A128GCMKW` to `A256GCMKW`, PBES2 or `dir`), the key identifies the sender. A sender who holds one of your keys can put the `kid` of a different key in the header. To identify the sender, compare `used` with the decrypters that you gave. Do not use `kid` for this. Every decrypter from `GetDecrypter` is a pointer, so `==` is safe. If you write your own `model.Decrypter`, make it a pointer or another comparable type. Comparing two interface values that hold a struct with a slice or map field panics.
 
 ```go
 head, plaintext, used, err := jwe.Decrypt(ctx, token, []model.Decrypter{tenantA, tenantB}, opts)
@@ -611,15 +646,17 @@ These `JoseOptions` apply to `Decrypt`:
 - `AllowedKeyManagementAlgorithms` and `AllowedContentEncryptionAlgorithms` limit the `alg` and `enc` values that a token can name. If a list is empty, all values that this library implements are permitted. A list that names a value this library does not implement, such as a JWS `alg`, is a configuration fault. `Decrypt` refuses every call with `ErrInvalidOptions` until you correct it.
 - `MaxKeysTried` limits the number of decrypters of the token's `alg`. The default is 100. If you give more, `Decrypt` refuses the token with `ErrTooManyKeys` before it tries any. With many keys, select one with `ParseHeader` and give `Decrypt` only that one.
 - `OnDecrypterError` receives each decrypter that fails, and its error. Use it to see a fault such as a hardware module outage, which `Decrypt` otherwise reports as the same `ErrDecryptionFailed` as a bad token. What it receives can depend on the token, so log it, and do not send it to the sender.
+- `MaxPBES2Count` and `RequireRecommendedPBES2Count` limit the `p2c` of a PBES2 token. See [Passwords (PBES2)](#passwords-pbes2).
+- `MaxDecompressedSize` turns on `zip` and limits the size of the inflated plaintext. See [Compression](#compression).
 - `AcceptedTypes`, `RequireKeyIdentifier` and `UnderstoodCriticalHeaders` apply as they do to a JWS. The exception is `b64`: RFC 7797 defines it for JWS only, so a JWE `crit` that names `b64` is refused.
 
 `AllowedSigningAlgorithms` does not apply to a JWE.
 
-The encrypted key of an `A128KW`, `A192KW` or `A256KW` token must be 8 octets longer than the key of its `enc`, and that of a `dir` token must be empty. The encrypted key of an `RSA-OAEP` token is as long as the recipient's modulus, so it must be 256 to 1024 octets. `Decrypt` refuses any other length with `ErrMalformedToken`, before any decrypter is tried. Thus a token cannot make each decrypter process a large encrypted key.
+The encrypted key of an `A128KW` to `A256KW`, `ECDH-ES+A128KW` to `ECDH-ES+A256KW` or PBES2 token must be 8 octets longer than the key of its `enc`. That of an `A128GCMKW` to `A256GCMKW` token must be as long as the key of its `enc`, and that of a `dir` or `ECDH-ES` token must be empty. The encrypted key of an `RSA-OAEP` token is as long as the recipient's modulus, so it must be 256 to 1024 octets. `Decrypt` refuses any other length with `ErrMalformedToken`, before any decrypter is tried. Thus a token cannot make each decrypter process a large encrypted key.
 
 `Decrypt` has no limit on the size of a token. Each decrypter of the token's `alg` decrypts the full ciphertext. Limit the size of the request body before you call `Decrypt`.
 
-`Decrypt` refuses a token with a `zip` header. RFC 7516 section 4.1.3 requires a recipient to decompress, and this library does not. A `crit` header must not name a parameter that RFC 7516 or RFC 7518 defines for JWE, such as `enc` or `epk`.
+`Decrypt` refuses a token with a `zip` header unless `MaxDecompressedSize` is set. See [Compression](#compression). A `crit` header must not name a parameter that RFC 7516 or RFC 7518 defines for JWE, such as `enc` or `epk`.
 
 ### Keys held outside the process
 
@@ -671,11 +708,12 @@ Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 | `ErrAudienceMismatch` | `JoseOptions.ExpectedAudience` is set and the token's `aud` names none of its values |
 | `ErrInvalidOptions` | The options passed are themselves wrong, whatever the token. A nil `ctx`, a `JoseOptions.ExpectedAudience` that holds an empty string, and a JWE allow-list that names a value this library does not implement are three cases |
 | `ErrTooManyKeys` | The signature did not verify under as many keys as `JoseOptions.MaxKeysTried` allows, and more keys or key sources remained. For a JWE, more decrypters of the token's `alg` were given than `MaxKeysTried` allows |
+| `ErrOutOfBounds` | A JWE asks for more work than your options allow: a `p2c` above `JoseOptions.MaxPBES2Count`, or a plaintext that inflates to more than `MaxDecompressedSize`. It also covers a `p2c` below 1000 when `RequireRecommendedPBES2Count` is set |
 
 An error can match more than one sentinel. A header that breaks the specification matches `ErrMalformedToken` and also the sentinel for the fault, such as `ErrMalformedClaim` for a `kid` that is not a string. A header that is well formed but refused matches only the sentinel for the reason:
 
-- your options refuse it: an `alg` or `enc` outside an allow-list, a `typ` outside `AcceptedTypes`, or no `kid` when `RequireKeyIdentifier` is set;
-- it names what this library does not implement: an unknown `alg` or `enc`, `zip`, a `crit` extension that you have not named in `UnderstoodCriticalHeaders`, or a `b64` of `false`.
+- your options refuse it: an `alg` or `enc` outside an allow-list, a `typ` outside `AcceptedTypes`, no `kid` when `RequireKeyIdentifier` is set, or a `p2c` outside your bounds;
+- it names what this library does not implement: an unknown `alg` or `enc`, a `zip` other than `DEF` or any `zip` when `MaxDecompressedSize` is unset, a `crit` extension that you have not named in `UnderstoodCriticalHeaders`, or a `b64` of `false`.
 
 If a header has both kinds of fault, the error reports the fault in the specification.
 
@@ -706,8 +744,9 @@ These are new:
 - `oct` keys in the `jwk` package: `PrivateFromJwk` reads one as a `[]byte`, and `PrivateJwk` writes one.
 - `model.Encrypter`, `model.Decrypter` and `model.DecrypterOpts`.
 - `jwa.Encryption` with `jwa.GetEncryption`, and the `alg` constants `jwa.RSAOAEP` to `jwa.Dir` and `jwa.ECDHES` to `jwa.ECDHESA256KW`. The integer values of the existing `jwa.Algorithm` constants do not change.
-- `JoseOptions` fields: `AllowedKeyManagementAlgorithms`, `AllowedContentEncryptionAlgorithms`, `OnDecrypterError` and `StrictKeyOperations`.
-- The error sentinel `ErrEncryptionError`. `ErrDecryptionFailed` now has a use.
+- `JoseOptions` fields: `AllowedKeyManagementAlgorithms`, `AllowedContentEncryptionAlgorithms`, `OnDecrypterError`, `StrictKeyOperations`, `MaxPBES2Count`, `RequireRecommendedPBES2Count` and `MaxDecompressedSize`.
+- `jwe.PasswordKey` for PBES2, and the `alg` constants `jwa.A128GCMKW` to `jwa.A256GCMKW` and `jwa.PBES2HS256A128KW` to `jwa.PBES2HS512A256KW`.
+- The error sentinels `ErrEncryptionError` and `ErrOutOfBounds`. `ErrDecryptionFailed` now has a use.
 
 A jwk whose `key_ops` lists a value twice is now refused by `jws.GetValidatorFromJwk`, and skipped in a `jku` key set. RFC 7517 section 4.3 says this MUST NOT happen. If a key set that you rely on does it, have its publisher remove the repeated value.
 

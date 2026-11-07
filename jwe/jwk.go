@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/MichaelFraser99/go-jose/internal/jose/header"
 	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
 	internal_jwk "github.com/MichaelFraser99/go-jose/internal/jose/jwk"
 	"github.com/MichaelFraser99/go-jose/joseerror"
@@ -22,6 +23,9 @@ var encrypterKeyReaders = map[jwa.Algorithm]func(map[string]any) (crypto.PublicK
 	jwa.A128KW:       readSharedKey,
 	jwa.A192KW:       readSharedKey,
 	jwa.A256KW:       readSharedKey,
+	jwa.A128GCMKW:    readSharedKey,
+	jwa.A192GCMKW:    readSharedKey,
+	jwa.A256GCMKW:    readSharedKey,
 	jwa.ECDHES:       jwk.PublicFromJwk,
 	jwa.ECDHESA128KW: jwk.PublicFromJwk,
 	jwa.ECDHESA192KW: jwk.PublicFromJwk,
@@ -55,10 +59,12 @@ var agreementOperations = map[string]bool{"deriveKey": true, "deriveBits": true}
 //
 // For RSA-OAEP, RSA-OAEP-256, RSA-OAEP-384 and RSA-OAEP-512, the jwk is an RSA
 // public key. For the ECDH-ES algorithms, it is an EC public key on P-256, P-384
-// or P-521, or an OKP X25519 public key. For A128KW, A192KW and A256KW, it is an
-// "oct" key. dir is refused with ErrUnsupportedAlgorithm, as no jwk member
-// names the "enc" a dir key is bound to (RFC 8725 section 3.1); build a
-// DirectKey instead.
+// or P-521, or an OKP X25519 public key. For A128KW, A192KW, A256KW, A128GCMKW,
+// A192GCMKW and A256GCMKW, it is an "oct" key. dir is refused with
+// ErrUnsupportedAlgorithm, as no jwk member names the "enc" a dir key is bound
+// to (RFC 8725 section 3.1); build a DirectKey instead. The PBES2 algorithms
+// are refused with ErrUnsupportedAlgorithm too, as a password is not a key a
+// jwk holds; build a PasswordKey instead.
 //
 // RFC 8725 section 3.1 requires each key to be used with exactly one algorithm,
 // so a jwk whose "alg" is present and is not the string alg names is refused.
@@ -95,8 +101,9 @@ func GetEncrypterFromJwk(alg jwa.Algorithm, publicJwk map[string]any, opts *mode
 //
 // For RSA-OAEP, RSA-OAEP-256, RSA-OAEP-384 and RSA-OAEP-512, the jwk is an RSA
 // private key. For the ECDH-ES algorithms, it is an EC private key on P-256,
-// P-384 or P-521, or an OKP X25519 private key. For A128KW, A192KW and A256KW,
-// it is an "oct" key. dir is refused as GetEncrypterFromJwk refuses it. The
+// P-384 or P-521, or an OKP X25519 private key. For A128KW, A192KW, A256KW and
+// the AES GCM key wraps, it is an "oct" key. dir and the PBES2 algorithms are
+// refused as GetEncrypterFromJwk refuses them. The
 // jwk's "alg", "use" and "key_ops" are held to the rules GetEncrypterFromJwk
 // applies, with "unwrapKey" in place of "wrapKey", and, for an ECDH-ES key,
 // "deriveKey" or "deriveBits" (RFC 7517 section 4.3). opts may be nil, and its
@@ -123,6 +130,9 @@ func GetDecrypterFromJwk(alg jwa.Algorithm, privateJwk map[string]any, opts *mod
 func notFromJwk(alg jwa.Algorithm) error {
 	if alg == jwa.Dir {
 		return fmt.Errorf("%wa jwk does not name the enc a dir key is bound to, so build a jwe.DirectKey instead", joseerror.ErrUnsupportedAlgorithm)
+	}
+	if slices.Contains(header.PasswordAlgorithms, alg) {
+		return fmt.Errorf("%w%s takes a password, which a jwk does not hold, so build a jwe.PasswordKey instead", joseerror.ErrUnsupportedAlgorithm, alg)
 	}
 	return fmt.Errorf("%w%s is not a key management algorithm this library implements", joseerror.ErrUnsupportedAlgorithm, algorithmName(alg))
 }

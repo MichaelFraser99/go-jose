@@ -4,18 +4,24 @@ import "testing"
 
 func TestKeyManagementAlgorithm_NamesAreTheRegisteredOnes(t *testing.T) {
 	tests := map[Algorithm]string{
-		RSAOAEP:      "RSA-OAEP",
-		RSAOAEP256:   "RSA-OAEP-256",
-		RSAOAEP384:   "RSA-OAEP-384",
-		RSAOAEP512:   "RSA-OAEP-512",
-		A128KW:       "A128KW",
-		A192KW:       "A192KW",
-		A256KW:       "A256KW",
-		Dir:          "dir",
-		ECDHES:       "ECDH-ES",
-		ECDHESA128KW: "ECDH-ES+A128KW",
-		ECDHESA192KW: "ECDH-ES+A192KW",
-		ECDHESA256KW: "ECDH-ES+A256KW",
+		RSAOAEP:          "RSA-OAEP",
+		RSAOAEP256:       "RSA-OAEP-256",
+		RSAOAEP384:       "RSA-OAEP-384",
+		RSAOAEP512:       "RSA-OAEP-512",
+		A128KW:           "A128KW",
+		A192KW:           "A192KW",
+		A256KW:           "A256KW",
+		Dir:              "dir",
+		ECDHES:           "ECDH-ES",
+		ECDHESA128KW:     "ECDH-ES+A128KW",
+		ECDHESA192KW:     "ECDH-ES+A192KW",
+		ECDHESA256KW:     "ECDH-ES+A256KW",
+		A128GCMKW:        "A128GCMKW",
+		A192GCMKW:        "A192GCMKW",
+		A256GCMKW:        "A256GCMKW",
+		PBES2HS256A128KW: "PBES2-HS256+A128KW",
+		PBES2HS384A192KW: "PBES2-HS384+A192KW",
+		PBES2HS512A256KW: "PBES2-HS512+A256KW",
 	}
 	for alg, name := range tests {
 		if alg.String() != name {

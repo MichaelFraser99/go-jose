@@ -40,6 +40,9 @@ func recipientKey(t *testing.T, example testvectors.JWEExample) any {
 
 func exampleKey(t *testing.T, example testvectors.JWEExample) any {
 	t.Helper()
+	if example.Password != "" {
+		return PasswordKey{Password: []byte(example.Password), Count: example.P2C}
+	}
 	key := recipientKey(t, example)
 	if example.Alg == "dir" {
 		return DirectKey{Key: key.([]byte), Enc: jwa.GetEncryption(example.Enc)}
@@ -58,10 +61,11 @@ func exampleDecrypter(t *testing.T, example testvectors.JWEExample) model.Decryp
 
 func TestDecrypt_RecoversThePlaintextOfEachRFCExample(t *testing.T) {
 	byID := examples(t)
-	for _, id := range []string{"RFC7516-A.1", "RFC7516-A.3", "RFC7520-5.2", "RFC7520-5.4", "RFC7520-5.5", "RFC7520-5.6", "RFC7520-5.8"} {
+	for _, id := range []string{"RFC7516-A.1", "RFC7516-A.3", "RFC7520-5.2", "RFC7520-5.3", "RFC7520-5.4", "RFC7520-5.5", "RFC7520-5.6", "RFC7520-5.7", "RFC7520-5.8", "RFC7520-5.9"} {
 		t.Run(id, func(t *testing.T) {
 			example := byID[id]
-			head, plaintext, _, err := Decrypt(context.Background(), example.Compact, []model.Decrypter{exampleDecrypter(t, example)}, nil)
+			opts := &model.JoseOptions{MaxDecompressedSize: len(example.Plaintext)}
+			head, plaintext, _, err := Decrypt(context.Background(), example.Compact, []model.Decrypter{exampleDecrypter(t, example)}, opts)
 			if err != nil {
 				t.Fatalf("[RFC 7516 5.2] %s must decrypt, got %s", id, err)
 			}
@@ -81,7 +85,7 @@ func TestDecrypt_RecoversThePlaintextOfEachRFCExample(t *testing.T) {
 
 func TestDecrypter_RecoversTheCEKOfEachRFCExample(t *testing.T) {
 	byID := examples(t)
-	for _, id := range []string{"RFC7516-A.1", "RFC7516-A.3", "RFC7520-5.2", "RFC7520-5.4", "RFC7520-5.5", "RFC7520-5.6", "RFC7520-5.8"} {
+	for _, id := range []string{"RFC7516-A.1", "RFC7516-A.3", "RFC7520-5.2", "RFC7520-5.3", "RFC7520-5.4", "RFC7520-5.5", "RFC7520-5.6", "RFC7520-5.7", "RFC7520-5.8", "RFC7520-5.9"} {
 		t.Run(id, func(t *testing.T) {
 			example := byID[id]
 			head, err := jsonutils.DecodeBase64urlMap(example.ProtectedHeader)
@@ -117,36 +121,57 @@ func TestEncrypt_ReproducesRFC7516AppendixA3(t *testing.T) {
 
 func TestEncrypter_WrapsTheCEKAsEachRFCExampleDoes(t *testing.T) {
 	byID := examples(t)
-	for _, id := range []string{"RFC7516-A.3", "RFC7520-5.6", "RFC7520-5.8"} {
+	for _, id := range []string{"RFC7516-A.3", "RFC7520-5.3", "RFC7520-5.6", "RFC7520-5.7", "RFC7520-5.8"} {
 		t.Run(id, func(t *testing.T) {
 			example := byID[id]
 			encrypter, err := GetEncrypter(jwa.GetAlgorithm(example.Alg), exampleKey(t, example))
 			if err != nil {
 				t.Fatal(err)
 			}
-			cek, encryptedKey, err := encrypter.WrapKey(bytes.NewReader(example.CEK), jwa.GetEncryption(example.Enc), map[string]any{})
+			random := slices.Concat(example.P2S, example.CEK, example.KeyWrapIV)
+			head := map[string]any{}
+			cek, encryptedKey, err := encrypter.WrapKey(bytes.NewReader(random), jwa.GetEncryption(example.Enc), head)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if !bytes.Equal(cek, example.CEK) || !bytes.Equal(encryptedKey, example.EncryptedKey) {
 				t.Errorf("[RFC 7516 5.1 steps 2 to 4] %s: want CEK %x and encrypted key %x, got %x and %x", id, example.CEK, example.EncryptedKey, cek, encryptedKey)
 			}
+			printed, err := jsonutils.DecodeBase64urlMap(example.ProtectedHeader)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{"iv", "tag", "p2s", "p2c"} {
+				want, inPrinted := printed[name]
+				got, inEmitted := head[name]
+				if number, isInt := got.(int); isInt {
+					got = float64(number)
+				}
+				if inPrinted != inEmitted || got != want {
+					t.Errorf("[RFC 7518 4.7.1, 4.8.1] %s: the '%s' header the encrypter wrote is %v, and the RFC prints %v", id, name, got, want)
+				}
+			}
 		})
 	}
 }
 
-func TestDecrypt_RefusesEachRFCExampleThisLibraryDoesNotImplement(t *testing.T) {
-	byID := examples(t)
-	for _, id := range []string{"RFC7520-5.3", "RFC7520-5.7", "RFC7520-5.9"} {
-		t.Run(id, func(t *testing.T) {
-			example := byID[id]
-			decrypter, err := GetDecrypter(jwa.A128KW, make([]byte, 16))
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, plaintext, _, err := Decrypt(context.Background(), example.Compact, []model.Decrypter{decrypter}, nil)
-			if errors.Is(err, joseerror.ErrMalformedToken) || !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || plaintext != nil {
-				t.Errorf("[RFC 7516 5.2 step 5] %s names an alg or zip this library does not implement, so want ErrUnsupportedAlgorithm and not ErrMalformedToken, as the token is well formed, got %v", id, err)
+func TestDecrypt_RefusesTheRFCsCompressedExampleUnlessDecompressionIsOnAndBigEnough(t *testing.T) {
+	example := examples(t)["RFC7520-5.9"]
+	decrypter := exampleDecrypter(t, example)
+	for name, c := range map[string]struct {
+		opts *model.JoseOptions
+		want error
+	}{
+		"no options":                       {opts: nil, want: joseerror.ErrUnsupportedAlgorithm},
+		"MaxDecompressedSize unset":        {opts: &model.JoseOptions{}, want: joseerror.ErrUnsupportedAlgorithm},
+		"MaxDecompressedSize negative":     {opts: &model.JoseOptions{MaxDecompressedSize: -1}, want: joseerror.ErrUnsupportedAlgorithm},
+		"MaxDecompressedSize one too few":  {opts: &model.JoseOptions{MaxDecompressedSize: len(example.Plaintext) - 1}, want: joseerror.ErrOutOfBounds},
+		"MaxDecompressedSize of one octet": {opts: &model.JoseOptions{MaxDecompressedSize: 1}, want: joseerror.ErrOutOfBounds},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, plaintext, d, err := Decrypt(context.Background(), example.Compact, []model.Decrypter{decrypter}, c.opts)
+			if !errors.Is(err, c.want) || errors.Is(err, joseerror.ErrMalformedToken) || plaintext != nil || d != nil {
+				t.Errorf("[RFC 8725bis 3.15] want %v and no plaintext, got %v", c.want, err)
 			}
 		})
 	}
