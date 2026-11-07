@@ -70,6 +70,10 @@ A recipient MUST validate an `x5c` chain per RFC 5280, and RFC 5280 path validat
 
 A zero-valued field and a `nil` `*JoseOptions` must mean the same thing. `UseTokenProvidedKeys` is the example: it is off when unset and off when no options are passed. In v0.10.0 a `nil` options pointer turned it on while a constructed struct turned it off, so setting any unrelated option silently changed which keys verified a token. Keep new fields in the same shape, so that the zero value is the behaviour the documentation describes.
 
+### A SHOULD NOT on a peer's data is accepted by default, with a flag to refuse it
+
+When an RFC says that a jwk, header or token SHOULD NOT hold something, accept it by default. Add a `JoseOptions` bool that refuses it, off when unset. A MUST NOT is refused always. `StrictKeyOperations` is the example: RFC 7517 section 4.3 says that `use` and `key_ops` SHOULD NOT be used together, and that unrelated operations SHOULD NOT be combined. Do not refuse either by default.
+
 ### Never ask a caller's ML-DSA key for its parameters
 
 `crypto/mldsa` panics when `Parameters()` is called on a zero-value `*mldsa.PrivateKey` or `*mldsa.PublicKey`, and a zero-value private key reports the all-zero seed, which is the published RFC 9964 example key. So `common.UsableMLDSAPrivateKey` and `common.UsableMLDSAPublicKey` rebuild a key for the parameter set the algorithm names, and require the rebuilt key to match. Route every new ML-DSA entry point through them.

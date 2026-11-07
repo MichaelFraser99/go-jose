@@ -170,7 +170,7 @@ func TestGetValidatorFromJwk_BindsTheKeyToItsAlgAndKty(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			validator, err := GetValidatorFromJwk(test.alg, test.jwk)
+			validator, err := GetValidatorFromJwk(test.alg, test.jwk, nil)
 			if test.accept {
 				if err != nil || validator == nil {
 					t.Errorf("[%s] %s must build a %s validator, got err=%v", test.clause, name, test.alg, err)
@@ -195,7 +195,7 @@ func TestGetValidatorFromJwk_AnAlgMismatchIsAnInvalidPublicKey(t *testing.T) {
 	}
 	for _, alg := range []any{"PS256", 256} {
 		(*publicJwk)["alg"] = alg
-		_, err := GetValidatorFromJwk(jwa.RS256, *publicJwk)
+		_, err := GetValidatorFromJwk(jwa.RS256, *publicJwk, nil)
 		if !errors.Is(err, joseerror.ErrInvalidPublicKey) {
 			t.Errorf("[RFC 8725 3.1] a jwk whose alg is %#v cannot be used for RS256, so it must be refused with ErrInvalidPublicKey, got %v", alg, err)
 		}
@@ -205,7 +205,7 @@ func TestGetValidatorFromJwk_AnAlgMismatchIsAnInvalidPublicKey(t *testing.T) {
 func TestGetValidatorFromJwk_RefusesAnUnsupportedAlgorithmBeforeReadingTheJwk(t *testing.T) {
 	for _, alg := range []jwa.Algorithm{jwa.Unknown, jwa.Algorithm(-1), jwa.HS256, jwa.HS384, jwa.HS512} {
 		t.Run(alg.String(), func(t *testing.T) {
-			validator, err := GetValidatorFromJwk(alg, map[string]any{})
+			validator, err := GetValidatorFromJwk(alg, map[string]any{}, nil)
 			if !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) {
 				t.Errorf("[RFC 8725 3.1] GetValidatorFromJwk builds no validator for %s, so it must refuse it as an unsupported algorithm whatever the jwk holds, got %v", alg, err)
 			}

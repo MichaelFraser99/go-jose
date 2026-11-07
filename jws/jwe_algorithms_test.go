@@ -40,7 +40,7 @@ func TestAJWEKeyManagementAlgorithmCannotSignOrVerifyAJWS(t *testing.T) {
 			if validator, err := jws.GetValidator(alg, &rsaKey.PublicKey); !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || validator != nil {
 				t.Errorf("[RFC 7518 4.1] GetValidator must refuse %s, got %#v and %v", alg, validator, err)
 			}
-			if validator, err := jws.GetValidatorFromJwk(alg, *publicJwk); !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || validator != nil {
+			if validator, err := jws.GetValidatorFromJwk(alg, *publicJwk, nil); !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || validator != nil {
 				t.Errorf("[RFC 7518 4.1] GetValidatorFromJwk must refuse %s, got %#v and %v", alg, validator, err)
 			}
 			called := false

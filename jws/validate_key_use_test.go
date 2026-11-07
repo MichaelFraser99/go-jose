@@ -10,6 +10,7 @@ import (
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
 	"github.com/MichaelFraser99/go-jose/jwk"
+	"github.com/MichaelFraser99/go-jose/model"
 )
 
 func TestGetValidatorFromJwk_RefusesAJwkMarkedAsNotForVerifying(t *testing.T) {
@@ -54,7 +55,7 @@ func TestGetValidatorFromJwk_RefusesAJwkMarkedAsNotForVerifying(t *testing.T) {
 			for k, v := range test.members {
 				candidate[k] = v
 			}
-			validator, err := GetValidatorFromJwk(jwa.ES256, candidate)
+			validator, err := GetValidatorFromJwk(jwa.ES256, candidate, nil)
 			if test.accept {
 				if err != nil || validator == nil {
 					t.Fatalf("[%s] a jwk with %s permits verifying, so it must build a validator, got %v", test.clause, name, err)
@@ -74,6 +75,59 @@ func TestGetValidatorFromJwk_RefusesAJwkMarkedAsNotForVerifying(t *testing.T) {
 	}
 }
 
+func TestGetValidatorFromJwk_StrictKeyOperationsRefusesWhatSection43SaysShouldNotBePublished(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	public, err := jwk.PublicJwk(&key.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := map[string]struct {
+		members map[string]any
+		refused bool
+	}{
+		"no use and no key_ops":                  {members: map[string]any{}},
+		"use of sig alone":                       {members: map[string]any{"use": "sig"}},
+		"key_ops of verify":                      {members: map[string]any{"key_ops": []any{"verify"}}},
+		"key_ops of verify and sign":             {members: map[string]any{"key_ops": []any{"verify", "sign"}}},
+		"use of sig and key_ops of verify":       {members: map[string]any{"use": "sig", "key_ops": []any{"verify"}}, refused: true},
+		"key_ops of verify and encrypt":          {members: map[string]any{"key_ops": []any{"verify", "encrypt"}}, refused: true},
+		"key_ops of sign, verify and deriveBits": {members: map[string]any{"key_ops": []any{"sign", "verify", "deriveBits"}}, refused: true},
+		"key_ops of verify and an unknown value": {members: map[string]any{"key_ops": []any{"verify", "x-custom"}}, refused: true},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			candidate := map[string]any{}
+			for k, v := range *public {
+				candidate[k] = v
+			}
+			for k, v := range test.members {
+				candidate[k] = v
+			}
+			if validator, err := GetValidatorFromJwk(jwa.ES256, candidate, nil); err != nil || validator == nil {
+				t.Fatalf("[RFC 7517 4.3] no MUST forbids a jwk with %s, so it must build a validator by default, got %v", name, err)
+			}
+			if validator, err := GetValidatorFromJwk(jwa.ES256, candidate, &model.JoseOptions{IgnoreKeyUse: true}); err != nil || validator == nil {
+				t.Fatalf("[RFC 7517 4.3] a jwk with %s must build a validator when only IgnoreKeyUse is set, got %v", name, err)
+			}
+			validator, err := GetValidatorFromJwk(jwa.ES256, candidate, &model.JoseOptions{StrictKeyOperations: true, IgnoreKeyUse: true})
+			if !test.refused {
+				if err != nil || validator == nil {
+					t.Errorf("[RFC 7517 4.3] section 4.3 discourages nothing in a jwk with %s, so StrictKeyOperations must accept it, got %v", name, err)
+				}
+				return
+			}
+			if !errors.Is(err, joseerror.ErrInvalidPublicKey) || validator != nil {
+				t.Errorf("[RFC 7517 4.3] a jwk with %s SHOULD NOT be published, so StrictKeyOperations must refuse it with ErrInvalidPublicKey and no validator, whatever IgnoreKeyUse says, got %v", name, err)
+			}
+		})
+	}
+}
+
 func TestGetValidator_VerifiesWithAJwkMarkedForEncryptionWhenTheCallerReadsItFirst(t *testing.T) {
 	signer, err := GetSigner(jwa.ES256, nil)
 	if err != nil {
@@ -85,7 +139,7 @@ func TestGetValidator_VerifiesWithAJwkMarkedForEncryptionWhenTheCallerReadsItFir
 	}
 	(*public)["use"] = "enc"
 
-	if validator, err := GetValidatorFromJwk(jwa.ES256, *public); !errors.Is(err, joseerror.ErrInvalidPublicKey) {
+	if validator, err := GetValidatorFromJwk(jwa.ES256, *public, nil); !errors.Is(err, joseerror.ErrInvalidPublicKey) {
 		t.Fatalf("[RFC 7517 4.2] GetValidatorFromJwk must refuse a jwk whose use is enc, got %v and %#v", err, validator)
 	}
 

@@ -181,6 +181,23 @@ func TestEncrypt_RefusesAnEphemeralKeyOrPartyInfoItCannotHonour(t *testing.T) {
 	}
 }
 
+func ecdhJwkFixtures(t *testing.T) (public, private map[string]any) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicJwk, err := jwk.PublicJwk(&key.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateJwk, err := jwk.PrivateJwk(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return *publicJwk, *privateJwk
+}
+
 func TestGetEncrypterAndGetDecrypterFromJwk_BuildECDHESKeys(t *testing.T) {
 	ecKey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	if err != nil {
@@ -200,12 +217,12 @@ func TestGetEncrypterAndGetDecrypterFromJwk_BuildECDHESKeys(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			encrypter, err := GetEncrypterFromJwk(jwa.ECDHESA256KW, with(*publicJwk, map[string]any{"use": "enc", "key_ops": []any{}}))
+			encrypter, err := GetEncrypterFromJwk(jwa.ECDHESA256KW, with(*publicJwk, map[string]any{"use": "enc", "key_ops": []any{}}), nil)
 			if err != nil {
 				t.Fatalf("[RFC 7517 4.3] no key_ops value names a public key used for key agreement, so an empty one must be accepted, got %v", err)
 			}
 			for _, ops := range [][]any{{"deriveKey"}, {"deriveBits"}, {"deriveKey", "deriveBits"}} {
-				decrypter, err := GetDecrypterFromJwk(jwa.ECDHESA256KW, with(*privateJwk, map[string]any{"key_ops": ops}))
+				decrypter, err := GetDecrypterFromJwk(jwa.ECDHESA256KW, with(*privateJwk, map[string]any{"key_ops": ops}), nil)
 				if err != nil {
 					t.Fatalf("[RFC 7517 4.3] key_ops %v names key agreement, got %v", ops, err)
 				}
@@ -217,18 +234,21 @@ func TestGetEncrypterAndGetDecrypterFromJwk_BuildECDHESKeys(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if d, err := GetDecrypterFromJwk(jwa.ECDHES, with(*privateJwk, map[string]any{"key_ops": []any{"unwrapKey"}})); !errors.Is(err, joseerror.ErrInvalidPrivateKey) || d != nil {
+			if d, err := GetDecrypterFromJwk(jwa.ECDHES, with(*privateJwk, map[string]any{"key_ops": []any{"unwrapKey"}}), nil); !errors.Is(err, joseerror.ErrInvalidPrivateKey) || d != nil {
 				t.Errorf("[RFC 7517 4.3] a decrypter's key_ops must name deriveKey or deriveBits, got %v", err)
 			}
-			if e, err := GetEncrypterFromJwk(jwa.ECDHES, with(*publicJwk, map[string]any{"use": "enc", "key_ops": []any{"sign"}})); !errors.Is(err, joseerror.ErrInvalidPublicKey) || e != nil {
+			if e, err := GetEncrypterFromJwk(jwa.ECDHES, with(*publicJwk, map[string]any{"use": "enc", "key_ops": []any{"sign"}}), nil); !errors.Is(err, joseerror.ErrInvalidPublicKey) || e != nil {
 				t.Errorf("[RFC 7517 4.3] use enc and key_ops sign are not consistent, got %v", err)
 			}
-			for _, ops := range [][]any{{"verify"}, {"sign"}, {"deriveKey", "verify"}} {
-				if e, err := GetEncrypterFromJwk(jwa.ECDHES, with(*publicJwk, map[string]any{"key_ops": ops})); !errors.Is(err, joseerror.ErrInvalidPublicKey) || e != nil {
-					t.Errorf("[RFC 7517 4.3] key_ops %v names a signature operation, so the key is not for key agreement, got %v", ops, err)
+			for _, ops := range [][]any{{"verify"}, {"sign"}, {"encrypt", "verify"}} {
+				if e, err := GetEncrypterFromJwk(jwa.ECDHES, with(*publicJwk, map[string]any{"key_ops": ops}), nil); !errors.Is(err, joseerror.ErrInvalidPublicKey) || e != nil {
+					t.Errorf("[RFC 7517 4.3] key_ops %v names a signature operation and no key agreement, so the key is not for key agreement, got %v", ops, err)
 				}
 			}
-			if e, err := GetEncrypterFromJwk(jwa.ECDHES, with(*publicJwk, map[string]any{"alg": "ECDH-ES+A128KW"})); !errors.Is(err, joseerror.ErrInvalidPublicKey) || e != nil {
+			if e, err := GetEncrypterFromJwk(jwa.ECDHES, with(*publicJwk, map[string]any{"key_ops": []any{"deriveKey", "verify"}}), nil); err != nil || e == nil {
+				t.Errorf("[RFC 7517 4.3] key_ops naming key agreement beside verify only SHOULD NOT be published, so it must be accepted by default, got %v", err)
+			}
+			if e, err := GetEncrypterFromJwk(jwa.ECDHES, with(*publicJwk, map[string]any{"alg": "ECDH-ES+A128KW"}), nil); !errors.Is(err, joseerror.ErrInvalidPublicKey) || e != nil {
 				t.Errorf("[RFC 8725 3.1] a jwk naming another alg must be refused, got %v", err)
 			}
 		})
@@ -245,10 +265,10 @@ func TestGetEncrypterAndGetDecrypterFromJwk_BuildECDHESKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if e, err := GetEncrypterFromJwk(jwa.ECDHES, *edPublicJwk); !errors.Is(err, joseerror.ErrInvalidPublicKey) || e != nil {
+	if e, err := GetEncrypterFromJwk(jwa.ECDHES, *edPublicJwk, nil); !errors.Is(err, joseerror.ErrInvalidPublicKey) || e != nil {
 		t.Errorf("[RFC 8037 3.2] an Ed25519 key cannot agree a key, got %v", err)
 	}
-	if d, err := GetDecrypterFromJwk(jwa.ECDHES, *edPrivateJwk); !errors.Is(err, joseerror.ErrInvalidPrivateKey) || d != nil {
+	if d, err := GetDecrypterFromJwk(jwa.ECDHES, *edPrivateJwk, nil); !errors.Is(err, joseerror.ErrInvalidPrivateKey) || d != nil {
 		t.Errorf("[RFC 8037 3.2] an Ed25519 key cannot agree a key, got %v", err)
 	}
 }

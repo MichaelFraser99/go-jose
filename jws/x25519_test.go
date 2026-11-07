@@ -53,7 +53,7 @@ func TestGetValidatorFromJwk_RefusesAnX25519KeyForEveryAlgorithm(t *testing.T) {
 			if alg == jwa.HS256 || alg == jwa.HS384 || alg == jwa.HS512 {
 				want = joseerror.ErrUnsupportedAlgorithm
 			}
-			validator, err := jws.GetValidatorFromJwk(alg, rfc8037A6RecipientJwk())
+			validator, err := jws.GetValidatorFromJwk(alg, rfc8037A6RecipientJwk(), nil)
 			if !errors.Is(err, want) {
 				t.Errorf("[RFC 8037 3.2] an X25519 key MUST NOT be used for signing, so a %s validator must be refused with %v, got %v", alg, want, err)
 			}

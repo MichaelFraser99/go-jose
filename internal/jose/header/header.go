@@ -64,13 +64,13 @@ func ValidateHeader(ctx context.Context, header map[string]any, client *http.Cli
 
 	var jwkRetrievers []model.Retriever
 	if params.jwk != nil && opts.UseTokenProvidedKeys {
-		jwkRetrievers = append(jwkRetrievers, carried(jwk.InlineJWK(*params.jwk, params.kid, *alg, opts.IgnoreKeyUse)))
+		jwkRetrievers = append(jwkRetrievers, carried(jwk.InlineJWK(*params.jwk, params.kid, *alg, opts.IgnoreKeyUse, opts.StrictKeyOperations)))
 	}
 	if params.x5c != nil && opts.X509Roots != nil {
 		jwkRetrievers = append(jwkRetrievers, carried(x5.InlineCertificate(*params.x5c, params.x5t, params.x5ts256, opts.X509Roots, opts.X509ExtKeyUsages)))
 	}
 	if params.jku != nil && opts.UseTokenProvidedKeys && client != nil {
-		jwkRetrievers = append(jwkRetrievers, jwk.RetrieveJKU(*params.jku, httputils.Fetcher(ctx, client, opts.FetchTimeout), params.kid, *alg, opts.IgnoreKeyUse))
+		jwkRetrievers = append(jwkRetrievers, jwk.RetrieveJKU(*params.jku, httputils.Fetcher(ctx, client, opts.FetchTimeout), params.kid, *alg, opts.IgnoreKeyUse, opts.StrictKeyOperations))
 	}
 	if params.x5u != nil && opts.X509Roots != nil && client != nil {
 		jwkRetrievers = append(jwkRetrievers, x5.RetrieveX5U(*params.x5u, httputils.Fetcher(ctx, client, opts.FetchTimeout), params.x5t, params.x5ts256, opts.X509Roots, opts.X509ExtKeyUsages))

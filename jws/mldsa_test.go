@@ -65,7 +65,7 @@ func TestVerify_EachRFC9964ExampleJWS(t *testing.T) {
 				t.Errorf("[RFC 9964 A.1] the example's header and payload must come back as signed, got %v and %q", head, payload)
 			}
 
-			validator, err := jws.GetValidatorFromJwk(ex.alg, ex.publicJwk)
+			validator, err := jws.GetValidatorFromJwk(ex.alg, ex.publicJwk, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -93,7 +93,7 @@ func TestVerify_AnRFC9964ExampleUnderTheKeyOfAnotherParameterSet(t *testing.T) {
 			if validator, err := jws.GetValidator(ex.alg, other.public); !errors.Is(err, joseerror.ErrInvalidPublicKey) || validator != nil {
 				t.Errorf("[RFC 9964 5] GetValidator(%s) must refuse an %s key with ErrInvalidPublicKey, got %#v and %v", ex.Alg, other.Alg, validator, err)
 			}
-			if validator, err := jws.GetValidatorFromJwk(ex.alg, other.publicJwk); !errors.Is(err, joseerror.ErrInvalidPublicKey) || validator != nil {
+			if validator, err := jws.GetValidatorFromJwk(ex.alg, other.publicJwk, nil); !errors.Is(err, joseerror.ErrInvalidPublicKey) || validator != nil {
 				t.Errorf("[RFC 8725 3.1] GetValidatorFromJwk(%s) must refuse a jwk whose alg is %s, got %#v and %v", ex.Alg, other.Alg, validator, err)
 			}
 		})
@@ -154,7 +154,7 @@ func TestGetValidatorFromJwk_BindsAnAKPKeyToItsAlg(t *testing.T) {
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			validator, err := jws.GetValidatorFromJwk(tc.alg, tc.jwk)
+			validator, err := jws.GetValidatorFromJwk(tc.alg, tc.jwk, nil)
 			if !errors.Is(err, tc.want) || validator != nil {
 				t.Errorf("[RFC 9964 3] want %v and no validator, got %#v and %v", tc.want, validator, err)
 			}

@@ -71,7 +71,7 @@ func TestGetSignerFromPrivateKey_ReproducesTheRFC8037Ed25519Signature(t *testing
 		t.Errorf("[RFC 8037 A.4] Ed25519 is deterministic, so the example key over the example input must give the example signature\n got %s\nwant %s", got, rfc8037SigB64)
 	}
 
-	validator, err := jws.GetValidatorFromJwk(jwa.Ed25519, rfc8037PublicJwk())
+	validator, err := jws.GetValidatorFromJwk(jwa.Ed25519, rfc8037PublicJwk(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestVerify_TheRFC8037ExampleJWSNamingTheDeprecatedEdDSA(t *testing.T) {
 		t.Errorf("[RFC 8037 A.4] the example's header and payload must come back as signed, got %v and %q", head, payload)
 	}
 
-	validator, err := jws.GetValidatorFromJwk(jwa.EdDSA, rfc8037PublicJwk())
+	validator, err := jws.GetValidatorFromJwk(jwa.EdDSA, rfc8037PublicJwk(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +223,7 @@ func TestGetValidatorFromJwk_BindsAnOKPKeyToEitherEdDSAIdentifier(t *testing.T) 
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			validator, err := jws.GetValidatorFromJwk(tc.alg, tc.jwk)
+			validator, err := jws.GetValidatorFromJwk(tc.alg, tc.jwk, nil)
 			if !errors.Is(err, tc.want) {
 				t.Errorf("[%s] want %v, got %v", tc.clause, tc.want, err)
 			}
@@ -239,7 +239,7 @@ func TestGetValidatorFromJwk_BindsAnOKPKeyToEitherEdDSAIdentifier(t *testing.T) 
 			if member != nil {
 				key["alg"] = member
 			}
-			if _, err := jws.GetValidatorFromJwk(alg, key); err != nil {
+			if _, err := jws.GetValidatorFromJwk(alg, key, nil); err != nil {
 				t.Errorf("[RFC 9864 4.1.1] EdDSA with this library's one curve and Ed25519 name the same algorithm, so an Ed25519 key whose alg is %v must build a %s validator, got %v", member, alg, err)
 			}
 		}

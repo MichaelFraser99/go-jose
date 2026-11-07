@@ -4,6 +4,8 @@ import (
 	"crypto"
 	"encoding/json"
 	"fmt"
+	"slices"
+
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/eddsa"
 	"github.com/MichaelFraser99/go-jose/internal/httputils"
@@ -15,9 +17,9 @@ import (
 // InlineJWK returns the key of a jwk header when SelectKeys would select it. A key it
 // would not select reports ErrNoKeyIdentifierMatch, or ErrMalformedClaim when one of
 // the members it judges by has the wrong type.
-func InlineJWK(jwk map[string]any, kid *string, alg string, ignoreKeyUse bool) model.Retriever {
+func InlineJWK(jwk map[string]any, kid *string, alg string, ignoreKeyUse, strictKeyOperations bool) model.Retriever {
 	return func() ([]crypto.PublicKey, error) {
-		if err := checkMember(jwk, kid, alg, ignoreKeyUse); err != nil {
+		if err := checkMember(jwk, kid, alg, ignoreKeyUse, strictKeyOperations); err != nil {
 			return nil, err
 		}
 
@@ -32,7 +34,7 @@ func InlineJWK(jwk map[string]any, kid *string, alg string, ignoreKeyUse bool) m
 
 // RetrieveJKU fetches the JWK Set a jku header names and returns the keys SelectKeys
 // takes from it. A set from which no key is selected reports ErrNoKeyIdentifierMatch.
-func RetrieveJKU(jku string, fetch httputils.Fetch, kid *string, alg string, ignoreKeyUse bool) model.Retriever {
+func RetrieveJKU(jku string, fetch httputils.Fetch, kid *string, alg string, ignoreKeyUse, strictKeyOperations bool) model.Retriever {
 	return func() ([]crypto.PublicKey, error) {
 		response, err := fetch(jku, "jku")
 		if err != nil {
@@ -50,7 +52,7 @@ func RetrieveJKU(jku string, fetch httputils.Fetch, kid *string, alg string, ign
 			return nil, fmt.Errorf("%wfailed to unmarshal jku response: %w", joseerror.ErrApplicationError, err)
 		}
 
-		keystore := SelectKeys(returnedKeystore, kid, alg, ignoreKeyUse)
+		keystore := SelectKeys(returnedKeystore, kid, alg, ignoreKeyUse, strictKeyOperations)
 		if len(keystore) == 0 {
 			return nil, fmt.Errorf("%wno usable jwk entry in the returned set matches the identifiers specified in the jose header", joseerror.ErrNoKeyIdentifierMatch)
 		}
@@ -157,15 +159,16 @@ func PublicFromJwk(jwk map[string]any) (crypto.PublicKey, error) {
 //   - its "alg" is absent or equals alg, since RFC 8725 section 3.1 requires each key
 //     be used with exactly one algorithm;
 //   - unless ignoreKeyUse, its "use" is absent or "sig" and its "key_ops" is absent or
-//     includes "verify" (RFC 7517 sections 4.2 and 4.3).
-func SelectKeys(keySet model.Jwks, kid *string, alg string, ignoreKeyUse bool) []crypto.PublicKey {
+//     includes "verify" (RFC 7517 sections 4.2 and 4.3), and, when
+//     strictKeyOperations, it passes CheckRecommendedKeyOperations.
+func SelectKeys(keySet model.Jwks, kid *string, alg string, ignoreKeyUse, strictKeyOperations bool) []crypto.PublicKey {
 	var selected []crypto.PublicKey
 	for _, member := range keySet.Keys {
 		publicKey, err := PublicFromJwk(member)
 		if err != nil {
 			continue
 		}
-		if checkMember(member, kid, alg, ignoreKeyUse) != nil {
+		if checkMember(member, kid, alg, ignoreKeyUse, strictKeyOperations) != nil {
 			continue
 		}
 		selected = append(selected, publicKey)
@@ -173,7 +176,7 @@ func SelectKeys(keySet model.Jwks, kid *string, alg string, ignoreKeyUse bool) [
 	return selected
 }
 
-func checkMember(jwk map[string]any, kid *string, alg string, ignoreKeyUse bool) error {
+func checkMember(jwk map[string]any, kid *string, alg string, ignoreKeyUse, strictKeyOperations bool) error {
 	if k, present := jwk["kid"]; present {
 		sk, ok := k.(string)
 		if !ok {
@@ -197,7 +200,7 @@ func checkMember(jwk map[string]any, kid *string, alg string, ignoreKeyUse bool)
 	if ignoreKeyUse {
 		return nil
 	}
-	return CheckKeyUse(jwk, joseerror.ErrNoKeyIdentifierMatch, joseerror.ErrMalformedClaim)
+	return CheckKeyUse(jwk, joseerror.ErrNoKeyIdentifierMatch, joseerror.ErrMalformedClaim, strictKeyOperations)
 }
 
 // CheckKeyUse refuses a jwk its publisher marked as not for verifying signatures:
@@ -205,8 +208,9 @@ func checkMember(jwk map[string]any, kid *string, alg string, ignoreKeyUse bool)
 // "key_ops" is present and lacks "verify" (RFC 7517 section 4.3). A member of the
 // wrong type, or a "key_ops" that lists a value twice, which section 4.3 says
 // MUST NOT happen, is refused with malformed, and a mark that excludes verifying
-// with refused.
-func CheckKeyUse(jwk map[string]any, refused, malformed error) error {
+// with refused. When strictKeyOperations, a jwk CheckRecommendedKeyOperations
+// refuses is refused with refused.
+func CheckKeyUse(jwk map[string]any, refused, malformed error, strictKeyOperations bool) error {
 	if u, present := jwk["use"]; present {
 		su, ok := u.(string)
 		if !ok {
@@ -242,5 +246,33 @@ func CheckKeyUse(jwk map[string]any, refused, malformed error) error {
 		}
 	}
 
+	if strictKeyOperations {
+		return CheckRecommendedKeyOperations(jwk, refused)
+	}
 	return nil
+}
+
+var relatedOperations = [][]string{{"sign", "verify"}, {"encrypt", "decrypt"}, {"wrapKey", "unwrapKey"}}
+
+// CheckRecommendedKeyOperations refuses, with refused, a jwk that RFC 7517
+// section 4.3 says SHOULD NOT be published: one carrying both "use" and
+// "key_ops", or one whose "key_ops" names unrelated operations. Section 4.3
+// relates only "sign" with "verify", "encrypt" with "decrypt", and "wrapKey"
+// with "unwrapKey", so a "key_ops" of more than one value must be one of those
+// pairs. The jwk's "key_ops" must already have passed the section's MUST rules:
+// an array of strings, none listed twice.
+func CheckRecommendedKeyOperations(jwk map[string]any, refused error) error {
+	ops, present := jwk["key_ops"].([]any)
+	if !present {
+		return nil
+	}
+	if _, use := jwk["use"]; use {
+		return fmt.Errorf("%wjwk carries both use and key_ops, which RFC 7517 section 4.3 says SHOULD NOT be used together", refused)
+	}
+	if len(ops) < 2 || len(ops) == 2 && slices.ContainsFunc(relatedOperations, func(pair []string) bool {
+		return slices.Contains(ops, any(pair[0])) && slices.Contains(ops, any(pair[1]))
+	}) {
+		return nil
+	}
+	return fmt.Errorf("%wjwk key_ops names unrelated operations, which RFC 7517 section 4.3 says SHOULD NOT be combined", refused)
 }

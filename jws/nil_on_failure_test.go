@@ -61,7 +61,7 @@ func TestGetValidator_AFailedConstructionReturnsNoValidator(t *testing.T) {
 func TestGetValidatorFromJwk_AFailedConstructionReturnsNoValidator(t *testing.T) {
 	for _, alg := range constructableAlgorithms {
 		t.Run(alg.String(), func(t *testing.T) {
-			validator, err := GetValidatorFromJwk(alg, map[string]any{"kty": "nonsense"})
+			validator, err := GetValidatorFromJwk(alg, map[string]any{"kty": "nonsense"}, nil)
 			if err == nil {
 				t.Fatal("expected a jwk with an unknown kty to be refused")
 			}

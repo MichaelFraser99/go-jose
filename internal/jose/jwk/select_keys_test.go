@@ -161,7 +161,7 @@ func TestSelectKeys(t *testing.T) {
 				publics = append(publics, public)
 			}
 
-			got := SelectKeys(set, tc.kid, "ES256", tc.ignoreKeyUse)
+			got := SelectKeys(set, tc.kid, "ES256", tc.ignoreKeyUse, false)
 
 			if len(got) != len(tc.want) {
 				t.Fatalf("[%s] expected %d keys, got %d", tc.clause, len(tc.want), len(got))
@@ -191,7 +191,7 @@ func TestRetrieveJKU_ASelectionOfNoMemberReportsNoKeyIdentifierMatch(t *testing.
 			jwk, _ := p256Jwk(t, tc.member)
 			server := serveKeySet(t, jwk)
 
-			keys, err := RetrieveJKU(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0), tc.kid, "ES256", false)()
+			keys, err := RetrieveJKU(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0), tc.kid, "ES256", false, false)()
 			if err == nil {
 				t.Fatalf("[%s] no member may be selected, got %d keys", tc.clause, len(keys))
 			}
@@ -213,7 +213,7 @@ func TestRetrieveJKU_ADocumentThatIsNotAJwkSetIsRefused(t *testing.T) {
 			}))
 			defer server.Close()
 
-			keys, err := RetrieveJKU(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0), nil, "ES256", false)()
+			keys, err := RetrieveJKU(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0), nil, "ES256", false, false)()
 			if err == nil {
 				t.Fatalf("[RFC 7517 5] a JWK Set MUST have a \"keys\" member holding an array, got %d keys", len(keys))
 			}
@@ -251,7 +251,7 @@ func TestInlineJWK_KeyUse(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			jwk, public := p256Jwk(t, tc.member)
 
-			keys, err := InlineJWK(jwk, nil, "ES256", tc.ignoreKeyUse)()
+			keys, err := InlineJWK(jwk, nil, "ES256", tc.ignoreKeyUse, false)()
 			if tc.wantErr != nil {
 				if !errors.Is(err, tc.wantErr) {
 					t.Errorf("[%s] expected %v, got %d keys and %v", tc.clause, tc.wantErr, len(keys), err)
@@ -287,7 +287,7 @@ func TestInlineJWK_AMemberOfTheWrongTypeIsMalformed(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			jwk, _ := p256Jwk(t, tc.member)
 
-			keys, err := InlineJWK(jwk, tc.kid, "ES256", false)()
+			keys, err := InlineJWK(jwk, tc.kid, "ES256", false, false)()
 			if !errors.Is(err, joseerror.ErrMalformedClaim) {
 				t.Errorf("[%s] a jwk member of the wrong JSON type must be refused as malformed, got %d keys and %v", tc.clause, len(keys), err)
 			}

@@ -141,7 +141,7 @@ func TestRSAConstructors_RefuseAModulusOutsideTheSupportedRange(t *testing.T) {
 						return v, err
 					},
 					"GetValidatorFromJwk": func() (any, error) {
-						v, err := GetValidatorFromJwk(alg, rsaJwkOf(rsaPublicKeyOfBits(test.bits)))
+						v, err := GetValidatorFromJwk(alg, rsaJwkOf(rsaPublicKeyOfBits(test.bits)), nil)
 						return v, err
 					},
 					"GetSignerFromPrivateKey": func() (any, error) {
@@ -228,7 +228,7 @@ func TestRSAConstructors_AcceptOnlyAnOddPublicExponentFromThreeToTheCryptoRSABou
 						return v, err
 					}, joseerror.ErrInvalidPublicKey},
 					"GetValidatorFromJwk": {func() (any, error) {
-						v, err := GetValidatorFromJwk(alg, rsaJwkOf(publicKey))
+						v, err := GetValidatorFromJwk(alg, rsaJwkOf(publicKey), nil)
 						return v, err
 					}, joseerror.ErrInvalidPublicKey},
 					"GetSignerFromPrivateKey": {func() (any, error) {
