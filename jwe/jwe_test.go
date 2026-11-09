@@ -1100,3 +1100,15 @@ func TestDecrypt_DecodesTheHeaderOnceForAllDecrypters(t *testing.T) {
 		t.Errorf("50 decrypters allocated %d bytes against %d for one, over a %d-octet token, so the header is being decoded once per decrypter", fifty, one, len(token))
 	}
 }
+
+func TestDecryptAndParseHeader_RefuseAnAcceptedTypeNoTypCanMatch(t *testing.T) {
+	for _, entry := range []string{"", " JWT", "*/*", "ſecevent+jwt"} {
+		opts := &model.JWEOptions{AcceptedTypes: []string{entry}}
+		if _, _, _, err := Decrypt(context.Background(), "not.a.token.at.all", []model.Decrypter{scriptedDecrypter{alg: jwa.Dir}}, opts); !errors.Is(err, joseerror.ErrInvalidOptions) {
+			t.Errorf("[RFC 6838 4.2] AcceptedTypes %q names no media type, so Decrypt must refuse with ErrInvalidOptions whatever the token, got %v", entry, err)
+		}
+		if _, err := ParseHeader("not.a.token.at.all", opts); !errors.Is(err, joseerror.ErrInvalidOptions) {
+			t.Errorf("[RFC 6838 4.2] AcceptedTypes %q names no media type, so ParseHeader must refuse with ErrInvalidOptions whatever the token, got %v", entry, err)
+		}
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/MichaelFraser99/go-jose/joseerror"
+	"github.com/MichaelFraser99/go-jose/jws"
 	"github.com/MichaelFraser99/go-jose/model"
 )
 
@@ -72,7 +73,7 @@ func validateOptions(opts *model.JoseOptions) error {
 	if opts != nil && slices.Contains(opts.ExpectedAudience, "") {
 		return fmt.Errorf("%wExpectedAudience holds an empty string, which names no recipient", joseerror.ErrInvalidOptions)
 	}
-	return nil
+	return jws.CheckOptions(opts)
 }
 
 func numericDate(body map[string]any, name string, absent float64) (float64, error) {
