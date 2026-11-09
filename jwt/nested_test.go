@@ -2,18 +2,22 @@ package jwt
 
 import (
 	"context"
+	"crypto"
 	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/MichaelFraser99/go-jose/internal/jose/header"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
 	"github.com/MichaelFraser99/go-jose/jwe"
@@ -47,18 +51,34 @@ var recipientKeys = map[jwa.Algorithm]func(t *testing.T) (public, private any){
 		}
 		return &key.PublicKey, key
 	},
+	jwa.RSAOAEP:      rsaKeys,
+	jwa.RSAOAEP384:   rsaKeys,
+	jwa.RSAOAEP512:   rsaKeys,
 	jwa.ECDHES:       x25519Keys,
 	jwa.ECDHESA128KW: x25519Keys,
-	jwa.A128KW:       sharedSecret,
-	jwa.A128GCMKW:    sharedSecret,
+	jwa.ECDHESA192KW: x25519Keys,
+	jwa.ECDHESA256KW: x25519Keys,
+	jwa.A128KW:       sharedSecretOf(16),
+	jwa.A192KW:       sharedSecretOf(24),
+	jwa.A256KW:       sharedSecretOf(32),
+	jwa.A128GCMKW:    sharedSecretOf(16),
+	jwa.A192GCMKW:    sharedSecretOf(24),
+	jwa.A256GCMKW:    sharedSecretOf(32),
 	jwa.Dir: func(t *testing.T) (any, any) {
 		key := jwe.DirectKey{Key: randomSecret(t), Enc: jwa.A128GCM}
 		return key, key
 	},
-	jwa.PBES2HS256A128KW: func(*testing.T) (any, any) {
-		key := jwe.PasswordKey{Password: []byte("correct horse battery staple"), Count: 1000}
-		return key, key
-	},
+	jwa.PBES2HS256A128KW: passwordKeys,
+	jwa.PBES2HS384A192KW: passwordKeys,
+	jwa.PBES2HS512A256KW: passwordKeys,
+}
+
+func rsaKeys(t *testing.T) (any, any) {
+	key, err := nestedRSAKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &key.PublicKey, key
 }
 
 func x25519Keys(t *testing.T) (any, any) {
@@ -69,9 +89,19 @@ func x25519Keys(t *testing.T) (any, any) {
 	return key.PublicKey(), key
 }
 
-func sharedSecret(t *testing.T) (any, any) {
-	secret := randomSecret(t)
-	return secret, secret
+func sharedSecretOf(size int) func(*testing.T) (any, any) {
+	return func(t *testing.T) (any, any) {
+		secret := make([]byte, size)
+		if _, err := rand.Read(secret); err != nil {
+			t.Fatal(err)
+		}
+		return secret, secret
+	}
+}
+
+func passwordKeys(*testing.T) (any, any) {
+	key := jwe.PasswordKey{Password: []byte("correct horse battery staple"), Count: 1000}
+	return key, key
 }
 
 func recipientFor(t *testing.T, alg jwa.Algorithm) recipient {
@@ -92,9 +122,9 @@ func recipientFor(t *testing.T, alg jwa.Algorithm) recipient {
 	return recipient{encrypter: encrypter, decrypter: decrypter}
 }
 
-var sharedKeyAlgorithms = []jwa.Algorithm{jwa.Dir, jwa.A128KW, jwa.A128GCMKW, jwa.PBES2HS256A128KW}
+var sharedKeyAlgorithms = []jwa.Algorithm{jwa.Dir, jwa.A128KW, jwa.A192KW, jwa.A256KW, jwa.A128GCMKW, jwa.A192GCMKW, jwa.A256GCMKW, jwa.PBES2HS256A128KW, jwa.PBES2HS384A192KW, jwa.PBES2HS512A256KW}
 
-var publicKeyAlgorithms = []jwa.Algorithm{jwa.RSAOAEP256, jwa.ECDHES, jwa.ECDHESA128KW}
+var publicKeyAlgorithms = []jwa.Algorithm{jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512, jwa.ECDHES, jwa.ECDHESA128KW, jwa.ECDHESA192KW, jwa.ECDHESA256KW}
 
 func signedJWT(t *testing.T, claims map[string]any) (string, model.Retriever) {
 	t.Helper()
@@ -431,6 +461,51 @@ func TestValidate_RequireSignedJWTAndRequireEncryptedJWTPinTheShape(t *testing.T
 			}
 			if c.want != nil && (!errors.Is(err, c.want) || validated != nil) {
 				t.Errorf("[RFC 7519 7.2] this shape is not the one the options require, so want %v, got %v", c.want, err)
+			}
+		})
+	}
+}
+
+func TestValidate_AnEncryptOnlyJWTIsRefusedUnderEveryAlgThatIsNotASharedSecret(t *testing.T) {
+	for _, alg := range header.KeyManagementAlgorithms {
+		if slices.Contains(sharedKeyAlgorithms, alg) {
+			continue
+		}
+		t.Run(alg.String(), func(t *testing.T) {
+			r := recipientFor(t, alg)
+			token := encryptOnly(t, r, map[string]any{"sub": "admin"})
+			if validated, err := Validate(context.Background(), token, nil, []model.Decrypter{r.decrypter}, nil, nil); !errors.Is(err, joseerror.ErrInvalidSignature) || validated != nil {
+				t.Errorf("[RFC 8725 2.1] only a shared key or password shows who encrypted a JWT, so an encrypt-only JWT under %s must be refused by default, got %v", alg, err)
+			}
+		})
+	}
+}
+
+type countingDecrypter struct {
+	model.Decrypter
+	calls int
+}
+
+func (c *countingDecrypter) Decrypt(random io.Reader, msg []byte, opts crypto.DecrypterOpts) ([]byte, error) {
+	c.calls++
+	return c.Decrypter.Decrypt(random, msg, opts)
+}
+
+func TestValidate_RefusesAnUnauthenticatedJWTBeforeAnyDecrypterRuns(t *testing.T) {
+	public := recipientFor(t, jwa.RSAOAEP256)
+	shared := recipientFor(t, jwa.A128KW)
+	for name, c := range map[string]struct {
+		r    recipient
+		opts *model.JoseOptions
+	}{
+		"a public-key encrypt-only JWT":                        {r: public},
+		"a shared-key encrypt-only JWT under RequireSignedJWT": {r: shared, opts: &model.JoseOptions{RequireSignedJWT: true}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			counter := &countingDecrypter{Decrypter: c.r.decrypter}
+			token := encryptOnly(t, c.r, map[string]any{"sub": "admin"})
+			if _, err := Validate(context.Background(), token, nil, []model.Decrypter{counter}, c.opts, nil); !errors.Is(err, joseerror.ErrInvalidSignature) || counter.calls != 0 {
+				t.Errorf("[RFC 7519 7.2] the refusal depends only on the protected header, so it must come before any decrypter runs; got %v after %d decryptions", err, counter.calls)
 			}
 		})
 	}

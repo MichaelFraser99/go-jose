@@ -80,7 +80,7 @@ A peer chooses `p2c`, and each PBES2 decrypter runs that many PBKDF2 iterations.
 
 ### An encrypt-only JWT under a public key proves nothing about its writer
 
-RFC 7519 allows a JWT that is only encrypted. Under RSA-OAEP or ECDH-ES anyone holding the recipient's public key can make one, so a caller expecting signed JWTs could be sent unsigned claims inside a JWE, and no signature would be checked. `jwt.Validate` therefore refuses such a token with `ErrInvalidSignature` unless `AllowUnauthenticatedJWT` is set in the JWE options. An encrypt-only JWT under a shared key or password is accepted, as only a holder of the secret can make it. Keep `publicKeyEncryption` in `jwt` in step with every key management algorithm whose encryption key is public.
+RFC 7519 allows a JWT that is only encrypted. Under RSA-OAEP or ECDH-ES anyone holding the recipient's public key can make one, so a caller expecting signed JWTs could be sent unsigned claims inside a JWE, and no signature would be checked. `jwt.Validate` therefore refuses such a token with `ErrInvalidSignature` unless `AllowUnauthenticatedJWT` is set in the JWE options. An encrypt-only JWT under a shared key or password is accepted, as only a holder of the secret can make it. `senderAuthenticatingEncryption` in `jwt` is an allow-list of the shared-key and password algorithms. Any other algorithm, including one added later such as HPKE, is refused for an encrypt-only JWT by default. Add an algorithm to the list only if a holder of a secret, and no one else, can encrypt with it. The refusal runs before decryption, as it depends only on the protected header.
 
 ### Never ask a caller's ML-DSA key for its parameters
 

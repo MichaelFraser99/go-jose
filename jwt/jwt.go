@@ -45,9 +45,11 @@ type Token struct {
 	Decrypter        model.Decrypter
 }
 
-var publicKeyEncryption = []jwa.Algorithm{
-	jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512,
-	jwa.ECDHES, jwa.ECDHESA128KW, jwa.ECDHESA192KW, jwa.ECDHESA256KW,
+var senderAuthenticatingEncryption = []jwa.Algorithm{
+	jwa.Dir,
+	jwa.A128KW, jwa.A192KW, jwa.A256KW,
+	jwa.A128GCMKW, jwa.A192GCMKW, jwa.A256GCMKW,
+	jwa.PBES2HS256A128KW, jwa.PBES2HS384A192KW, jwa.PBES2HS512A256KW,
 }
 
 // New signs a JWS Compact Serialization from head and body, writing to neither.
@@ -121,11 +123,13 @@ func New(signer crypto.Signer, head, body map[string]any, opts Opts) (*string, e
 //   - Otherwise the plaintext is the claims set, which must be a JSON object, else
 //     ErrMalformedToken. With dir, A128KW to A256KW, A128GCMKW to A256GCMKW or a
 //     PBES2 alg, only a holder of the shared key or password can have encrypted
-//     it. With RSA-OAEP or ECDH-ES anyone holding the recipient's public key can,
-//     so the claims prove nothing about who wrote them, and the token is refused
-//     with ErrInvalidSignature unless jweOpts.AllowUnauthenticatedJWT is set.
-//     With opts.RequireSignedJWT set, a JWT that is not nested is refused with
-//     ErrInvalidSignature under any key.
+//     it. Under any other alg, such as RSA-OAEP or ECDH-ES, anyone holding the
+//     recipient's public key can, so the claims prove nothing about who wrote
+//     them, and the token is refused with ErrInvalidSignature unless
+//     jweOpts.AllowUnauthenticatedJWT is set. With opts.RequireSignedJWT set, a
+//     JWT that is not nested is refused with ErrInvalidSignature under any key.
+//     Both refusals depend only on the protected header, so they are made before
+//     any decrypter runs.
 //
 // With RSA-OAEP or ECDH-ES, Token.Decrypter names the key of yours that
 // decrypted the token, not its sender: anyone holding your public key can
@@ -179,23 +183,26 @@ func validateEncrypted(ctx context.Context, token string, outOfBoundsPublicKey m
 	if len(decrypters) == 0 {
 		return nil, fmt.Errorf("%wthe token has the five segments of a JWE, and no decrypters were given to decrypt it", joseerror.ErrUnsupportedAlgorithm)
 	}
+	unverified, err := jwe.ParseHeader(token, jweOpts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt jwe compact serialization: %w", err)
+	}
+	nested := header.NamesNestedJWT(unverified)
+	if !nested {
+		if err := checkUnsigned(unverified, opts, jweOpts); err != nil {
+			return nil, err
+		}
+	}
+
 	head, plaintext, decrypter, err := jwe.Decrypt(ctx, token, decrypters, jweOpts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt jwe compact serialization: %w", err)
 	}
 	result := &Token{EncryptionHeader: head, Decrypter: decrypter}
-
-	if header.NamesNestedJWT(head) {
+	if nested {
 		return validateSigned(ctx, string(plaintext), outOfBoundsPublicKey, opts, result)
 	}
 
-	if opts != nil && opts.RequireSignedJWT {
-		return nil, fmt.Errorf("%wthe JWT is encrypted and not signed, and RequireSignedJWT is set", joseerror.ErrInvalidSignature)
-	}
-	alg, _ := head["alg"].(string)
-	if slices.Contains(publicKeyEncryption, jwa.GetAlgorithm(alg)) && (jweOpts == nil || !jweOpts.AllowUnauthenticatedJWT) {
-		return nil, fmt.Errorf("%wthe JWT is encrypted with %s and not signed, so anyone holding the recipient's public key could have written its claims; set AllowUnauthenticatedJWT in the JWEOptions to accept it", joseerror.ErrInvalidSignature, jsonutils.QuoteBounded(alg))
-	}
 	body, err := jsonutils.DecodeJSONObject(plaintext)
 	if err != nil {
 		return nil, fmt.Errorf("%wthe plaintext of a JWT that is not nested must be its claims set, a JSON object: %v", joseerror.ErrMalformedToken, err)
@@ -205,6 +212,17 @@ func validateEncrypted(ctx context.Context, token string, outOfBoundsPublicKey m
 	}
 	result.Claims = body
 	return result, nil
+}
+
+func checkUnsigned(head map[string]any, opts *model.JoseOptions, jweOpts *model.JWEOptions) error {
+	if opts != nil && opts.RequireSignedJWT {
+		return fmt.Errorf("%wthe JWT is encrypted and not signed, and RequireSignedJWT is set", joseerror.ErrInvalidSignature)
+	}
+	alg, _ := head["alg"].(string)
+	if !slices.Contains(senderAuthenticatingEncryption, jwa.GetAlgorithm(alg)) && (jweOpts == nil || !jweOpts.AllowUnauthenticatedJWT) {
+		return fmt.Errorf("%wthe JWT is encrypted with %s and not signed, and only a shared key or password shows who encrypted it; set AllowUnauthenticatedJWT in the JWEOptions to accept it", joseerror.ErrInvalidSignature, jsonutils.QuoteBounded(alg))
+	}
+	return nil
 }
 
 // Encrypt encrypts signedJWT, a JWT that jwt.New signed, to the recipient
