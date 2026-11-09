@@ -9,6 +9,8 @@ import (
 
 	"errors"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/ecdhes"
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/gcmkw"
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/pbes2"
 	"github.com/MichaelFraser99/go-jose/internal/httputils"
 	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
 	"github.com/MichaelFraser99/go-jose/internal/jose/jwk"
@@ -79,16 +81,49 @@ func ValidateHeader(ctx context.Context, header map[string]any, client *http.Cli
 	return jwkRetrievers, nil
 }
 
-func checkKeyAgreement(header map[string]any) error {
-	alg, _ := header["alg"].(string)
-	if !slices.Contains(keyAgreementAlgorithms, jwa.GetAlgorithm(alg)) {
-		return nil
+func checkAlgorithmParameters(header map[string]any) error {
+	if raw, present := header["zip"]; present {
+		if _, ok := raw.(string); !ok {
+			return fmt.Errorf("%wthe 'zip' header must be a string (RFC 7516 section 4.1.3)", joseerror.ErrMalformedClaim)
+		}
 	}
-	if err := checkEphemeralKey(header); err != nil {
+	alg, _ := header["alg"].(string)
+	switch algorithm := jwa.GetAlgorithm(alg); {
+	case slices.Contains(keyAgreementAlgorithms, algorithm):
+		if err := checkEphemeralKey(header); err != nil {
+			return err
+		}
+		_, _, err := ecdhes.PartyInfo(header)
+		return err
+	case slices.Contains(gcmKeyWrapAlgorithms, algorithm):
+		_, _, err := gcmkw.Parameters(header)
+		return err
+	case slices.Contains(PasswordAlgorithms, algorithm):
+		_, _, err := pbes2.Parameters(header)
 		return err
 	}
-	_, _, err := ecdhes.PartyInfo(header)
-	return err
+	return nil
+}
+
+func checkAlgorithmBounds(header map[string]any, alg jwa.Algorithm, opts *model.JoseOptions) error {
+	if slices.Contains(PasswordAlgorithms, alg) {
+		_, count, _ := pbes2.Parameters(header)
+		if maximum := MaxPBES2Count(opts); count > maximum {
+			return fmt.Errorf("%wthe 'p2c' header asks for more PBKDF2 iterations than the %d MaxPBES2Count allows", joseerror.ErrOutOfBounds, maximum)
+		}
+		if opts.RequireRecommendedPBES2Count && count < pbes2.RecommendedCount {
+			return fmt.Errorf("%wthe 'p2c' header of %d is below the %d RFC 7518 section 4.8.1.2 recommends, and RequireRecommendedPBES2Count is set", joseerror.ErrOutOfBounds, count, pbes2.RecommendedCount)
+		}
+	}
+	if raw, present := header["zip"]; present {
+		if zip := raw.(string); zip != "DEF" {
+			return fmt.Errorf("%wthe 'zip' header names %s, and this library implements only DEF", joseerror.ErrUnsupportedAlgorithm, jsonutils.QuoteBounded(zip))
+		}
+		if opts.MaxDecompressedSize <= 0 {
+			return fmt.Errorf("%wthe 'zip' header asks for decompression, which MaxDecompressedSize turns on", joseerror.ErrUnsupportedAlgorithm)
+		}
+	}
+	return nil
 }
 
 func checkEphemeralKey(header map[string]any) error {
@@ -119,9 +154,30 @@ var KeyManagementAlgorithms = []jwa.Algorithm{
 	jwa.A128KW, jwa.A192KW, jwa.A256KW,
 	jwa.Dir,
 	jwa.ECDHES, jwa.ECDHESA128KW, jwa.ECDHESA192KW, jwa.ECDHESA256KW,
+	jwa.A128GCMKW, jwa.A192GCMKW, jwa.A256GCMKW,
+	jwa.PBES2HS256A128KW, jwa.PBES2HS384A192KW, jwa.PBES2HS512A256KW,
 }
 
 var keyAgreementAlgorithms = []jwa.Algorithm{jwa.ECDHES, jwa.ECDHESA128KW, jwa.ECDHESA192KW, jwa.ECDHESA256KW}
+
+var gcmKeyWrapAlgorithms = []jwa.Algorithm{jwa.A128GCMKW, jwa.A192GCMKW, jwa.A256GCMKW}
+
+// PasswordAlgorithms are the PBES2 "alg" values (RFC 7518 section 4.8).
+var PasswordAlgorithms = []jwa.Algorithm{jwa.PBES2HS256A128KW, jwa.PBES2HS384A192KW, jwa.PBES2HS512A256KW}
+
+// DefaultMaxPBES2Count is the "p2c" bound when JoseOptions.MaxPBES2Count is
+// unset: twice the 600,000 iterations draft-ietf-oauth-rfc8725bis section 3.13
+// cites, as that section recommends.
+const DefaultMaxPBES2Count = 1_200_000
+
+// MaxPBES2Count returns the PBKDF2 iterations one JWE may cost: opts.MaxPBES2Count,
+// or DefaultMaxPBES2Count when that is zero or less.
+func MaxPBES2Count(opts *model.JoseOptions) int {
+	if opts != nil && opts.MaxPBES2Count > 0 {
+		return opts.MaxPBES2Count
+	}
+	return DefaultMaxPBES2Count
+}
 
 // ValidateJWEHeader checks a decoded JWE Protected Header, as RFC 7516 section
 // 5.2 step 5 requires, and returns the alg and enc it names.
@@ -129,14 +185,19 @@ var keyAgreementAlgorithms = []jwa.Algorithm{jwa.ECDHES, jwa.ECDHESA128KW, jwa.E
 // "alg" must name an algorithm in KeyManagementAlgorithms and "enc" a content
 // encryption algorithm this library implements (RFC 7516 sections 4.1.1 and
 // 4.1.2), each within the caller's allow-list if one is set, else
-// ErrUnsupportedAlgorithm. "zip" is refused with ErrUnsupportedAlgorithm, since
-// section 4.1.3 requires it to be processed and this library does not
-// decompress. The parameters RFC 7516 shares with RFC 7515 have the shapes
+// ErrUnsupportedAlgorithm. "zip" must be a string, else ErrMalformedToken. It
+// must be "DEF", and JoseOptions.MaxDecompressedSize must be set, else
+// ErrUnsupportedAlgorithm (section 4.1.3). The parameters RFC 7516 shares with RFC 7515 have the shapes
 // CheckHeaderShape describes, except that "b64" (RFC 7797, JWS only) is not
 // read, and "crit" may name no parameter RFC 7516 or RFC 7518 defines for JWE
 // (RFC 7516 section 4.1.13). For an ECDH-ES alg, "epk" must be a key
 // ecdhes.EphemeralPublicKey accepts, and "apu" and "apv" must be distinct
-// base64url strings (RFC 7518 section 4.6); no other alg reads them.
+// base64url strings (RFC 7518 section 4.6); no other alg reads them. For an
+// AES GCM key wrap alg, "iv" and "tag" must be base64url strings of 12 and 16
+// octets (section 4.7.1). For a PBES2 alg, "p2s" must be a base64url string of
+// at least 8 octets and "p2c" a positive integer (section 4.8.1), else
+// ErrMalformedToken; a "p2c" above JoseOptions.MaxPBES2Count (1,200,000 when
+// unset), or below 1000 with RequireRecommendedPBES2Count, is ErrOutOfBounds.
 // AcceptedTypes, RequireKeyIdentifier and UnderstoodCriticalHeaders apply as
 // they do to a JWS, except that "b64" in UnderstoodCriticalHeaders is ignored,
 // as RFC 7797 defines it for JWS only.
@@ -155,7 +216,7 @@ func ValidateJWEHeader(header map[string]any, opts *model.JoseOptions) (jwa.Algo
 	if _, err := readHeaderShape(header, jweMode); err != nil {
 		return jwa.Unknown, jwa.UnknownEncryption, malformed(err)
 	}
-	if err := checkKeyAgreement(header); err != nil {
+	if err := checkAlgorithmParameters(header); err != nil {
 		if errors.Is(err, joseerror.ErrUnsupportedAlgorithm) {
 			return jwa.Unknown, jwa.UnknownEncryption, err
 		}
@@ -178,8 +239,8 @@ func ValidateJWEHeader(header map[string]any, opts *model.JoseOptions) (jwa.Algo
 		return jwa.Unknown, jwa.UnknownEncryption, fmt.Errorf("%w%s is not permitted by application-level constraints", joseerror.ErrUnsupportedAlgorithm, jsonutils.QuoteBounded(*encName))
 	}
 
-	if _, present := header["zip"]; present {
-		return jwa.Unknown, jwa.UnknownEncryption, fmt.Errorf("%wthe 'zip' header names a compression this library does not apply", joseerror.ErrUnsupportedAlgorithm)
+	if err := checkAlgorithmBounds(header, alg, opts); err != nil {
+		return jwa.Unknown, jwa.UnknownEncryption, err
 	}
 
 	if err := validateExpectedType(header, opts.AcceptedTypes); err != nil {
@@ -203,7 +264,7 @@ func CheckJWEHeaderShape(header map[string]any) error {
 	if _, err := readHeaderShape(header, jweMode); err != nil {
 		return err
 	}
-	return checkKeyAgreement(header)
+	return checkAlgorithmParameters(header)
 }
 
 type carriedSourceError struct {

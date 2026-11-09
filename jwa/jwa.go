@@ -71,6 +71,24 @@ const (
 	// ECDHESA256KW is ECDH-ES key agreement whose result wraps the CEK with
 	// A256KW, as RFC 7518 section 4.6 defines it.
 	ECDHESA256KW
+	// A128GCMKW is AES GCM key wrap with a 128-bit key, as RFC 7518 section 4.7
+	// defines it.
+	A128GCMKW
+	// A192GCMKW is AES GCM key wrap with a 192-bit key, as RFC 7518 section 4.7
+	// defines it.
+	A192GCMKW
+	// A256GCMKW is AES GCM key wrap with a 256-bit key, as RFC 7518 section 4.7
+	// defines it.
+	A256GCMKW
+	// PBES2HS256A128KW is PBES2 with HMAC SHA-256 and A128KW wrapping, as RFC 7518
+	// section 4.8 defines it.
+	PBES2HS256A128KW
+	// PBES2HS384A192KW is PBES2 with HMAC SHA-384 and A192KW wrapping, as RFC 7518
+	// section 4.8 defines it.
+	PBES2HS384A192KW
+	// PBES2HS512A256KW is PBES2 with HMAC SHA-512 and A256KW wrapping, as RFC 7518
+	// section 4.8 defines it.
+	PBES2HS512A256KW
 )
 
 func (a Algorithm) String() string {
@@ -135,6 +153,18 @@ func (a Algorithm) String() string {
 		return "ECDH-ES+A192KW"
 	case ECDHESA256KW:
 		return "ECDH-ES+A256KW"
+	case A128GCMKW:
+		return "A128GCMKW"
+	case A192GCMKW:
+		return "A192GCMKW"
+	case A256GCMKW:
+		return "A256GCMKW"
+	case PBES2HS256A128KW:
+		return "PBES2-HS256+A128KW"
+	case PBES2HS384A192KW:
+		return "PBES2-HS384+A192KW"
+	case PBES2HS512A256KW:
+		return "PBES2-HS512+A256KW"
 	default:
 		return ""
 	}
@@ -204,6 +234,18 @@ func GetAlgorithm(alg string) Algorithm {
 		return ECDHESA192KW
 	case "ECDH-ES+A256KW":
 		return ECDHESA256KW
+	case "A128GCMKW":
+		return A128GCMKW
+	case "A192GCMKW":
+		return A192GCMKW
+	case "A256GCMKW":
+		return A256GCMKW
+	case "PBES2-HS256+A128KW":
+		return PBES2HS256A128KW
+	case "PBES2-HS384+A192KW":
+		return PBES2HS384A192KW
+	case "PBES2-HS512+A256KW":
+		return PBES2HS512A256KW
 	default:
 		return Unknown
 	}

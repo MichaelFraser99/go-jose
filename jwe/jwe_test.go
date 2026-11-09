@@ -60,9 +60,11 @@ type keyPair struct {
 
 func pairFor(t *testing.T, alg jwa.Algorithm, enc jwa.Encryption) keyPair {
 	t.Helper()
-	sharedKeySizes := map[jwa.Algorithm]int{jwa.A128KW: 16, jwa.A192KW: 24, jwa.A256KW: 32}
+	sharedKeySizes := map[jwa.Algorithm]int{jwa.A128KW: 16, jwa.A192KW: 24, jwa.A256KW: 32, jwa.A128GCMKW: 16, jwa.A192GCMKW: 24, jwa.A256GCMKW: 32}
 	var public, private any
-	if alg == jwa.Dir {
+	if slices.Contains(passwordAlgorithms, alg) {
+		public = PasswordKey{Password: randomBytes(t, 12), Count: 1000}
+	} else if alg == jwa.Dir {
 		public = DirectKey{Key: randomBytes(t, cekSizes[enc]), Enc: enc}
 	} else if slices.Contains(keyAgreement, alg) {
 		key, err := ecdh.P256().GenerateKey(rand.Reader)
@@ -91,7 +93,11 @@ func pairFor(t *testing.T, alg jwa.Algorithm, enc jwa.Encryption) keyPair {
 
 var keyAgreement = []jwa.Algorithm{jwa.ECDHES, jwa.ECDHESA128KW, jwa.ECDHESA192KW, jwa.ECDHESA256KW}
 
-var allKeyManagement = append([]jwa.Algorithm{jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512, jwa.A128KW, jwa.A192KW, jwa.A256KW, jwa.Dir}, keyAgreement...)
+var gcmKeyWrap = []jwa.Algorithm{jwa.A128GCMKW, jwa.A192GCMKW, jwa.A256GCMKW}
+
+var passwordAlgorithms = []jwa.Algorithm{jwa.PBES2HS256A128KW, jwa.PBES2HS384A192KW, jwa.PBES2HS512A256KW}
+
+var allKeyManagement = slices.Concat([]jwa.Algorithm{jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512, jwa.A128KW, jwa.A192KW, jwa.A256KW, jwa.Dir}, keyAgreement, gcmKeyWrap, passwordAlgorithms)
 
 func TestEncrypt_RoundTripsEveryAlgAndEnc(t *testing.T) {
 	for _, alg := range allKeyManagement {
@@ -266,7 +272,7 @@ func TestDecrypt_ATokenOfOnlyDotsIsRefusedWithoutSplittingItAll(t *testing.T) {
 }
 
 func TestDecrypt_EveryFailureToDecryptIsTheSameError(t *testing.T) {
-	for _, alg := range []jwa.Algorithm{jwa.RSAOAEP, jwa.A128KW, jwa.Dir, jwa.ECDHES, jwa.ECDHESA128KW} {
+	for _, alg := range []jwa.Algorithm{jwa.RSAOAEP, jwa.A128KW, jwa.Dir, jwa.ECDHES, jwa.ECDHESA128KW, jwa.A128GCMKW, jwa.PBES2HS256A128KW} {
 		t.Run(alg.String(), func(t *testing.T) {
 			pair := pairFor(t, alg, jwa.A128GCM)
 			token, err := Encrypt(pair.encrypter, jwa.A128GCM, []byte("p"), nil)
@@ -489,7 +495,7 @@ func TestDecrypt_ChecksTheHeader(t *testing.T) {
 		{name: "an enc in the wrong case", head: map[string]any{"alg": "dir", "enc": "a128gcm"}, want: []error{joseerror.ErrUnsupportedAlgorithm}},
 		{name: "an alg as the enc", head: map[string]any{"alg": "dir", "enc": "A128KW"}, want: []error{joseerror.ErrUnsupportedAlgorithm}},
 		{name: "zip DEF", head: map[string]any{"alg": "dir", "enc": "A128GCM", "zip": "DEF"}, want: []error{joseerror.ErrUnsupportedAlgorithm}},
-		{name: "zip of another type", head: map[string]any{"alg": "dir", "enc": "A128GCM", "zip": 1}, want: []error{joseerror.ErrUnsupportedAlgorithm}},
+		{name: "zip of another type", head: map[string]any{"alg": "dir", "enc": "A128GCM", "zip": 1}, want: []error{joseerror.ErrMalformedToken, joseerror.ErrMalformedClaim}, malformed: true},
 		{name: "an alg outside the allow-list", head: map[string]any{"alg": "dir", "enc": "A128GCM"}, opts: &model.JoseOptions{AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.A128KW}}, want: []error{joseerror.ErrUnsupportedAlgorithm}},
 		{name: "an enc outside the allow-list", head: map[string]any{"alg": "dir", "enc": "A128GCM"}, opts: &model.JoseOptions{AllowedContentEncryptionAlgorithms: []jwa.Encryption{jwa.A256GCM}}, want: []error{joseerror.ErrUnsupportedAlgorithm}},
 		{name: "crit naming an extension not understood", head: map[string]any{"alg": "dir", "enc": "A128GCM", "crit": []any{"exp"}, "exp": 1}, want: []error{joseerror.ErrMissingCriticalClaim}},
@@ -546,6 +552,9 @@ func TestDecrypt_AcceptsWhatTheHeaderRulesAllow(t *testing.T) {
 		{name: "an apu equal to the apv, which only ECDH-ES reads", head: map[string]any{"apu": "QQ", "apv": "QQ"}},
 		{name: "an apu that is not a string, which only ECDH-ES reads", head: map[string]any{"apu": 1}},
 		{name: "an epk that is not a key, which only ECDH-ES reads", head: map[string]any{"epk": 1}},
+		{name: "an iv and tag that are not base64url, which only AES GCM key wrap reads", head: map[string]any{"iv": 1, "tag": "!"}},
+		{name: "a p2s that is too short and a p2c of 0, which only PBES2 reads", head: map[string]any{"p2s": "AA", "p2c": 0}},
+		{name: "a p2c above MaxPBES2Count, which only PBES2 reads", head: map[string]any{"p2c": 1e12}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -645,6 +654,8 @@ func TestEncrypt_RefusesWhatItCannotEmit(t *testing.T) {
 	dir := pairFor(t, jwa.Dir, jwa.A128GCM).encrypter
 	agreement := pairFor(t, jwa.ECDHES, jwa.A128GCM).encrypter
 	agreementKW := pairFor(t, jwa.ECDHESA128KW, jwa.A128GCM).encrypter
+	gcm := pairFor(t, jwa.A128GCMKW, jwa.A128GCM).encrypter
+	password := pairFor(t, jwa.PBES2HS256A128KW, jwa.A128GCM).encrypter
 	var typedNil *headerRewriter
 	tests := []struct {
 		name      string
@@ -679,6 +690,17 @@ func TestEncrypt_RefusesWhatItCannotEmit(t *testing.T) {
 		{name: "an ECDH-ES encrypter leaving out the epk", encrypter: headerRewriter{Encrypter: agreement, rewrite: func(h map[string]any) { delete(h, "epk") }}, enc: jwa.A128GCM, want: joseerror.ErrMissingClaim},
 		{name: "an ECDH-ES encrypter writing an epk with a private member", encrypter: headerRewriter{Encrypter: agreement, rewrite: func(h map[string]any) { h["epk"].(map[string]any)["d"] = "AAAA" }}, enc: jwa.A128GCM, want: joseerror.ErrMalformedClaim},
 		{name: "an ECDH-ES encrypter writing an apu equal to the apv", encrypter: headerRewriter{Encrypter: agreementKW, rewrite: func(h map[string]any) { h["apu"], h["apv"] = "QQ", "QQ" }}, enc: jwa.A128GCM, want: joseerror.ErrMalformedClaim},
+		{name: "an iv given for AES GCM key wrap", encrypter: gcm, enc: jwa.A128GCM, head: map[string]any{"iv": "AAAAAAAAAAAAAAAA"}, want: joseerror.ErrMalformedClaim},
+		{name: "a tag given for AES GCM key wrap", encrypter: gcm, enc: jwa.A128GCM, head: map[string]any{"tag": "AAAAAAAAAAAAAAAAAAAAAA"}, want: joseerror.ErrMalformedClaim},
+		{name: "an AES GCM key wrap encrypter leaving out the tag", encrypter: headerRewriter{Encrypter: gcm, rewrite: func(h map[string]any) { delete(h, "tag") }}, enc: jwa.A128GCM, want: joseerror.ErrMissingClaim},
+		{name: "an AES GCM key wrap encrypter writing an 11-octet iv", encrypter: headerRewriter{Encrypter: gcm, rewrite: func(h map[string]any) { h["iv"] = "AAAAAAAAAAAAAAA" }}, enc: jwa.A128GCM, want: joseerror.ErrMalformedClaim},
+		{name: "an AES GCM key wrap encrypter returning an encrypted key 8 octets long", encrypter: headerRewriter{Encrypter: gcm, key: make([]byte, 24)}, enc: jwa.A128GCM, want: joseerror.ErrEncryptionError},
+		{name: "a p2s given for PBES2", encrypter: password, enc: jwa.A128GCM, head: map[string]any{"p2s": "AAAAAAAAAAA"}, want: joseerror.ErrMalformedClaim},
+		{name: "a p2c given for PBES2", encrypter: password, enc: jwa.A128GCM, head: map[string]any{"p2c": 4096}, want: joseerror.ErrMalformedClaim},
+		{name: "a PBES2 encrypter leaving out the p2c", encrypter: headerRewriter{Encrypter: password, rewrite: func(h map[string]any) { delete(h, "p2c") }}, enc: jwa.A128GCM, want: joseerror.ErrMissingClaim},
+		{name: "a PBES2 encrypter writing a p2c of 0", encrypter: headerRewriter{Encrypter: password, rewrite: func(h map[string]any) { h["p2c"] = 0 }}, enc: jwa.A128GCM, want: joseerror.ErrMalformedClaim},
+		{name: "a PBES2 encrypter writing a 7-octet p2s", encrypter: headerRewriter{Encrypter: password, rewrite: func(h map[string]any) { h["p2s"] = "AAAAAAAAAA" }}, enc: jwa.A128GCM, want: joseerror.ErrMalformedClaim},
+		{name: "a PBES2 encrypter returning an encrypted key of the CEK's length", encrypter: headerRewriter{Encrypter: password, key: make([]byte, 16)}, enc: jwa.A128GCM, want: joseerror.ErrEncryptionError},
 		{name: "an encrypter adding a malformed parameter", encrypter: headerRewriter{Encrypter: kw, rewrite: func(h map[string]any) { h["x5t"] = "not base64url!" }}, enc: jwa.A128GCM, want: joseerror.ErrMalformedClaim},
 		{name: "an encrypter of a JWS alg", encrypter: algOverride{Encrypter: kw, alg: jwa.RS256}, enc: jwa.A128GCM, want: joseerror.ErrUnsupportedAlgorithm},
 		{name: "an encrypter of an alg outside the enumeration", encrypter: algOverride{Encrypter: kw, alg: jwa.Algorithm(999)}, enc: jwa.A128GCM, want: joseerror.ErrUnsupportedAlgorithm},

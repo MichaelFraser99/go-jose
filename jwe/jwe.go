@@ -3,6 +3,7 @@ package jwe
 
 import (
 	"bytes"
+	"compress/flate"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -10,11 +11,13 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"math"
 	"slices"
 	"strings"
 
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/contentenc"
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/pbes2"
 	"github.com/MichaelFraser99/go-jose/internal/jose/header"
 	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
 	"github.com/MichaelFraser99/go-jose/joseerror"
@@ -133,14 +136,28 @@ func checkProducerHeader(headBytes []byte) error {
 //     "enc" a content encryption algorithm it implements (sections 4.1.1 and
 //     4.1.2), each within JoseOptions.AllowedKeyManagementAlgorithms and
 //     AllowedContentEncryptionAlgorithms when set, else ErrUnsupportedAlgorithm.
-//   - "zip" is ErrUnsupportedAlgorithm: section 4.1.3 requires it to be
-//     processed, and this library does not decompress.
+//   - "zip" must be a string, and must be "DEF" with
+//     JoseOptions.MaxDecompressedSize set, else ErrUnsupportedAlgorithm
+//     (section 4.1.3). Decrypt then inflates the plaintext (RFC 1951) after it
+//     is authenticated. A plaintext that is not a DEFLATE stream is
+//     ErrMalformedToken, and one that inflates to more than
+//     MaxDecompressedSize octets is ErrOutOfBounds.
 //   - For an ECDH-ES alg, "epk" must be present and be an EC or OKP public key
 //     with its point on its curve and no private member (RFC 7518 section
 //     4.6.1.1, RFC 8725 section 3.4); an "epk" on a curve this library does not
 //     implement, such as X448, is ErrUnsupportedAlgorithm. "apu" and "apv" must
 //     be base64url strings and must differ (section 4.6.2). No other alg reads
 //     "epk", "apu" or "apv".
+//   - For an AES GCM key wrap alg, "iv" and "tag" must be base64url strings of
+//     12 and 16 octets (RFC 7518 section 4.7.1).
+//   - For a PBES2 alg, "p2s" must be a base64url string of at least 8 octets
+//     and "p2c" a positive integer (RFC 7518 section 4.8.1). A peer chooses
+//     "p2c", and each PBES2 decrypter tried runs that many PBKDF2 iterations.
+//     JoseOptions.MaxPBES2Count (1,200,000 when unset) bounds the iterations of
+//     the whole call, as draft-ietf-oauth-rfc8725bis section 3.13 recommends:
+//     a "p2c" times the number of decrypters of the token's alg that exceeds it
+//     is ErrOutOfBounds, before any decrypter runs. So is a "p2c" below 1000
+//     when RequireRecommendedPBES2Count is set.
 //   - "crit" follows RFC 7515 section 4.1.11, as section 4.1.13 requires, and
 //     may name no parameter RFC 7516 or RFC 7518 defines for JWE.
 //   - The parameters shared with RFC 7515 have the shapes jws.Verify requires,
@@ -148,9 +165,10 @@ func checkProducerHeader(headBytes []byte) error {
 //     as they do there. "b64" (RFC 7797) is a JWS parameter and is not read.
 //
 // The Initialization Vector and Authentication Tag must be the lengths enc
-// defines. The JWE Encrypted Key of a dir or ECDH-ES JWE must be empty, and
-// that of an A128KW, A192KW, A256KW or ECDH-ES key wrap JWE must be 8 octets
-// longer than enc's key (section 5.2 step 10, RFC 3394 section 2.2.1). That of
+// defines. The JWE Encrypted Key of a dir or ECDH-ES JWE must be empty. That
+// of an A128KW, A192KW, A256KW, ECDH-ES key wrap or PBES2 JWE must be 8 octets
+// longer than enc's key (section 5.2 step 10, RFC 3394 section 2.2.1), and that
+// of an AES GCM key wrap JWE as long as enc's key (RFC 7518 section 4.7). That of
 // an RSA-OAEP JWE is as long as the recipient's modulus (RFC 8017 section
 // 7.1.2), so it must be 256 to 1024 octets, the moduli this library accepts.
 // Any other length is ErrMalformedToken, and is refused before any decrypter
@@ -242,6 +260,12 @@ func Decrypt(ctx context.Context, compactSerialization string, decrypters []mode
 	if len(candidates) > maxKeysTried {
 		return nil, nil, nil, fmt.Errorf("%w%d decrypters implement %s, more than the %d MaxKeysTried allows", joseerror.ErrTooManyKeys, len(candidates), alg, maxKeysTried)
 	}
+	if slices.Contains(header.PasswordAlgorithms, alg) {
+		_, count, _ := pbes2.Parameters(protectedHeader)
+		if maximum := header.MaxPBES2Count(opts); count > maximum/len(candidates) {
+			return nil, nil, nil, fmt.Errorf("%w%d %s decrypters at a 'p2c' of %d would run more PBKDF2 iterations than the %d MaxPBES2Count allows", joseerror.ErrOutOfBounds, len(candidates), alg, count, maximum)
+		}
+	}
 
 	aad := []byte(components[0])
 	sealed := append(slices.Clip(ciphertext), tag...)
@@ -268,6 +292,11 @@ func Decrypt(ctx context.Context, compactSerialization string, decrypters []mode
 			return nil, nil, nil, fmt.Errorf("%w%s", joseerror.ErrDecryptionFailed, err.Error())
 		}
 		if plaintext, err := aead.Open(make([]byte, 0, len(ciphertext)), iv, sealed, aad); err == nil {
+			if _, compressed := protectedHeader["zip"]; compressed {
+				if plaintext, err = inflate(plaintext, opts.MaxDecompressedSize); err != nil {
+					return nil, nil, nil, err
+				}
+			}
 			return protectedHeader, plaintext, candidate, nil
 		}
 	}
@@ -329,10 +358,29 @@ func checkOptions(opts *model.JoseOptions) error {
 	return nil
 }
 
+func inflate(compressed []byte, limit int) ([]byte, error) {
+	reader := flate.NewReader(bytes.NewReader(compressed))
+	defer func() { _ = reader.Close() }()
+	read := int64(limit)
+	if read < math.MaxInt64 {
+		read++
+	}
+	inflated, err := io.ReadAll(io.LimitReader(reader, read))
+	if err != nil {
+		return nil, fmt.Errorf("%wthe 'zip' header names DEF, and the plaintext is not a DEFLATE stream (RFC 1951): %s", joseerror.ErrMalformedToken, err.Error())
+	}
+	if len(inflated) > limit {
+		return nil, fmt.Errorf("%wthe plaintext inflates to more than the %d octets MaxDecompressedSize allows", joseerror.ErrOutOfBounds, limit)
+	}
+	return slices.Clip(inflated), nil
+}
+
 func encryptedKeySize(alg jwa.Algorithm, cekSize int) (least, most int) {
 	switch alg {
-	case jwa.A128KW, jwa.A192KW, jwa.A256KW, jwa.ECDHESA128KW, jwa.ECDHESA192KW, jwa.ECDHESA256KW:
+	case jwa.A128KW, jwa.A192KW, jwa.A256KW, jwa.ECDHESA128KW, jwa.ECDHESA192KW, jwa.ECDHESA256KW, jwa.PBES2HS256A128KW, jwa.PBES2HS384A192KW, jwa.PBES2HS512A256KW:
 		return cekSize + 8, cekSize + 8
+	case jwa.A128GCMKW, jwa.A192GCMKW, jwa.A256GCMKW:
+		return cekSize, cekSize
 	case jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512:
 		return common.MinimumRSAModulusBits / 8, common.MaximumRSAModulusBits / 8
 	case jwa.Dir, jwa.ECDHES, jwa.ES256, jwa.ES384, jwa.ES512, jwa.RS256, jwa.RS384, jwa.RS512, jwa.PS256, jwa.PS384, jwa.PS512, jwa.HS256, jwa.HS384, jwa.HS512, jwa.EdDSA, jwa.Ed25519, jwa.MLDSA44, jwa.MLDSA65, jwa.MLDSA87, jwa.Unknown:

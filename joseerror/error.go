@@ -29,4 +29,5 @@ var (
 	ErrAudienceMismatch     = errors.New("audience mismatch: ")
 	ErrInvalidOptions       = errors.New("invalid options: ")
 	ErrTooManyKeys          = errors.New("too many keys: ")
+	ErrOutOfBounds          = errors.New("out of bounds: ")
 )

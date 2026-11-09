@@ -6,7 +6,7 @@ This file gives guidance to Claude Code (claude.ai/code) when it works in this r
 
 A zero-dependency Go implementation of the JOSE standards: JWS (RFC 7515), JWE (RFC 7516), JWK (RFC 7517), JWA (RFC 7518) and JWT (RFC 7519). It is a library, not a service.
 
-JWE is the Compact Serialization only, with the RSA-OAEP family, ECDH-ES (P-256, P-384, P-521 and X25519, direct and with AES Key Wrap), AES Key Wrap and `dir` for key management and all six RFC 7518 section 5 content encryption algorithms. `RSA1_5` is left out on purpose (RFC 8725 section 3.2). A `dir` key is a `jwe.DirectKey` bound to one `enc` (RFC 8725 section 3.1), and `jwe.Decrypt` returns the decrypter that succeeded so a caller never has to trust `kid`. AES GCM key wrap, PBES2, `zip`, nested JWTs and HPKE are planned under issue #72 and not yet implemented.
+JWE is the Compact Serialization only, with the RSA-OAEP family, ECDH-ES (P-256, P-384, P-521 and X25519, direct and with AES Key Wrap), AES Key Wrap, AES GCM key wrap, PBES2 and `dir` for key management and all six RFC 7518 section 5 content encryption algorithms. `RSA1_5` is left out on purpose (RFC 8725 section 3.2). A `dir` key is a `jwe.DirectKey` bound to one `enc` (RFC 8725 section 3.1), a PBES2 key is a `jwe.PasswordKey`, and `jwe.Decrypt` returns the decrypter that succeeded so a caller never has to trust `kid`. `Decrypt` inflates a `zip` of `DEF` only when `JoseOptions.MaxDecompressedSize` is set, and `Encrypt` never compresses. Nested JWT helpers and HPKE are planned under issue #72 and not yet implemented.
 
 ## Commands
 
@@ -33,7 +33,7 @@ One exception, and only one: an `Example` function in an `example_test.go` file 
 - **`jws/`**, **`jwe/`**, **`jwt/`**, **`jwk/`** — the public API. There is **no root package**: `go-jose` itself holds only `e2e_test.go`. Import the subpackage.
 - **`model/`** — exported types shared across packages, including `JoseOptions`.
 - **`joseerror/`** — the error sentinels. Each carries a message prefix, so wrap with `%w` followed immediately by the rest of the message and no space.
-- **`internal/algorithms/<alg>/`** — one package per algorithm. A signature algorithm has `NewSigner` and `NewValidator`. A JWE key management algorithm (`rsaoaep`, `keywrap`, `direct`) has `NewEncrypter` and `NewDecrypter`. `contentenc` builds the AEAD for an `enc`, and `aeskw`, `concatkdf` and `cbchmac` are the primitives the standard library lacks.
+- **`internal/algorithms/<alg>/`** — one package per algorithm. A signature algorithm has `NewSigner` and `NewValidator`. A JWE key management algorithm (`rsaoaep`, `ecdhes`, `keywrap`, `gcmkw`, `pbes2`, `direct`) has `NewEncrypter` and `NewDecrypter`. `contentenc` builds the AEAD for an `enc`, and `aeskw`, `concatkdf` and `cbchmac` are the primitives the standard library lacks.
 - **`internal/algorithms/common/`** — shared key handling, jwk production and jwk reading.
 - **`internal/jose/`** — header validation, jwk parsing, x5 certificate handling, JSON utilities.
 - **`internal/httputils/`** — the one place this library makes an outbound request.
@@ -73,6 +73,10 @@ A zero-valued field and a `nil` `*JoseOptions` must mean the same thing. `UseTok
 ### A SHOULD NOT on a peer's data is accepted by default, with a flag to refuse it
 
 When an RFC says that a jwk, header or token SHOULD NOT hold something, accept it by default. Add a `JoseOptions` bool that refuses it, off when unset. A MUST NOT is refused always. `StrictKeyOperations` is the example: RFC 7517 section 4.3 says that `use` and `key_ops` SHOULD NOT be used together, and that unrelated operations SHOULD NOT be combined. Do not refuse either by default.
+
+### A JWE's `p2c` and `zip` are bounded before the work they ask for
+
+A peer chooses `p2c`, and each PBES2 decrypter runs that many PBKDF2 iterations. So `header.ValidateJWEHeader` refuses a `p2c` above `JoseOptions.MaxPBES2Count`, and `jwe.Decrypt` refuses one whose product with the number of decrypters of the token's `alg` is above it, both before any decrypter runs. The bound is per call, not per decrypter, as draft-ietf-oauth-rfc8725bis section 3.13 bounds the iterations of one validation. `pbes2.Decrypter` trusts the count it is given. Keep both checks before the decrypter loop. A refusal there depends on the token alone, so it does not break the uniform failure. In the same way, `jwe.Decrypt` inflates a `DEF` plaintext through a reader limited to `MaxDecompressedSize` plus one octet, so a decompression bomb stops at the limit. Do not read the whole stream and measure it afterwards. Both refusals are `ErrOutOfBounds`, not `ErrMalformedToken`, because a bound is the caller's policy.
 
 ### Never ask a caller's ML-DSA key for its parameters
 
