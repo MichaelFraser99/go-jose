@@ -204,6 +204,8 @@ func TestNew_RefusesAHeadThatBreaksAJwsProducerRule(t *testing.T) {
 		{name: "a jwk that is a string", head: map[string]any{"jwk": "x"}, want: joseerror.ErrMalformedClaim, clause: "RFC 7515 4.1.3"},
 		{name: "a typ that is a number", head: map[string]any{"typ": 5}, want: joseerror.ErrMalformedClaim, clause: "RFC 7515 4.1.9"},
 		{name: "a cty that is a number", head: map[string]any{"cty": 5}, want: joseerror.ErrMalformedClaim, clause: "RFC 7515 4.1.10"},
+		{name: "a cty of JWT over a claims set", head: map[string]any{"cty": "JWT"}, want: joseerror.ErrMalformedClaim, clause: "RFC 7519 5.2"},
+		{name: "a cty of application/jwt over a claims set", head: map[string]any{"cty": "application/jwt; charset=utf-8"}, want: joseerror.ErrMalformedClaim, clause: "RFC 7519 5.2"},
 		{name: "a b64 that is the string false", head: map[string]any{"b64": "false", "crit": []string{"b64"}}, want: joseerror.ErrMalformedClaim, clause: "RFC 7797 3"},
 		{name: "a b64 of true without crit", head: map[string]any{"b64": true}, want: joseerror.ErrMissingCriticalClaim, clause: "RFC 7797 6"},
 		{name: "a b64 of true with a crit that does not name it", head: map[string]any{"b64": true, "exp": 1, "crit": []string{"exp"}}, want: joseerror.ErrMissingCriticalClaim, clause: "RFC 7797 6"},

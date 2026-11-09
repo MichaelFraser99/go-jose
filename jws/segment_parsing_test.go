@@ -257,8 +257,8 @@ func TestVerifyCompactSerialization_RefusesANestedJWTBeforeTouchingAKey(t *testi
 			header, _ := json.Marshal(map[string]any{"alg": "ES256", "cty": cty})
 			token := s.sign(t, header, []byte(inner))
 			_, _, err := VerifyCompactSerialization(context.Background(), token, s.retriever, nil)
-			if !errors.Is(err, joseerror.ErrMalformedToken) || !strings.Contains(err.Error(), "nested JWTs are not supported") {
-				t.Errorf("[RFC 7519 5.2, 7.2 step 8] cty %q was not refused as an unsupported nested JWT: %v", cty, err)
+			if !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || errors.Is(err, joseerror.ErrMalformedToken) || !strings.Contains(err.Error(), "not supported") {
+				t.Errorf("[RFC 7519 5.2, 7.2 step 8] a JWS nested in a JWS is valid RFC 7519 that this library does not implement, so cty %q must be ErrUnsupportedAlgorithm and not ErrMalformedToken, got %v", cty, err)
 			}
 			if calls := s.calls.Load(); calls != 0 {
 				t.Errorf("[RFC 7519 7.2 step 8] the key retriever ran %d time(s) for a nested JWT this library refuses", calls)

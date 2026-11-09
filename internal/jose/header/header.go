@@ -51,7 +51,7 @@ func ValidateHeader(ctx context.Context, header map[string]any, client *http.Cli
 		return nil, fmt.Errorf("%w%s is not permitted by application-level constraints", joseerror.ErrUnsupportedAlgorithm, jsonutils.QuoteBounded(*alg))
 	}
 
-	if err := validateExpectedType(header, opts.AcceptedTypes); err != nil {
+	if err := ValidateExpectedType(header, opts.AcceptedTypes); err != nil {
 		return nil, err
 	}
 
@@ -243,7 +243,7 @@ func ValidateJWEHeader(header map[string]any, opts *model.JWEOptions) (jwa.Algor
 		return jwa.Unknown, jwa.UnknownEncryption, err
 	}
 
-	if err := validateExpectedType(header, opts.AcceptedTypes); err != nil {
+	if err := ValidateExpectedType(header, opts.AcceptedTypes); err != nil {
 		return jwa.Unknown, jwa.UnknownEncryption, err
 	}
 	if err := validateKeyIdentifierRequirement(header, opts.RequireKeyIdentifier); err != nil {
@@ -404,7 +404,11 @@ func readHeaderShape(header map[string]any, mode mode) (headerShape, error) {
 	return params, nil
 }
 
-func validateExpectedType(header map[string]any, accepted []string) error {
+// ValidateExpectedType refuses a header whose "typ" is not one of accepted, as
+// RFC 7515 section 4.1.9 compares media types. With none accepted, "typ" is not
+// checked. A missing "typ" is ErrMissingClaim, and any other refusal
+// ErrMalformedClaim.
+func ValidateExpectedType(header map[string]any, accepted []string) error {
 	if len(accepted) == 0 {
 		return nil
 	}
@@ -428,8 +432,9 @@ func validateExpectedType(header map[string]any, accepted []string) error {
 
 // NamesNestedJWT reports whether the header's cty is "JWT", which RFC 7519
 // section 5.2 requires of a Nested JWT. The comparison follows RFC 7515 section
-// 4.1.10: case-insensitive, with "application/" prepended to a value without a '/'.
-// Media-type parameters (RFC 9110 section 8.3.1) are ignored.
+// 4.1.10: case-insensitive for ASCII letters only (RFC 6838 section 4.2), with
+// "application/" prepended to a value without a '/'. Media-type parameters (RFC
+// 9110 section 8.3.1) are ignored.
 func NamesNestedJWT(header map[string]any) bool {
 	cty, _ := header["cty"].(string)
 	return mediaTypesMatch(cty, "JWT")
@@ -437,7 +442,57 @@ func NamesNestedJWT(header map[string]any) bool {
 
 func mediaTypesMatch(declared, accepted string) bool {
 	declared = withoutParameters(declared)
-	return declared != "" && strings.EqualFold(qualifyMediaType(declared), qualifyMediaType(withoutParameters(accepted)))
+	return declared != "" && equalFoldASCII(qualifyMediaType(declared), qualifyMediaType(withoutParameters(accepted)))
+}
+
+func equalFoldASCII(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range len(a) {
+		if lowerASCII(a[i]) != lowerASCII(b[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func lowerASCII(c byte) byte {
+	if 'A' <= c && c <= 'Z' {
+		return c + 'a' - 'A'
+	}
+	return c
+}
+
+// CheckAcceptedTypes refuses, with ErrInvalidOptions, an AcceptedTypes entry
+// that no "typ" can match: one that is not a media type name of RFC 6838
+// section 4.2, as a subtype alone or as a type and subtype, before any
+// parameters.
+func CheckAcceptedTypes(accepted []string) error {
+	for _, entry := range accepted {
+		name := withoutParameters(entry)
+		parts := strings.Split(name, "/")
+		if len(parts) > 2 || !slices.ContainsFunc(parts, isRestrictedName) || slices.ContainsFunc(parts, func(part string) bool { return !isRestrictedName(part) }) {
+			return fmt.Errorf("%wAcceptedTypes holds %s, which is not a media type name (RFC 6838 section 4.2), so no 'typ' can match it", joseerror.ErrInvalidOptions, jsonutils.QuoteBounded(entry))
+		}
+	}
+	return nil
+}
+
+func isRestrictedName(name string) bool {
+	if len(name) == 0 || len(name) > 127 || !isASCIIAlphanumeric(name[0]) {
+		return false
+	}
+	for i := 1; i < len(name); i++ {
+		if !isASCIIAlphanumeric(name[i]) && !strings.ContainsRune("!#$&-^_.+", rune(name[i])) {
+			return false
+		}
+	}
+	return true
+}
+
+func isASCIIAlphanumeric(c byte) bool {
+	return 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9'
 }
 
 func withoutParameters(mediaType string) string {

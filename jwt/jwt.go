@@ -118,8 +118,10 @@ func New(signer crypto.Signer, head, body map[string]any, opts Opts) (*string, e
 // decrypters it is refused with ErrUnsupportedAlgorithm. Then, as section 7.2
 // step 8 requires:
 //   - If the JWE's "cty" is "JWT" (section 5.2), the plaintext is a Nested JWT. It
-//     is verified as a token of three segments is, so anything but a JWS, such as
-//     a JWE nested in the JWE, is ErrMalformedToken.
+//     is verified as a token of three segments is. A JWE nested in the JWE is
+//     valid RFC 7519 that this library does not implement, so it is
+//     ErrUnsupportedAlgorithm, and anything else that is not a JWS is
+//     ErrMalformedToken.
 //   - Otherwise the plaintext is the claims set, which must be a JSON object, else
 //     ErrMalformedToken. With dir, A128KW to A256KW, A128GCMKW to A256GCMKW or a
 //     PBES2 alg, only a holder of the shared key or password can have encrypted
@@ -128,6 +130,8 @@ func New(signer crypto.Signer, head, body map[string]any, opts Opts) (*string, e
 //     them, and the token is refused with ErrInvalidSignature unless
 //     jweOpts.AllowUnauthenticatedJWT is set. With opts.RequireSignedJWT set, a
 //     JWT that is not nested is refused with ErrInvalidSignature under any key.
+//     The JWE's header is then the JWT's own, so opts.AcceptedTypes judges its
+//     "typ" (RFC 7519 section 5.1), as jweOpts.AcceptedTypes does.
 //     Both refusals depend only on the protected header, so they are made before
 //     any decrypter runs.
 //
@@ -152,6 +156,9 @@ func New(signer crypto.Signer, head, body map[string]any, opts Opts) (*string, e
 // ErrInvalidOptions, whatever the token.
 func Validate(ctx context.Context, token string, outOfBoundsPublicKey model.Retriever, decrypters []model.Decrypter, opts *model.JoseOptions, jweOpts *model.JWEOptions) (*Token, error) {
 	if err := validateOptions(opts); err != nil {
+		return nil, err
+	}
+	if err := jwe.CheckOptions(jweOpts); err != nil {
 		return nil, err
 	}
 	switch segments := strings.Count(token, ".") + 1; segments {
@@ -192,6 +199,11 @@ func validateEncrypted(ctx context.Context, token string, outOfBoundsPublicKey m
 		if err := checkUnsigned(unverified, opts, jweOpts); err != nil {
 			return nil, err
 		}
+		if opts != nil {
+			if err := header.ValidateExpectedType(unverified, opts.AcceptedTypes); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	head, plaintext, decrypter, err := jwe.Decrypt(ctx, token, decrypters, jweOpts)
@@ -200,6 +212,9 @@ func validateEncrypted(ctx context.Context, token string, outOfBoundsPublicKey m
 	}
 	result := &Token{EncryptionHeader: head, Decrypter: decrypter}
 	if nested {
+		if strings.Count(string(plaintext), ".") == 4 {
+			return nil, fmt.Errorf("%wa JWT encrypted inside a JWE is not supported: the plaintext is a JWE", joseerror.ErrUnsupportedAlgorithm)
+		}
 		return validateSigned(ctx, string(plaintext), outOfBoundsPublicKey, opts, result)
 	}
 
@@ -331,6 +346,9 @@ func checkProducerHeader(headBytes []byte) error {
 	_ = decoder.Decode(&emitted)
 	if err := header.CheckHeaderShape(emitted); err != nil {
 		return err
+	}
+	if header.NamesNestedJWT(emitted) {
+		return fmt.Errorf("%wNew signs a claims set, so 'cty' must not name JWT (RFC 7519 section 5.2); to nest a JWT, encrypt it with Encrypt", joseerror.ErrMalformedClaim)
 	}
 	if _, present := emitted["b64"]; present {
 		if critical, _ := emitted["crit"].([]any); !slices.Contains(critical, any("b64")) {
