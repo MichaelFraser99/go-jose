@@ -440,6 +440,37 @@ func mediaTypesMatch(declared, accepted string) bool {
 	return declared != "" && strings.EqualFold(qualifyMediaType(declared), qualifyMediaType(withoutParameters(accepted)))
 }
 
+// CheckAcceptedTypes refuses, with ErrInvalidOptions, an AcceptedTypes entry
+// that no "typ" can match: one that is not a media type name of RFC 6838
+// section 4.2, as a subtype alone or as a type and subtype, before any
+// parameters.
+func CheckAcceptedTypes(accepted []string) error {
+	for _, entry := range accepted {
+		name := withoutParameters(entry)
+		parts := strings.Split(name, "/")
+		if len(parts) > 2 || !slices.ContainsFunc(parts, isRestrictedName) || slices.ContainsFunc(parts, func(part string) bool { return !isRestrictedName(part) }) {
+			return fmt.Errorf("%wAcceptedTypes holds %s, which is not a media type name (RFC 6838 section 4.2), so no 'typ' can match it", joseerror.ErrInvalidOptions, jsonutils.QuoteBounded(entry))
+		}
+	}
+	return nil
+}
+
+func isRestrictedName(name string) bool {
+	if len(name) == 0 || len(name) > 127 || !isASCIIAlphanumeric(name[0]) {
+		return false
+	}
+	for i := 1; i < len(name); i++ {
+		if !isASCIIAlphanumeric(name[i]) && !strings.ContainsRune("!#$&-^_.+", rune(name[i])) {
+			return false
+		}
+	}
+	return true
+}
+
+func isASCIIAlphanumeric(c byte) bool {
+	return 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9'
+}
+
 func withoutParameters(mediaType string) string {
 	if i := strings.IndexByte(mediaType, ';'); i >= 0 {
 		return strings.TrimRight(mediaType[:i], " \t")

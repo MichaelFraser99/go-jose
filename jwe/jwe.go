@@ -355,7 +355,7 @@ func checkOptions(opts *model.JWEOptions) error {
 			return fmt.Errorf("%wAllowedContentEncryptionAlgorithms holds %s, which is not a content encryption algorithm this library implements", joseerror.ErrInvalidOptions, contentenc.Name(enc))
 		}
 	}
-	return nil
+	return header.CheckAcceptedTypes(opts.AcceptedTypes)
 }
 
 func inflate(compressed []byte, limit int) ([]byte, error) {

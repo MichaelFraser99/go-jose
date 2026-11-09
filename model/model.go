@@ -51,7 +51,10 @@ type JoseOptions struct {
 	// costs no verification and does not count. Zero or less means 100.
 	MaxKeysTried int
 
-	// AllowedSigningAlgorithms defines the list of acceptable algorithms for token signature verification. If not specified, all algorithms are permitted
+	// AllowedSigningAlgorithms lists the 'alg' values a JWS may name. With none
+	// named, every signature algorithm this library implements is permitted. An
+	// entry this library has no validator for, such as a JWE alg, makes every
+	// call fail with ErrInvalidOptions, whatever the token.
 	AllowedSigningAlgorithms []jwa.Algorithm
 
 	// ClockSkewLeeway widens the window the iat, nbf and exp claims are judged against, to allow for clock skew between the issuer and this verifier. A value of zero or less grants none. Defaults to 0
@@ -61,7 +64,10 @@ type JoseOptions struct {
 	// compared as RFC 7515 section 4.1.9 requires: case-insensitively, with
 	// "application/" treated as prepended to any value containing no "/".
 	//
-	// With none listed, 'typ' is not checked.
+	// With none listed, 'typ' is not checked. An entry that is not a media type
+	// name (RFC 6838 section 4.2), such as "", " JWT" or "*/*", can match no
+	// 'typ', so it makes every call fail with ErrInvalidOptions, whatever the
+	// token.
 	AcceptedTypes []string
 
 	// RequireKeyIdentifier refuses a token whose 'kid' header is absent or is not a

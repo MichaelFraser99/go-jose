@@ -11,6 +11,7 @@ import (
 
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/es256"
 	"github.com/MichaelFraser99/go-jose/joseerror"
+	"github.com/MichaelFraser99/go-jose/jwa"
 	"github.com/MichaelFraser99/go-jose/model"
 )
 
@@ -194,6 +195,19 @@ func TestValidate_ANumberBeyondTheFloat64RangeIsRefusedAsAMalformedToken(t *test
 		claimsTestFixClock(t, claimsTestNow)
 		if err := claimsTestValidate(t, payload, nil); errors.Is(err, joseerror.ErrMalformedClaim) {
 			t.Errorf("[RFC 8259 6] %s is refused by the JSON decoder before any claim is judged, so it must not match ErrMalformedClaim, got %q", payload, err)
+		}
+	}
+}
+
+func TestValidate_RefusesOptionValuesNoTokenCanMeetWhateverTheToken(t *testing.T) {
+	for name, opts := range map[string]*model.JoseOptions{
+		"a JWE alg in AllowedSigningAlgorithms": {AllowedSigningAlgorithms: []jwa.Algorithm{jwa.A128KW}},
+		"an AcceptedTypes entry with a space":   {AcceptedTypes: []string{"JWT "}},
+	} {
+		for _, token := range []string{"a.b.c", "a.b.c.d.e", "garbage"} {
+			if validated, err := Validate(context.Background(), token, nil, nil, opts, nil); !errors.Is(err, joseerror.ErrInvalidOptions) || validated != nil {
+				t.Errorf("[RFC 6838 4.2, RFC 8725 3.1] %s can match no token, so Validate must refuse %q with ErrInvalidOptions, got %v", name, token, err)
+			}
 		}
 	}
 }
