@@ -51,7 +51,7 @@ func ValidateHeader(ctx context.Context, header map[string]any, client *http.Cli
 		return nil, fmt.Errorf("%w%s is not permitted by application-level constraints", joseerror.ErrUnsupportedAlgorithm, jsonutils.QuoteBounded(*alg))
 	}
 
-	if err := validateExpectedType(header, opts.AcceptedTypes); err != nil {
+	if err := ValidateExpectedType(header, opts.AcceptedTypes); err != nil {
 		return nil, err
 	}
 
@@ -243,7 +243,7 @@ func ValidateJWEHeader(header map[string]any, opts *model.JWEOptions) (jwa.Algor
 		return jwa.Unknown, jwa.UnknownEncryption, err
 	}
 
-	if err := validateExpectedType(header, opts.AcceptedTypes); err != nil {
+	if err := ValidateExpectedType(header, opts.AcceptedTypes); err != nil {
 		return jwa.Unknown, jwa.UnknownEncryption, err
 	}
 	if err := validateKeyIdentifierRequirement(header, opts.RequireKeyIdentifier); err != nil {
@@ -404,7 +404,11 @@ func readHeaderShape(header map[string]any, mode mode) (headerShape, error) {
 	return params, nil
 }
 
-func validateExpectedType(header map[string]any, accepted []string) error {
+// ValidateExpectedType refuses a header whose "typ" is not one of accepted, as
+// RFC 7515 section 4.1.9 compares media types. With none accepted, "typ" is not
+// checked. A missing "typ" is ErrMissingClaim, and any other refusal
+// ErrMalformedClaim.
+func ValidateExpectedType(header map[string]any, accepted []string) error {
 	if len(accepted) == 0 {
 		return nil
 	}
