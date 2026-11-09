@@ -44,9 +44,35 @@ func VerifyCompactSerialization(ctx context.Context, compactSerialization string
 
 const defaultMaxKeysTried = 100
 
+// CheckOptions refuses, with ErrInvalidOptions, options that are wrong whatever
+// the token: an AllowedSigningAlgorithms entry this library has no validator
+// for, such as a JWE alg, and an AcceptedTypes entry that is not a media type
+// name (RFC 6838 section 4.2). Verify and VerifyCompactSerialization call it
+// before reading the token.
+func CheckOptions(opts *model.JoseOptions) error {
+	if opts == nil {
+		return nil
+	}
+	for _, alg := range opts.AllowedSigningAlgorithms {
+		if !hasValidator(alg) {
+			name := alg.String()
+			if alg == jwa.Unknown {
+				name = "jwa.Unknown, which a name GetAlgorithm does not recognise gives,"
+			} else if name == "" {
+				name = fmt.Sprintf("jwa.Algorithm(%d)", int(alg))
+			}
+			return fmt.Errorf("%wAllowedSigningAlgorithms holds %s, which is not a signature algorithm this library implements", joseerror.ErrInvalidOptions, name)
+		}
+	}
+	return header.CheckAcceptedTypes(opts.AcceptedTypes)
+}
+
 func verify(ctx context.Context, compactSerialization string, outOfBoundsPublicKey model.Retriever, opts *model.JoseOptions, payloadIsJSONObject bool) (protectedHeader map[string]any, payload []byte, body map[string]any, err error) {
 	if ctx == nil {
 		return nil, nil, nil, fmt.Errorf("%wthe context passed is nil", joseerror.ErrInvalidOptions)
+	}
+	if err := CheckOptions(opts); err != nil {
+		return nil, nil, nil, err
 	}
 	components := strings.Split(compactSerialization, ".")
 	if len(components) != 3 {
@@ -84,7 +110,10 @@ func verify(ctx context.Context, compactSerialization string, outOfBoundsPublicK
 	jwkRetrievers = append(jwkRetrievers, headerJwkRetrievers...)
 
 	if len(jwkRetrievers) == 0 {
-		return nil, nil, nil, fmt.Errorf("%wno cryptographic material provided for signature validation", joseerror.ErrMalformedToken)
+		if opts == nil || !opts.UseTokenProvidedKeys && opts.X509Roots == nil {
+			return nil, nil, nil, fmt.Errorf("%wno retriever was given and no key the token names is allowed, so no token can verify; pass a retriever, or set UseTokenProvidedKeys or X509Roots", joseerror.ErrInvalidOptions)
+		}
+		return nil, nil, nil, fmt.Errorf("%wno retriever was given and the token names no key this verifier may use", joseerror.ErrNoKeyIdentifierMatch)
 	}
 
 	payload, err = jsonutils.DecodeBase64url(components[1])
