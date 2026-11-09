@@ -158,7 +158,7 @@ func TestNew_TheAlgHeaderNamesTheAlgorithmThatSigned(t *testing.T) {
 			if alg := newTestHeader(t, *token)["alg"]; alg != tt.wantAlg {
 				t.Errorf("[RFC 7515 4.1.1] want alg %q, got %v", tt.wantAlg, alg)
 			}
-			if _, _, err := Validate(context.Background(), *token, newTestRetriever(tt.signer.Public()), nil); err != nil {
+			if _, err := Validate(context.Background(), *token, newTestRetriever(tt.signer.Public()), nil, nil, nil); err != nil {
 				t.Errorf("[RFC 7515 5.2] the token does not verify under the alg its header names: %s", err)
 			}
 		})
@@ -176,7 +176,7 @@ func TestNew_CallsAModelSignerWithTheJwsSigningInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("[model.Signer JOSE mode] New handed a model.Signer a digest rather than the JWS Signing Input: %s", err)
 	}
-	if _, _, err := Validate(context.Background(), *token, newTestRetriever(signer.Public()), nil); err != nil {
+	if _, err := Validate(context.Background(), *token, newTestRetriever(signer.Public()), nil, nil, nil); err != nil {
 		t.Errorf("[RFC 7515 5.1] the token does not verify: %s", err)
 	}
 }
@@ -277,7 +277,7 @@ func TestNew_StandardLibrarySignersProduceJwsSignatures(t *testing.T) {
 			if !tt.viaThisLibrary {
 				return
 			}
-			if _, _, err := Validate(context.Background(), *token, newTestRetriever(tt.signer.Public()), nil); err != nil {
+			if _, err := Validate(context.Background(), *token, newTestRetriever(tt.signer.Public()), nil, nil, nil); err != nil {
 				t.Errorf("[RFC 7518 3] this library's validator refuses the token: %s", err)
 			}
 		})
@@ -512,7 +512,8 @@ func TestNew_ANilBodyIsAnEmptyClaimsSet(t *testing.T) {
 	if payload := newTestSegment(t, *token, 1); string(payload) != "{}" {
 		t.Errorf("[RFC 7519 4] the JWT Claims Set must be a JSON object, got %s", payload)
 	}
-	_, body, err := Validate(context.Background(), *token, newTestRetriever(signer.Public()), nil)
+	validated, err := Validate(context.Background(), *token, newTestRetriever(signer.Public()), nil, nil, nil)
+	_, body := parts(validated)
 	if err != nil {
 		t.Fatalf("[RFC 7519 7.2] the token does not validate: %s", err)
 	}
@@ -561,7 +562,8 @@ func TestValidate_AcceptsATokenSignedUnderTheDeprecatedEdDSA(t *testing.T) {
 	}
 	input := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"JWT"}`)) + "." + base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"test"}`))
 	token := input + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(edKey, []byte(input)))
-	_, body, err := Validate(context.Background(), token, newTestRetriever(public), nil)
+	validated, err := Validate(context.Background(), token, newTestRetriever(public), nil, nil, nil)
+	_, body := parts(validated)
 	if err != nil || body["sub"] != "test" {
 		t.Errorf("[RFC 9864 4.4] a deprecated identifier is to be avoided by new producers, not refused by verifiers, so an EdDSA token under an Ed25519 key must validate, got %v and %v", body, err)
 	}
@@ -596,7 +598,7 @@ func TestNew_DoesNotPanicOnASignerWhosePublicKeyChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the signer's first public key is a valid P-256 key, so the token must be signed, got %v", err)
 	}
-	if _, _, err := Validate(context.Background(), *token, newTestRetriever(&signer.key.PublicKey), nil); err != nil {
+	if _, err := Validate(context.Background(), *token, newTestRetriever(&signer.key.PublicKey), nil, nil, nil); err != nil {
 		t.Errorf("[RFC 7518 3.4] the signature must verify under the key Public first returned, got %v", err)
 	}
 }

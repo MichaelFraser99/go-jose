@@ -6,7 +6,7 @@ This file gives guidance to Claude Code (claude.ai/code) when it works in this r
 
 A zero-dependency Go implementation of the JOSE standards: JWS (RFC 7515), JWE (RFC 7516), JWK (RFC 7517), JWA (RFC 7518) and JWT (RFC 7519). It is a library, not a service.
 
-JWE is the Compact Serialization only, with the RSA-OAEP family, ECDH-ES (P-256, P-384, P-521 and X25519, direct and with AES Key Wrap), AES Key Wrap, AES GCM key wrap, PBES2 and `dir` for key management and all six RFC 7518 section 5 content encryption algorithms. `RSA1_5` is left out on purpose (RFC 8725 section 3.2). A `dir` key is a `jwe.DirectKey` bound to one `enc` (RFC 8725 section 3.1), a PBES2 key is a `jwe.PasswordKey`, and `jwe.Decrypt` returns the decrypter that succeeded so a caller never has to trust `kid`. `Decrypt` inflates a `zip` of `DEF` only when `JoseOptions.MaxDecompressedSize` is set, and `Encrypt` never compresses. Nested JWT helpers and HPKE are planned under issue #72 and not yet implemented.
+JWE is the Compact Serialization only, with the RSA-OAEP family, ECDH-ES (P-256, P-384, P-521 and X25519, direct and with AES Key Wrap), AES Key Wrap, AES GCM key wrap, PBES2 and `dir` for key management and all six RFC 7518 section 5 content encryption algorithms. `RSA1_5` is left out on purpose (RFC 8725 section 3.2). A `dir` key is a `jwe.DirectKey` bound to one `enc` (RFC 8725 section 3.1), a PBES2 key is a `jwe.PasswordKey`, and `jwe.Decrypt` returns the decrypter that succeeded so a caller never has to trust `kid`. `Decrypt` inflates a `zip` of `DEF` only when `JoseOptions.MaxDecompressedSize` is set, and `Encrypt` never compresses. `jwt.Validate` takes a JWT of any shape: signed, encrypted, or signed and then encrypted (`jwt.Encrypt` makes the last). HPKE is planned under issue #72 and not yet implemented.
 
 ## Commands
 
@@ -77,6 +77,10 @@ When an RFC says that a jwk, header or token SHOULD NOT hold something, accept i
 ### A JWE's `p2c` and `zip` are bounded before the work they ask for
 
 A peer chooses `p2c`, and each PBES2 decrypter runs that many PBKDF2 iterations. So `header.ValidateJWEHeader` refuses a `p2c` above `JoseOptions.MaxPBES2Count`, and `jwe.Decrypt` refuses one whose product with the number of decrypters of the token's `alg` is above it, both before any decrypter runs. The bound is per call, not per decrypter, as draft-ietf-oauth-rfc8725bis section 3.13 bounds the iterations of one validation. `pbes2.Decrypter` trusts the count it is given. Keep both checks before the decrypter loop. A refusal there depends on the token alone, so it does not break the uniform failure. In the same way, `jwe.Decrypt` inflates a `DEF` plaintext through a reader limited to `MaxDecompressedSize` plus one octet, so a decompression bomb stops at the limit. Do not read the whole stream and measure it afterwards. Both refusals are `ErrOutOfBounds`, not `ErrMalformedToken`, because a bound is the caller's policy.
+
+### An encrypt-only JWT under a public key proves nothing about its writer
+
+RFC 7519 allows a JWT that is only encrypted. Under RSA-OAEP or ECDH-ES anyone holding the recipient's public key can make one, so a caller expecting signed JWTs could be sent unsigned claims inside a JWE, and no signature would be checked. `jwt.Validate` therefore refuses such a token with `ErrInvalidSignature` unless `AllowUnauthenticatedJWT` is set in the JWE options. An encrypt-only JWT under a shared key or password is accepted, as only a holder of the secret can make it. Keep `publicKeyEncryption` in `jwt` in step with every key management algorithm whose encryption key is public.
 
 ### Never ask a caller's ML-DSA key for its parameters
 

@@ -102,6 +102,16 @@ type JoseOptions struct {
 	// default, refuses every JWE with "zip" with ErrUnsupportedAlgorithm.
 	MaxDecompressedSize int
 
+	// AllowUnauthenticatedJWT lets jwt.Validate accept a JWT that is encrypted
+	// with RSA-OAEP or ECDH-ES and not signed. RFC 7519 allows such a JWT, but
+	// anyone holding the recipient's public key can make one, so its claims prove
+	// nothing about who wrote them, and a token that should have been signed can
+	// arrive without its signature. Off by default, including when no options are
+	// passed. A JWT encrypted with a shared key or password needs no such option,
+	// as only a holder of the secret can encrypt it. Set it in the options
+	// jwt.Validate applies to the JWE.
+	AllowUnauthenticatedJWT bool
+
 	// ClockSkewLeeway widens the window the iat, nbf and exp claims are judged against, to allow for clock skew between the issuer and this verifier. A value of zero or less grants none. Defaults to 0
 	ClockSkewLeeway time.Duration
 

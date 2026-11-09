@@ -253,7 +253,7 @@ func TestNew_SignsAHeadThatKeepsTheJwsProducerRules(t *testing.T) {
 			if err != nil {
 				t.Fatalf("[RFC 7515 4.1, RFC 7797 3 and 6] New refused a header that keeps every producer rule: %s", err)
 			}
-			if _, _, err := Validate(context.Background(), *token, newTestRetriever(signer.Public()), &model.JoseOptions{UnderstoodCriticalHeaders: tt.understood}); err != nil {
+			if _, err := Validate(context.Background(), *token, newTestRetriever(signer.Public()), nil, &model.JoseOptions{UnderstoodCriticalHeaders: tt.understood}, nil); err != nil {
 				t.Errorf("[RFC 7515 5.2] the token does not verify: %s", err)
 			}
 		})
@@ -291,9 +291,9 @@ func TestValidate_RefusesATokenOfTheWrongShape(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			head, body, err := Validate(context.Background(), tt.token, nil, nil)
-			if !errors.Is(err, tt.want) || head != nil || body != nil {
-				t.Errorf("[%s] want %q and no head or body, got %v, %v and %q", tt.clause, tt.want, head, body, err)
+			validated, err := Validate(context.Background(), tt.token, nil, nil, nil, nil)
+			if !errors.Is(err, tt.want) || validated != nil {
+				t.Errorf("[%s] want %q and no token, got %v and %q", tt.clause, tt.want, validated, err)
 			}
 		})
 	}
@@ -332,9 +332,9 @@ func TestNew_RefusesAJweKeyManagementAlgorithm(t *testing.T) {
 	}
 }
 
-func TestValidate_PointsAJWEAtJweDecrypt(t *testing.T) {
-	_, _, err := Validate(context.Background(), "a.b.c.d.e", nil, nil)
-	if !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || !strings.Contains(err.Error(), "jwe.Decrypt") {
-		t.Errorf("[RFC 7516 9] a five-part token is a JWE, which Validate does not decrypt, so want ErrUnsupportedAlgorithm naming jwe.Decrypt, got %v", err)
+func TestValidate_AJWEWithNoDecryptersAsksForThem(t *testing.T) {
+	_, err := Validate(context.Background(), "a.b.c.d.e", nil, nil, nil, nil)
+	if !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || !strings.Contains(err.Error(), "no decrypters") {
+		t.Errorf("[RFC 7519 7.2 step 8] a five-part token is a JWE, and with no decrypters Validate cannot decrypt it, so want ErrUnsupportedAlgorithm saying so, got %v", err)
 	}
 }

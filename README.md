@@ -478,11 +478,20 @@ Any other `crypto.Signer`, such as a KMS signer, is called as Go's `crypto.Signe
 - `New` refuses a `b64` of `false` with `ErrMissingCriticalClaim`, because it always encodes the payload.
 - `New` refuses a `b64` that `crit` does not name with `ErrMissingCriticalClaim`. RFC 7797 section 6 says `crit` MUST include `b64` when `b64` is used. To sign with `"b64": true`, also set `"crit": ["b64"]`. A verifier must then name `b64` in `UnderstoodCriticalHeaders`.
 
-The second validates a jwt and returns the decoded head and body:
+The second validates a JWT of any shape: signed, encrypted, or signed and then encrypted. It returns a `*jwt.Token`:
 
 ```go
-func jwt.Validate(ctx context.Context, token string, outOfBoundsPublicKey model.Retriever, opts *model.JoseOptions) (head, body map[string]any, err error)
+func jwt.Validate(ctx context.Context, token string, outOfBoundsPublicKey model.Retriever, decrypters []model.Decrypter, opts, jweOpts *model.JoseOptions) (*jwt.Token, error)
 ```
+
+| `Token` field | Holds |
+| --- | --- |
+| `Claims` | The JWT Claims Set |
+| `SignatureHeader` | The JOSE Header of the JWS that signed the claims, or nil for a JWT that is only encrypted |
+| `EncryptionHeader` | The JWE Protected Header, or nil for a JWT that is only signed |
+| `Decrypter` | The decrypter that decrypted the token, or nil for a JWT that is only signed |
+
+`opts` applies to the JWS and to the claims. `jweOpts` applies to the JWE. Use two values, because a rule for one layer can be wrong for the other. For example, an `AcceptedTypes` of `JWT` is correct for a signed JWT, but refuses the JWE around it, which usually has no `typ`. A JWT that is only signed needs no decrypters, and `Validate` does not read `jweOpts` for it.
 
 The retriever supplies key material of your own. Pass nil only when a key the token's header names can verify it: when you have turned on `UseTokenProvidedKeys` for `jwk` and `jku`, or set `X509Roots` for `x5c` and `x5u`. `model.JoseOptions` carries everything described under [Keys a token carries](#keys-a-token-carries), and may be nil for the defaults.
 
@@ -503,7 +512,7 @@ The `iat` rule is this library's own. RFC 7519 section 4.1.6 sets no acceptance 
 
 A value too large for any clock, such as an `nbf` of `1e19`, is judged as a time far in the future. It is not converted to an integer, so the result is the same on every CPU. A number outside the float64 range, such as `1e400`, is different: the JSON decoder refuses the token with `ErrMalformedToken` before any claim is read. RFC 8259 section 6 lets a recipient limit the range of numbers.
 
-`Validate` refuses a token that does not have three segments with `ErrMalformedToken`. A token of five segments is a JWE. `Validate` does not decrypt, so it refuses a JWE with `ErrUnsupportedAlgorithm`. To read an encrypted token, use [`jwe.Decrypt`](#encrypting-and-decrypting).
+`Validate` refuses a token that does not have three or five segments with `ErrMalformedToken`. See [Encrypted JWTs](#encrypted-jwts) for a token of five segments.
 
 To check the audience, name this recipient in `JoseOptions.ExpectedAudience`:
 
@@ -668,26 +677,31 @@ A `model.Decrypter` is a `crypto.Decrypter`. Thus you can give `GetDecrypter` an
 
 A `crypto.Decrypter` takes no context, so `ctx` cannot stop a call that is already running in the module. `Decrypt` checks `ctx` before each decrypter and after the last. To limit the time of a module call, build the decrypter for each request around a `crypto.Decrypter` that holds the request's context.
 
-### Sign, then encrypt
+### Encrypted JWTs
 
-To send a signed JWT that only the recipient can read, sign it and then encrypt the result. Set `cty` to `JWT`, as RFC 7519 section 5.2 requires of a nested JWT:
+To send a signed JWT that only the recipient can read, sign it with `jwt.New` and then encrypt it with `jwt.Encrypt`. `jwt.Encrypt` sets `cty` to `JWT`, as RFC 7519 section 5.2 requires of a Nested JWT:
 
 ```go
 signed, err := jwt.New(signer, nil, claims, jwt.Opts{})
-token, err := jwe.Encrypt(encrypter, jwa.A256GCM, []byte(*signed), map[string]any{"cty": "JWT"})
+token, err := jwt.Encrypt(encrypter, jwa.A256GCM, *signed, nil)
 ```
 
-To read it, decrypt, then validate the plaintext as a JWT:
+`jwt.Encrypt` refuses a `signed` that is not three base64url segments with a JSON object header, with `ErrMalformedToken`. It refuses a `cty` in the header that does not name `JWT`, with `ErrMalformedClaim`. Otherwise its errors are those of `jwe.Encrypt`.
+
+To read the token, give `jwt.Validate` your decrypters:
 
 ```go
-head, plaintext, used, err := jwe.Decrypt(ctx, token, decrypters, jweOpts)
-if cty, _ := head["cty"].(string); !strings.EqualFold(cty, "JWT") {
-	// not a nested JWT
-}
-jwtHead, claims, err := jwt.Validate(ctx, string(plaintext), retriever, jwtOpts)
+validated, err := jwt.Validate(ctx, token, retriever, decrypters, opts, jweOpts)
 ```
 
-Use different `JoseOptions` for the two calls. For example, an `AcceptedTypes` of `JWT` is correct for the inner JWS but refuses the outer JWE, which has no `typ`.
+`Validate` decrypts a token of five segments with `jwe.Decrypt`, and returns its errors. With no decrypters, it refuses the token with `ErrUnsupportedAlgorithm`. After decryption, the JWE's `cty` decides what the plaintext is (RFC 7519 section 7.2 step 8):
+
+- If `cty` names `JWT`, the plaintext is a Nested JWT. It must be a signed JWT, which `Validate` verifies with the retriever and `opts`. A plaintext that is not three segments, such as a JWE inside the JWE, is refused with `ErrMalformedToken`.
+- Otherwise the plaintext is the claims set. RFC 7519 allows a JWT that is only encrypted. The plaintext must be a JSON object, else `ErrMalformedToken`.
+
+CAUTION: Anyone who has your public key can make a JWT that is only encrypted with `RSA-OAEP` or `ECDH-ES`. Its claims prove nothing about who wrote them. If you expect signed JWTs, an attacker can also send unsigned claims in a JWE, and the signature check would not run. So `Validate` refuses such a token with `ErrInvalidSignature`. To accept it, set `AllowUnauthenticatedJWT` in `jweOpts`. A JWT that is only encrypted with `dir`, `A128KW` to `A256KW`, `A128GCMKW` to `A256GCMKW` or PBES2 is accepted, because only a holder of the shared key or password can make it. Use `Decrypter` to identify that sender.
+
+The claim rules apply to the claims in every case.
 ## Errors
 Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 
@@ -735,10 +749,16 @@ When a header check echoes a value from the token in its error, the value is quo
 
 ## Upgrading from 0.11.x
 
-Two changes can break your build:
+Three changes can break your build:
 
 - `model.Mode`, `model.JWS` and `model.JWE` are removed. Nothing in the public API took them, so delete any use.
 - `jws.GetValidatorFromJwk` takes a `*model.JoseOptions` as a third argument. Pass `nil` to keep the v0.11.0 behaviour.
+- `jwt.Validate` takes decrypters and a second `*model.JoseOptions` for the JWE layer, and returns a `*jwt.Token`. For a signed JWT, pass `nil` for both, and read `Token.SignatureHeader` and `Token.Claims` where you read `head` and `body`:
+
+```go
+validated, err := jwt.Validate(ctx, token, retriever, nil, opts, nil)
+head, body := validated.SignatureHeader, validated.Claims
+```
 
 One change can break your error handling: a well-formed token that your options refuse, or that names what this library does not implement, no longer matches `ErrMalformedToken`. It matches only the sentinel for the reason, such as `ErrUnsupportedAlgorithm` for an `alg` outside `AllowedSigningAlgorithms`. If you test `errors.Is(err, joseerror.ErrMalformedToken)` to catch these refusals, test the specific sentinel instead. See [Errors](#errors).
 
@@ -748,7 +768,8 @@ These are new:
 - `oct` keys in the `jwk` package: `PrivateFromJwk` reads one as a `[]byte`, and `PrivateJwk` writes one.
 - `model.Encrypter`, `model.Decrypter` and `model.DecrypterOpts`.
 - `jwa.Encryption` with `jwa.GetEncryption`, and the `alg` constants `jwa.RSAOAEP` to `jwa.Dir` and `jwa.ECDHES` to `jwa.ECDHESA256KW`. The integer values of the existing `jwa.Algorithm` constants do not change.
-- `JoseOptions` fields: `AllowedKeyManagementAlgorithms`, `AllowedContentEncryptionAlgorithms`, `OnDecrypterError`, `StrictKeyOperations`, `MaxPBES2Count`, `RequireRecommendedPBES2Count` and `MaxDecompressedSize`.
+- `JoseOptions` fields: `AllowedKeyManagementAlgorithms`, `AllowedContentEncryptionAlgorithms`, `OnDecrypterError`, `StrictKeyOperations`, `MaxPBES2Count`, `RequireRecommendedPBES2Count`, `MaxDecompressedSize` and `AllowUnauthenticatedJWT`.
+- `jwt.Encrypt` and `jwt.Token`, for encrypted JWTs. See [Encrypted JWTs](#encrypted-jwts).
 - `jwe.PasswordKey` for PBES2, and the `alg` constants `jwa.A128GCMKW` to `jwa.A256GCMKW` and `jwa.PBES2HS256A128KW` to `jwa.PBES2HS512A256KW`.
 - The error sentinels `ErrEncryptionError` and `ErrOutOfBounds`. `ErrDecryptionFailed` now has a use.
 
@@ -758,7 +779,7 @@ A jwk whose `key_ops` lists a value twice is now refused by `jws.GetValidatorFro
 
 `jwk.PublicFromJwk` refuses an `oct` jwk with `ErrInvalidPublicKey`, because a symmetric key has no public half. v0.11.0 refused it with `ErrUnsupportedAlgorithm`. If you match the old sentinel for this case, match the new one.
 
-`jwt.Validate` still refuses a JWE with `ErrUnsupportedAlgorithm`. Its message now tells you to decrypt the token with `jwe.Decrypt` first.
+`jwt.Validate` decrypts a JWE when you give it decrypters. See [Encrypted JWTs](#encrypted-jwts). With no decrypters, it still refuses a JWE with `ErrUnsupportedAlgorithm`.
 
 A JWE `alg` cannot sign. `jws.GetSigner`, `jws.GetValidator` and `jwt.New` refuse one with `ErrUnsupportedAlgorithm`.
 
