@@ -500,7 +500,7 @@ RFC 7519 allows a JWT that is signed, encrypted, or both. To accept only the sha
 
 `Validate` returns a nil `*Token` with every error, so check `err` before you read the token.
 
-The retriever supplies key material of your own. Pass nil only when a key the token's header names can verify it: when you have turned on `UseTokenProvidedKeys` for `jwk` and `jku`, or set `X509Roots` for `x5c` and `x5u`. `model.JoseOptions` carries everything described under [Keys a token carries](#keys-a-token-carries), and may be nil for the defaults.
+The retriever supplies key material of your own. Pass nil only when a key the token's header names can verify it: when you have turned on `UseTokenProvidedKeys` for `jwk` and `jku`, or set `X509Roots` for `x5c` and `x5u`. With a nil retriever and neither option, no token can verify, so `Validate` refuses every token with `ErrInvalidOptions`, after it checks the header. If either option is set and the token names no key that it allows, the error is `ErrNoKeyIdentifierMatch`. `model.JoseOptions` carries everything described under [Keys a token carries](#keys-a-token-carries), and may be nil for the defaults.
 
 `Validate` checks each registered claim that is present:
 
@@ -733,14 +733,14 @@ Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 | `ErrMalformedClaim` | A claim is present but its type or value is wrong. This includes a `b64` that is not a boolean, and an `x5c` or `x5u` chain that is out of order or longer than 16 certificates |
 | `ErrMissingClaim` | A required claim is absent |
 | `ErrMissingCriticalClaim` | A header named in `crit` is absent, or names an extension this library does not understand, or `b64` is `false` |
-| `ErrNoKeyIdentifierMatch` | No key could be selected. The `kid` matches nothing, a `jku` set holds no usable key that matches the header, a certificate chain does not reach a configured root, or an `x5t` thumbprint does not match the chain |
+| `ErrNoKeyIdentifierMatch` | No key could be selected. The `kid` matches nothing, a `jku` set holds no usable key that matches the header, a certificate chain does not reach a configured root, or an `x5t` thumbprint does not match the chain. It also covers a token that names no key, when you give no retriever and rely on the keys a token names |
 | `ErrKeystoreError` | A `model.Jwks` lookup or addition failed, or a document decoded into `model.Jwks` is not a JWK Set |
 | `ErrApplicationError` | Key material a header named could not be obtained, decoded or used. Covers a failed `jku` or `x5u` fetch, a local decode of what one returned (an empty `x5u` body is a failed decode), and an inline `jwk` of a key type or curve this library does not support. A fetch that ran out of time also matches `context.DeadlineExceeded`, and one cancelled through `ctx` matches `context.Canceled` |
 | `ErrMalformedToken` | The token is not a well formed JOSE object: it breaks RFC 7515 or RFC 7516. A well-formed token that your options refuse, or that names what this library does not implement, does not match it |
 | `ErrExpired` | The current time is not before the token's `exp`, allowing for `ClockSkewLeeway` |
 | `ErrNotYetValid` | The token's `nbf` or `iat` is after the current time, allowing for `ClockSkewLeeway` |
 | `ErrAudienceMismatch` | `JoseOptions.ExpectedAudience` is set and the token's `aud` names none of its values |
-| `ErrInvalidOptions` | The options passed are themselves wrong, whatever the token. A nil `ctx`, a `JoseOptions.ExpectedAudience` that holds an empty string, and a JWE allow-list that names a value this library does not implement are three cases |
+| `ErrInvalidOptions` | The options passed are themselves wrong. Most of these cases are refused before the token is read. A verifier with no retriever and no token key allowed is refused after the header is checked, so a token with a bad header reports that fault first. A nil `ctx`, a `JoseOptions.ExpectedAudience` that holds an empty string, a JWE allow-list that names a value this library does not implement, and a nil retriever with neither `UseTokenProvidedKeys` nor `X509Roots` set, are four cases |
 | `ErrTooManyKeys` | The signature did not verify under as many keys as `JoseOptions.MaxKeysTried` allows, and more keys or key sources remained. For a JWE, more decrypters of the token's `alg` were given than `MaxKeysTried` allows |
 | `ErrOutOfBounds` | A JWE asks for more work than your options allow: a `p2c` above `JWEOptions.MaxPBES2Count`, or a plaintext that inflates to more than `MaxDecompressedSize`. It also covers a `p2c` below 1000 when `RequireRecommendedPBES2Count` is set |
 
@@ -798,6 +798,8 @@ A jwk whose `key_ops` lists a value twice is now refused by `jws.GetValidatorFro
 `jwk.PublicFromJwk` and `jwk.PrivateFromJwk` now read an X25519 jwk as an `*ecdh` key. v0.11.0 refused it with `ErrUnsupportedAlgorithm`. `jws.GetValidatorFromJwk` refuses an X25519 jwk with `ErrInvalidPublicKey`, where v0.11.0 gave `ErrUnsupportedAlgorithm`.
 
 `AcceptedTypes` and the `cty` check now ignore the case of ASCII letters only. v0.11.0 used Unicode case folding, so a `typ` with a lookalike letter, such as `ſecevent+jwt` with a long s, matched `secevent+jwt`. Media type names are ASCII (RFC 6838 section 4.2), so no valid `typ` or `cty` is affected, and you need to change nothing.
+
+A verifier given no retriever, and neither `UseTokenProvidedKeys` nor `X509Roots`, refuses every token with `ErrInvalidOptions`. v0.11.0 refused it with `ErrMalformedToken`, which blamed the token for a configuration fault. If token keys are allowed and the token names none, the error is `ErrNoKeyIdentifierMatch`. If you test for `ErrMalformedToken` in this case, test for these instead.
 
 `jwk.PublicFromJwk` refuses an `oct` jwk with `ErrInvalidPublicKey`, because a symmetric key has no public half. v0.11.0 refused it with `ErrUnsupportedAlgorithm`. If you match the old sentinel for this case, match the new one.
 

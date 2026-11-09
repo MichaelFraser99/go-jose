@@ -77,7 +77,10 @@ func verify(ctx context.Context, compactSerialization string, outOfBoundsPublicK
 	jwkRetrievers = append(jwkRetrievers, headerJwkRetrievers...)
 
 	if len(jwkRetrievers) == 0 {
-		return nil, nil, nil, fmt.Errorf("%wno cryptographic material provided for signature validation", joseerror.ErrMalformedToken)
+		if opts == nil || !opts.UseTokenProvidedKeys && opts.X509Roots == nil {
+			return nil, nil, nil, fmt.Errorf("%wno retriever was given and no key the token names is allowed, so no token can verify; pass a retriever, or set UseTokenProvidedKeys or X509Roots", joseerror.ErrInvalidOptions)
+		}
+		return nil, nil, nil, fmt.Errorf("%wno retriever was given and the token names no key this verifier may use", joseerror.ErrNoKeyIdentifierMatch)
 	}
 
 	payload, err = jsonutils.DecodeBase64url(components[1])
