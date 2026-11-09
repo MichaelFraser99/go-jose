@@ -701,7 +701,7 @@ To read the token, give `jwt.Validate` your decrypters:
 validated, err := jwt.Validate(ctx, token, retriever, decrypters, opts, jweOpts)
 ```
 
-`Validate` decrypts a token of five segments with `jwe.Decrypt`, and returns its errors. With no decrypters, it refuses the token with `ErrUnsupportedAlgorithm`. After decryption, the JWE's `cty` decides what the plaintext is (RFC 7519 section 7.2 step 8):
+`Validate` decrypts a token of five segments with `jwe.Decrypt`, and returns its errors. With no decrypters, it refuses the token with `ErrUnsupportedAlgorithm`. The JWE's `cty` decides what the plaintext is (RFC 7519 section 7.2 step 8). `Validate` reads it from the protected header before it decrypts, so it can refuse an unauthenticated JWT without running any decrypter. The header is authenticated by the decryption that follows. So a token whose `cty` was changed in transit is refused either way, though the error names the shape, not `ErrDecryptionFailed`:
 
 - If `cty` names `JWT`, the plaintext is a Nested JWT. It must be a signed JWT, which `Validate` verifies with the retriever and `opts`. A plaintext that is not three segments, such as a JWE inside the JWE, is refused with `ErrMalformedToken`.
 - Otherwise the plaintext is the claims set. RFC 7519 allows a JWT that is only encrypted. The plaintext must be a JSON object, else `ErrMalformedToken`.
@@ -710,7 +710,7 @@ CAUTION: Anyone who has your public key can make a JWT that is only encrypted wi
 
 A JWT that is only encrypted with `dir`, `A128KW` to `A256KW`, `A128GCMKW` to `A256GCMKW` or PBES2 is accepted, because only a holder of the shared key or password can make it. `Token.Decrypter` identifies that sender. With `RSA-OAEP` or `ECDH-ES`, `Token.Decrypter` names only your key that decrypted the token, not the sender. The signature of a Nested JWT identifies its issuer.
 
-The claim rules of `opts` apply to the claims in every case. The header rules of `jweOpts` apply to the JWE header.
+The claim rules of `opts` apply to the claims in every case. The header rules of `jweOpts` apply to the JWE header. For a JWT that is only encrypted, the JWE header is the JWT's own header (RFC 7519 section 5.1), so `AcceptedTypes` in `opts` also judges its `typ`, before any decrypter runs. A JWT that you type explicitly (RFC 8725 section 3.11) is then checked in every shape. For a Nested JWT, `opts.AcceptedTypes` judges the `typ` of the inner JWS, and the JWE needs no `typ`.
 
 To make a JWT that is only encrypted, encrypt the claims set as JSON with `jwe.Encrypt`, and do not set `cty`:
 

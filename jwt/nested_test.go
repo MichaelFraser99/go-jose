@@ -510,3 +510,65 @@ func TestValidate_RefusesAnUnauthenticatedJWTBeforeAnyDecrypterRuns(t *testing.T
 		})
 	}
 }
+
+func TestValidate_AcceptedTypesJudgesTheTypOfEveryShapeOfJWT(t *testing.T) {
+	shared := recipientFor(t, jwa.A256KW)
+	signer, err := jws.GetSigner(jwa.ES256, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retriever := newTestRetriever(signer.Public())
+	signedAs := func(typ string) string {
+		token, err := New(signer, map[string]any{"typ": typ}, map[string]any{"sub": "alice"}, Opts{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return *token
+	}
+	nested := func(typ string) string {
+		token, err := Encrypt(shared.encrypter, jwa.A128GCM, signedAs(typ), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return token
+	}
+	encryptedAs := func(typ any) string {
+		head := map[string]any{}
+		if typ != nil {
+			head["typ"] = typ
+		}
+		token, err := jwe.Encrypt(shared.encrypter, jwa.A128GCM, []byte(`{"sub":"alice"}`), head)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return token
+	}
+	opts := &model.JoseOptions{AcceptedTypes: []string{"at+jwt"}}
+	for _, c := range []struct {
+		name  string
+		token string
+		want  error
+	}{
+		{name: "a signed JWT of the accepted typ", token: signedAs("at+jwt")},
+		{name: "a signed JWT of another typ", token: signedAs("dpop+jwt"), want: joseerror.ErrMalformedClaim},
+		{name: "a Nested JWT whose JWS has the accepted typ and whose JWE has none", token: nested("at+jwt")},
+		{name: "a Nested JWT whose JWS has another typ", token: nested("dpop+jwt"), want: joseerror.ErrMalformedClaim},
+		{name: "an encrypt-only JWT of the accepted typ", token: encryptedAs("application/at+jwt")},
+		{name: "an encrypt-only JWT of another typ", token: encryptedAs("dpop+jwt"), want: joseerror.ErrMalformedClaim},
+		{name: "an encrypt-only JWT with no typ", token: encryptedAs(nil), want: joseerror.ErrMissingClaim},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			counter := &countingDecrypter{Decrypter: shared.decrypter}
+			validated, err := Validate(context.Background(), c.token, retriever, []model.Decrypter{counter}, opts, nil)
+			if c.want == nil && (err != nil || validated == nil) {
+				t.Errorf("[RFC 8725 3.11] the JWT's typ is accepted, so it must validate, got %v", err)
+			}
+			if c.want != nil && (!errors.Is(err, c.want) || validated != nil) {
+				t.Errorf("[RFC 7519 5.1, RFC 8725 3.11] the JWT's own typ is not accepted, so want %v, got %v", c.want, err)
+			}
+			if c.want != nil && strings.HasPrefix(c.name, "an encrypt-only") && counter.calls != 0 {
+				t.Errorf("[RFC 8725 3.11] the typ is in the protected header, so it must be judged before any decrypter runs, but %d ran", counter.calls)
+			}
+		})
+	}
+}
