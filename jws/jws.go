@@ -22,9 +22,12 @@ import (
 // well-formed token refused by opts, or naming what this library does not
 // implement, is refused with that reason alone.
 //
-// ctx bounds any jku or x5u fetch, and is checked before each key source is
-// tried and after the last. Once it has ended, its error is returned, matching context.Canceled or
-// context.DeadlineExceeded, even if a later source would have verified the token.
+// ctx bounds any jku or x5u fetch, and is checked after the token's format and
+// header are checked, before each key source is tried, and after the last. Once
+// it has ended, its error is returned, matching context.Canceled or
+// context.DeadlineExceeded, and no further source is tried. A key that has
+// already verified the token still verifies it: ending ctx stops work, and
+// does not undo a signature that was checked.
 func Verify(ctx context.Context, compactSerialization string, outOfBoundsPublicKey model.Retriever, opts *model.JoseOptions) (protectedHeader map[string]any, payload []byte, err error) {
 	protectedHeader, payload, _, err = verify(ctx, compactSerialization, outOfBoundsPublicKey, opts, false)
 	return protectedHeader, payload, err

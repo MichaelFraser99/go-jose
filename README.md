@@ -260,7 +260,10 @@ Each fetch is also bounded in time, provided your client's transport honours the
 
 A fetch stopped by either limit returns an error that matches `ErrApplicationError` and `context.DeadlineExceeded`. One stopped by cancelling `ctx` matches `context.Canceled`.
 
-`ctx` is also checked before each key source is tried, and after the last. So once it has ended, verification stops with its error, which matches `context.Canceled` or `context.DeadlineExceeded`, even when no fetch runs and a later key would have verified the token.
+`ctx` is also checked before each key source is tried, and after the last. So once it has ended, verification stops with its error, which matches `context.Canceled` or `context.DeadlineExceeded`, even when no fetch runs. Two cases are different:
+
+- A token whose format or header is wrong reports that fault, because those checks run first.
+- A key that verifies the token while `ctx` is ending still verifies it. Ending `ctx` stops further work, but a signature already checked stays valid. `jwe.Decrypt` does the same.
 
 With no client, `jku` and `x5u` contribute no key. Each member of a `jku` set is judged on its own, as [Which jwk and jku keys are used](#which-jwk-and-jku-keys-are-used) describes, and a member this library cannot read is skipped, as RFC 7517 section 5 recommends. A document that is not a JWK Set is refused as a whole: one without a `keys` member, one whose `keys` is null or not an array, and one whose `keys` array holds a number, string, boolean or array. An `x5u` resource is read as the PEM encoding RFC 7515 section 4.1.5 requires. A server that sends raw DER instead is still read: a body that parses as DER certificates is taken as exactly those certificates, and is never searched for PEM text. Any other body is read as PEM text, so a body whose explanatory text is not valid UTF-8 is refused.
 
@@ -799,7 +802,7 @@ A jwk whose `key_ops` lists a value twice is now refused by `jws.GetValidatorFro
 
 `jwk.PublicFromJwk` and `jwk.PrivateFromJwk` now read an X25519 jwk as an `*ecdh` key. v0.11.0 refused it with `ErrUnsupportedAlgorithm`. `jws.GetValidatorFromJwk` refuses an X25519 jwk with `ErrInvalidPublicKey`, where v0.11.0 gave `ErrUnsupportedAlgorithm`.
 
-`jws.Verify`, `jws.VerifyCompactSerialization` and `jwt.Validate` now return the context's error once `ctx` has ended, even when no fetch runs. v0.11.0 could still verify a token after `ctx` was cancelled, if every key came from your retriever.
+`jws.Verify`, `jws.VerifyCompactSerialization` and `jwt.Validate` now return the context's error once `ctx` has ended before a key verifies the token, even when no fetch runs. v0.11.0 could still verify a token after `ctx` was cancelled, if every key came from your retriever.
 
 `jwk.PublicFromJwk` refuses an `oct` jwk with `ErrInvalidPublicKey`, because a symmetric key has no public half. v0.11.0 refused it with `ErrUnsupportedAlgorithm`. If you match the old sentinel for this case, match the new one.
 
