@@ -50,7 +50,7 @@ func ExampleDecrypt() {
 	if err != nil {
 		panic(err)
 	}
-	opts := &model.JoseOptions{
+	opts := &model.JWEOptions{
 		AllowedKeyManagementAlgorithms:     []jwa.Algorithm{jwa.RSAOAEP256},
 		AllowedContentEncryptionAlgorithms: []jwa.Encryption{jwa.A256GCM},
 	}
@@ -169,7 +169,7 @@ func Example_signThenEncrypt() {
 	if err != nil {
 		panic(err)
 	}
-	token, err := jwe.Encrypt(encrypter, jwa.A256GCM, []byte(*signed), map[string]any{"cty": "JWT"})
+	token, err := jwt.Encrypt(encrypter, jwa.A256GCM, *signed, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -178,18 +178,11 @@ func Example_signThenEncrypt() {
 	if err != nil {
 		panic(err)
 	}
-	head, plaintext, _, err := jwe.Decrypt(context.Background(), token, []model.Decrypter{decrypter}, nil)
-	if err != nil {
-		panic(err)
-	}
-	if cty, _ := head["cty"].(string); !strings.EqualFold(cty, "JWT") {
-		panic("not a nested JWT")
-	}
 	retriever := func() ([]crypto.PublicKey, error) { return []crypto.PublicKey{signer.Public()}, nil }
-	_, claims, err := jwt.Validate(context.Background(), string(plaintext), retriever, nil)
+	validated, err := jwt.Validate(context.Background(), token, retriever, []model.Decrypter{decrypter}, nil, nil)
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(claims["sub"])
-	// Output: alice
+	fmt.Println(validated.Claims["sub"], validated.EncryptionHeader["cty"], validated.SignatureHeader["alg"])
+	// Output: alice JWT ES256
 }

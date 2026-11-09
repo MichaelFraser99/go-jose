@@ -200,7 +200,7 @@ func TestGetEncrypterFromJwk_TheFixturesAreAcceptedWithoutTheirFault(t *testing.
 func TestGetEncrypterFromJwk_StrictKeyOperationsRefusesWhatSection43SaysShouldNotBePublished(t *testing.T) {
 	secret := randomBytes(t, 16)
 	ecPublic, ecPrivate := ecdhJwkFixtures(t)
-	strict := &model.JoseOptions{StrictKeyOperations: true}
+	strict := &model.JWEOptions{StrictKeyOperations: true}
 	for name, c := range map[string]struct {
 		alg             jwa.Algorithm
 		public, private map[string]any

@@ -77,7 +77,7 @@ var agreementOperations = map[string]bool{"deriveKey": true, "deriveBits": true}
 // is refused, as it marks a signing key. With opts.StrictKeyOperations on, a
 // jwk that section 4.3 says SHOULD NOT be published is refused too. opts may be
 // nil. Every refusal of the jwk carries ErrInvalidPublicKey.
-func GetEncrypterFromJwk(alg jwa.Algorithm, publicJwk map[string]any, opts *model.JoseOptions) (model.Encrypter, error) {
+func GetEncrypterFromJwk(alg jwa.Algorithm, publicJwk map[string]any, opts *model.JWEOptions) (model.Encrypter, error) {
 	read, ok := encrypterKeyReaders[alg]
 	if !ok {
 		return nil, notFromJwk(alg)
@@ -109,7 +109,7 @@ func GetEncrypterFromJwk(alg jwa.Algorithm, publicJwk map[string]any, opts *mode
 // "deriveKey" or "deriveBits" (RFC 7517 section 4.3). opts may be nil, and its
 // StrictKeyOperations applies as it does to GetEncrypterFromJwk. Every refusal
 // of the jwk carries ErrInvalidPrivateKey.
-func GetDecrypterFromJwk(alg jwa.Algorithm, privateJwk map[string]any, opts *model.JoseOptions) (model.Decrypter, error) {
+func GetDecrypterFromJwk(alg jwa.Algorithm, privateJwk map[string]any, opts *model.JWEOptions) (model.Decrypter, error) {
 	if _, ok := encrypterKeyReaders[alg]; !ok {
 		return nil, notFromJwk(alg)
 	}

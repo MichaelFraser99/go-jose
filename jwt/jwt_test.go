@@ -1479,13 +1479,22 @@ func TestValidate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			signer := tt.signer(t)
-			head, body, err := Validate(context.Background(), tt.jwt(t, signer), func() ([]crypto.PublicKey, error) {
+			validated, err := Validate(context.Background(), tt.jwt(t, signer), func() ([]crypto.PublicKey, error) {
 				return []crypto.PublicKey{tt.publicKey(t, signer)}, nil
-			}, nil)
+			}, nil, nil, nil)
+			head, body := parts(validated)
+
 			tt.validate(t, head, body, err)
 		})
 	}
 } //todo: tests with opts
+
+func parts(validated *Token) (head, body map[string]any) {
+	if validated == nil {
+		return nil, nil
+	}
+	return validated.SignatureHeader, validated.Claims
+}
 
 func validateJwtSignature(t *testing.T, jwt string, validator model.Validator) []string {
 	t.Helper()
@@ -1673,7 +1682,7 @@ func TestValidateClockSkewLeeway(t *testing.T) {
 				t.Fatalf("no error should be thrown: %s", err.Error())
 			}
 
-			_, _, err = Validate(context.Background(), *token, retriever, tt.opts)
+			_, err = Validate(context.Background(), *token, retriever, nil, tt.opts, nil)
 			if tt.expectErr == nil {
 				if err != nil {
 					t.Fatalf("no error should be thrown: %s", err.Error())

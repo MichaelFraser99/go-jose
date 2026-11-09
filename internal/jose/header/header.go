@@ -105,7 +105,7 @@ func checkAlgorithmParameters(header map[string]any) error {
 	return nil
 }
 
-func checkAlgorithmBounds(header map[string]any, alg jwa.Algorithm, opts *model.JoseOptions) error {
+func checkAlgorithmBounds(header map[string]any, alg jwa.Algorithm, opts *model.JWEOptions) error {
 	if slices.Contains(PasswordAlgorithms, alg) {
 		_, count, _ := pbes2.Parameters(header)
 		if maximum := MaxPBES2Count(opts); count > maximum {
@@ -165,14 +165,14 @@ var gcmKeyWrapAlgorithms = []jwa.Algorithm{jwa.A128GCMKW, jwa.A192GCMKW, jwa.A25
 // PasswordAlgorithms are the PBES2 "alg" values (RFC 7518 section 4.8).
 var PasswordAlgorithms = []jwa.Algorithm{jwa.PBES2HS256A128KW, jwa.PBES2HS384A192KW, jwa.PBES2HS512A256KW}
 
-// DefaultMaxPBES2Count is the "p2c" bound when JoseOptions.MaxPBES2Count is
+// DefaultMaxPBES2Count is the "p2c" bound when JWEOptions.MaxPBES2Count is
 // unset: twice the 600,000 iterations draft-ietf-oauth-rfc8725bis section 3.13
 // cites, as that section recommends.
 const DefaultMaxPBES2Count = 1_200_000
 
 // MaxPBES2Count returns the PBKDF2 iterations one JWE may cost: opts.MaxPBES2Count,
 // or DefaultMaxPBES2Count when that is zero or less.
-func MaxPBES2Count(opts *model.JoseOptions) int {
+func MaxPBES2Count(opts *model.JWEOptions) int {
 	if opts != nil && opts.MaxPBES2Count > 0 {
 		return opts.MaxPBES2Count
 	}
@@ -186,7 +186,7 @@ func MaxPBES2Count(opts *model.JoseOptions) int {
 // encryption algorithm this library implements (RFC 7516 sections 4.1.1 and
 // 4.1.2), each within the caller's allow-list if one is set, else
 // ErrUnsupportedAlgorithm. "zip" must be a string, else ErrMalformedToken. It
-// must be "DEF", and JoseOptions.MaxDecompressedSize must be set, else
+// must be "DEF", and JWEOptions.MaxDecompressedSize must be set, else
 // ErrUnsupportedAlgorithm (section 4.1.3). The parameters RFC 7516 shares with RFC 7515 have the shapes
 // CheckHeaderShape describes, except that "b64" (RFC 7797, JWS only) is not
 // read, and "crit" may name no parameter RFC 7516 or RFC 7518 defines for JWE
@@ -196,14 +196,14 @@ func MaxPBES2Count(opts *model.JoseOptions) int {
 // AES GCM key wrap alg, "iv" and "tag" must be base64url strings of 12 and 16
 // octets (section 4.7.1). For a PBES2 alg, "p2s" must be a base64url string of
 // at least 8 octets and "p2c" a positive integer (section 4.8.1), else
-// ErrMalformedToken; a "p2c" above JoseOptions.MaxPBES2Count (1,200,000 when
+// ErrMalformedToken; a "p2c" above JWEOptions.MaxPBES2Count (1,200,000 when
 // unset), or below 1000 with RequireRecommendedPBES2Count, is ErrOutOfBounds.
 // AcceptedTypes, RequireKeyIdentifier and UnderstoodCriticalHeaders apply as
 // they do to a JWS, except that "b64" in UnderstoodCriticalHeaders is ignored,
 // as RFC 7797 defines it for JWS only.
-func ValidateJWEHeader(header map[string]any, opts *model.JoseOptions) (jwa.Algorithm, jwa.Encryption, error) {
+func ValidateJWEHeader(header map[string]any, opts *model.JWEOptions) (jwa.Algorithm, jwa.Encryption, error) {
 	if opts == nil {
-		opts = &model.JoseOptions{}
+		opts = &model.JWEOptions{}
 	}
 	algName, err := jsonutils.RetrieveClaim[string](header, "alg")
 	if err != nil {

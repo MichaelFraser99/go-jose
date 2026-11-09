@@ -14,8 +14,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/internal/jose/header"
+	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
+	"github.com/MichaelFraser99/go-jose/jwe"
 	"github.com/MichaelFraser99/go-jose/jws"
 	"github.com/MichaelFraser99/go-jose/model"
 	"maps"
@@ -29,7 +31,26 @@ type Opts struct {
 	Algorithm jwa.Algorithm
 }
 
-//todo: jwe support
+// Token is what Validate returns for a JWT that passed every check.
+//
+// Claims is the JWT Claims Set. SignatureHeader is the JOSE Header of the JWS
+// that signed it, and is nil for a JWT that is only encrypted. EncryptionHeader
+// is the JWE Protected Header and Decrypter the decrypter that decrypted it, and
+// both are nil for a JWT that is only signed. Of a Nested JWT, both headers are
+// set.
+type Token struct {
+	Claims           map[string]any
+	SignatureHeader  map[string]any
+	EncryptionHeader map[string]any
+	Decrypter        model.Decrypter
+}
+
+var senderAuthenticatingEncryption = []jwa.Algorithm{
+	jwa.Dir,
+	jwa.A128KW, jwa.A192KW, jwa.A256KW,
+	jwa.A128GCMKW, jwa.A192GCMKW, jwa.A256GCMKW,
+	jwa.PBES2HS256A128KW, jwa.PBES2HS384A192KW, jwa.PBES2HS512A256KW,
+}
 
 // New signs a JWS Compact Serialization from head and body, writing to neither.
 //
@@ -82,12 +103,39 @@ func New(signer crypto.Signer, head, body map[string]any, opts Opts) (*string, e
 	return newJwt(signer, h, body, alg)
 }
 
-// Validate verifies a token's structure, signature and registered claims, returning its
-// header and body.
+// Validate checks a JWT of any shape RFC 7519 section 7.2 allows and returns
+// its claims and headers.
 //
-// A token of other than three segments is refused with ErrMalformedToken (RFC 7515
-// section 7.1), except that one of five, a JWE (RFC 7516 section 9), is refused with
-// ErrUnsupportedAlgorithm.
+// opts applies to the JWS and to the claims, and jweOpts to the JWE. They are
+// different types, so they cannot be swapped.
+//
+// A token of three segments is a JWS (RFC 7515 section 7.1): it is verified with
+// outOfBoundsPublicKey and opts, and decrypters and jweOpts are not read. With
+// opts.RequireEncryptedJWT set, it is refused with ErrUnsupportedAlgorithm.
+//
+// A token of five segments is a JWE (RFC 7516 section 9). It is decrypted with
+// jwe.Decrypt, decrypters and jweOpts, with the errors Decrypt returns; with no
+// decrypters it is refused with ErrUnsupportedAlgorithm. Then, as section 7.2
+// step 8 requires:
+//   - If the JWE's "cty" is "JWT" (section 5.2), the plaintext is a Nested JWT. It
+//     is verified as a token of three segments is, so anything but a JWS, such as
+//     a JWE nested in the JWE, is ErrMalformedToken.
+//   - Otherwise the plaintext is the claims set, which must be a JSON object, else
+//     ErrMalformedToken. With dir, A128KW to A256KW, A128GCMKW to A256GCMKW or a
+//     PBES2 alg, only a holder of the shared key or password can have encrypted
+//     it. Under any other alg, such as RSA-OAEP or ECDH-ES, anyone holding the
+//     recipient's public key can, so the claims prove nothing about who wrote
+//     them, and the token is refused with ErrInvalidSignature unless
+//     jweOpts.AllowUnauthenticatedJWT is set. With opts.RequireSignedJWT set, a
+//     JWT that is not nested is refused with ErrInvalidSignature under any key.
+//     Both refusals depend only on the protected header, so they are made before
+//     any decrypter runs.
+//
+// With RSA-OAEP or ECDH-ES, Token.Decrypter names the key of yours that
+// decrypted the token, not its sender: anyone holding your public key can
+// encrypt to it. The signature of a Nested JWT is what names its issuer.
+//
+// A token of any other number of segments is refused with ErrMalformedToken.
 //
 // iss, sub and jti must be strings and aud a string or an array of strings (RFC 7519
 // section 4.1), else ErrMalformedClaim. iat, nbf and exp must be numbers (RFC 7519
@@ -102,27 +150,118 @@ func New(signer crypto.Signer, head, body map[string]any, opts Opts) (*string, e
 // When opts.ExpectedAudience is set, aud must name one of its values (section 4.1.3).
 // Options whose ExpectedAudience holds an empty string are refused with
 // ErrInvalidOptions, whatever the token.
-func Validate(ctx context.Context, token string, outOfBoundsPublicKey model.Retriever, opts *model.JoseOptions) (head, body map[string]any, err error) {
+func Validate(ctx context.Context, token string, outOfBoundsPublicKey model.Retriever, decrypters []model.Decrypter, opts *model.JoseOptions, jweOpts *model.JWEOptions) (*Token, error) {
 	if err := validateOptions(opts); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	segments := strings.Split(token, ".")
-	if len(segments) == 3 {
-		head, body, err = jws.VerifyCompactSerialization(ctx, token, outOfBoundsPublicKey, opts)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to verify jws compact serialization: %w", err)
+	switch segments := strings.Count(token, ".") + 1; segments {
+	case 3:
+		if opts != nil && opts.RequireEncryptedJWT {
+			return nil, fmt.Errorf("%wthe JWT is not encrypted, and RequireEncryptedJWT is set", joseerror.ErrUnsupportedAlgorithm)
 		}
-	} else if len(segments) == 5 {
-		return nil, nil, fmt.Errorf("%wthe token has the five segments of a JWE, which Validate does not decrypt: decrypt it with jwe.Decrypt first", joseerror.ErrUnsupportedAlgorithm)
-	} else {
-		return nil, nil, fmt.Errorf("%wa JWS has three segments, got %d", joseerror.ErrMalformedToken, len(segments))
+		return validateSigned(ctx, token, outOfBoundsPublicKey, opts, &Token{})
+	case 5:
+		return validateEncrypted(ctx, token, outOfBoundsPublicKey, decrypters, opts, jweOpts)
+	default:
+		return nil, fmt.Errorf("%wa JWT has three segments, or five when encrypted, got %d", joseerror.ErrMalformedToken, segments)
 	}
+}
 
+func validateSigned(ctx context.Context, token string, outOfBoundsPublicKey model.Retriever, opts *model.JoseOptions, result *Token) (*Token, error) {
+	head, body, err := jws.VerifyCompactSerialization(ctx, token, outOfBoundsPublicKey, opts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to verify jws compact serialization: %w", err)
+	}
 	if err := validateClaims(body, opts); err != nil {
-		return nil, nil, err
+		return nil, err
+	}
+	result.Claims, result.SignatureHeader = body, head
+	return result, nil
+}
+
+func validateEncrypted(ctx context.Context, token string, outOfBoundsPublicKey model.Retriever, decrypters []model.Decrypter, opts *model.JoseOptions, jweOpts *model.JWEOptions) (*Token, error) {
+	if len(decrypters) == 0 {
+		return nil, fmt.Errorf("%wthe token has the five segments of a JWE, and no decrypters were given to decrypt it", joseerror.ErrUnsupportedAlgorithm)
+	}
+	unverified, err := jwe.ParseHeader(token, jweOpts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt jwe compact serialization: %w", err)
+	}
+	nested := header.NamesNestedJWT(unverified)
+	if !nested {
+		if err := checkUnsigned(unverified, opts, jweOpts); err != nil {
+			return nil, err
+		}
 	}
 
-	return head, body, nil
+	head, plaintext, decrypter, err := jwe.Decrypt(ctx, token, decrypters, jweOpts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt jwe compact serialization: %w", err)
+	}
+	result := &Token{EncryptionHeader: head, Decrypter: decrypter}
+	if nested {
+		return validateSigned(ctx, string(plaintext), outOfBoundsPublicKey, opts, result)
+	}
+
+	body, err := jsonutils.DecodeJSONObject(plaintext)
+	if err != nil {
+		return nil, fmt.Errorf("%wthe plaintext of a JWT that is not nested must be its claims set, a JSON object: %v", joseerror.ErrMalformedToken, err)
+	}
+	if err := validateClaims(body, opts); err != nil {
+		return nil, err
+	}
+	result.Claims = body
+	return result, nil
+}
+
+func checkUnsigned(head map[string]any, opts *model.JoseOptions, jweOpts *model.JWEOptions) error {
+	if opts != nil && opts.RequireSignedJWT {
+		return fmt.Errorf("%wthe JWT is encrypted and not signed, and RequireSignedJWT is set", joseerror.ErrInvalidSignature)
+	}
+	alg, _ := head["alg"].(string)
+	if !slices.Contains(senderAuthenticatingEncryption, jwa.GetAlgorithm(alg)) && (jweOpts == nil || !jweOpts.AllowUnauthenticatedJWT) {
+		return fmt.Errorf("%wthe JWT is encrypted with %s and not signed, and only a shared key or password shows who encrypted it; set AllowUnauthenticatedJWT in the JWEOptions to accept it", joseerror.ErrInvalidSignature, jsonutils.QuoteBounded(alg))
+	}
+	return nil
+}
+
+// Encrypt encrypts signedJWT, a JWT that jwt.New signed, to the recipient
+// encrypter names, as the Nested JWT of RFC 7519 section 5.2: it calls
+// jwe.Encrypt with enc and head, with "cty" set to "JWT", and returns the JWE
+// Compact Serialization. Encrypt's errors are jwe.Encrypt's.
+//
+// signedJWT must be a JWS Compact Serialization of three base64url segments
+// whose header is a JSON object, else ErrMalformedToken, and whose "alg" is a
+// signature algorithm this library implements, else ErrUnsupportedAlgorithm: an
+// "alg" of "none" is not a signature (RFC 8725 section 3.1). The signature is
+// not verified. A "cty" in head that does not name "JWT" is refused with
+// ErrMalformedClaim. head is not modified.
+func Encrypt(encrypter model.Encrypter, enc jwa.Encryption, signedJWT string, head map[string]any) (string, error) {
+	segments := strings.Split(signedJWT, ".")
+	if len(segments) != 3 {
+		return "", fmt.Errorf("%wa signed JWT has three segments, got %d", joseerror.ErrMalformedToken, len(segments))
+	}
+	signedHead, err := jsonutils.DecodeBase64urlMap(segments[0])
+	if err != nil {
+		return "", fmt.Errorf("%wthe signed JWT's header is not a base64url JSON object: %v", joseerror.ErrMalformedToken, err)
+	}
+	if name, _ := signedHead["alg"].(string); jwa.GetAlgorithm(name) == jwa.Unknown || isKeyManagement(jwa.GetAlgorithm(name)) {
+		return "", fmt.Errorf("%wthe signed JWT's alg %s is not a signature algorithm this library implements", joseerror.ErrUnsupportedAlgorithm, jsonutils.QuoteBounded(name))
+	}
+	for _, segment := range segments[1:] {
+		if _, err := jsonutils.DecodeBase64url(segment); err != nil {
+			return "", fmt.Errorf("%wthe signed JWT has a segment that is not base64url: %v", joseerror.ErrMalformedToken, err)
+		}
+	}
+	h := maps.Clone(head)
+	if h == nil {
+		h = map[string]any{}
+	}
+	if _, present := h["cty"]; present && !header.NamesNestedJWT(h) {
+		return "", fmt.Errorf("%wthe 'cty' header of a Nested JWT must be \"JWT\" (RFC 7519 section 5.2)", joseerror.ErrMalformedClaim)
+	}
+	h["cty"] = "JWT"
+	return jwe.Encrypt(encrypter, enc, []byte(signedJWT), h)
 }
 
 func signingAlgorithm(signer crypto.Signer, head map[string]any, opts Opts) (jwa.Algorithm, error) {

@@ -34,7 +34,7 @@ func claimsTestValidate(t *testing.T, payload string, opts *model.JoseOptions) e
 	if err != nil {
 		t.Fatalf("signing: %s", err)
 	}
-	_, _, err = Validate(context.Background(), input+"."+base64.RawURLEncoding.EncodeToString(signature), newTestRetriever(signer.Public()), opts)
+	_, err = Validate(context.Background(), input+"."+base64.RawURLEncoding.EncodeToString(signature), newTestRetriever(signer.Public()), nil, opts, nil)
 	return err
 }
 
@@ -166,7 +166,7 @@ func TestValidate_ExpectedAudience(t *testing.T) {
 
 func TestValidate_AnEmptyExpectedAudienceIsRefusedBeforeTheTokenIsRead(t *testing.T) {
 	for _, token := range []string{"", "not a token", "a.b.c"} {
-		_, _, err := Validate(context.Background(), token, nil, &model.JoseOptions{ExpectedAudience: []string{""}})
+		_, err := Validate(context.Background(), token, nil, nil, &model.JoseOptions{ExpectedAudience: []string{""}}, nil)
 		if !errors.Is(err, joseerror.ErrInvalidOptions) {
 			t.Errorf("[RFC 7519 4.1.3] an empty string names no recipient, so the options are refused whatever the token %q: want %q, got %v", token, joseerror.ErrInvalidOptions, err)
 		}

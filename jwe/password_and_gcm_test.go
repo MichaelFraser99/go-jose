@@ -32,7 +32,7 @@ func keyedHeaderToken(t *testing.T, head map[string]any, encryptedKeySize int) s
 type headerCase struct {
 	name      string
 	head      map[string]any
-	opts      *model.JoseOptions
+	opts      *model.JWEOptions
 	want      error
 	malformed bool
 	clause    string
@@ -76,7 +76,7 @@ func TestDecrypt_ChecksTheAESGCMKeyWrapParameters(t *testing.T) {
 		{name: "a 15-octet tag", head: map[string]any{"iv": iv, "tag": "AAAAAAAAAAAAAAAAAAAA"}, want: joseerror.ErrMalformedClaim, malformed: true, clause: "RFC 7518 4.7"},
 		{name: "a 17-octet tag", head: map[string]any{"iv": iv, "tag": "AAAAAAAAAAAAAAAAAAAAAAA"}, want: joseerror.ErrMalformedClaim, malformed: true, clause: "RFC 7518 4.7"},
 		{name: "a tag that is not a string", head: map[string]any{"iv": iv, "tag": []any{"x"}}, want: joseerror.ErrMalformedClaim, malformed: true, clause: "RFC 7518 4.7.1.2"},
-		{name: "a short iv on an alg outside the allow-list", head: map[string]any{"iv": "AA", "tag": tag}, opts: &model.JoseOptions{AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.A128KW}}, want: joseerror.ErrMalformedClaim, malformed: true, clause: "RFC 7516 5.2 step 5"},
+		{name: "a short iv on an alg outside the allow-list", head: map[string]any{"iv": "AA", "tag": tag}, opts: &model.JWEOptions{AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.A128KW}}, want: joseerror.ErrMalformedClaim, malformed: true, clause: "RFC 7516 5.2 step 5"},
 	})
 }
 
@@ -170,7 +170,7 @@ func TestDecrypt_ChecksThePBES2Parameters(t *testing.T) {
 		{name: "a p2c that is a string", head: map[string]any{"p2s": salt, "p2c": "1000"}, want: joseerror.ErrMalformedClaim, malformed: true, clause: "RFC 7518 4.8.1.2"},
 		{name: "a p2c that is a boolean", head: map[string]any{"p2s": salt, "p2c": true}, want: joseerror.ErrMalformedClaim, malformed: true, clause: "RFC 7518 4.8.1.2"},
 		{name: "a p2c of null", head: map[string]any{"p2s": salt, "p2c": json.RawMessage("null")}, want: joseerror.ErrMalformedClaim, malformed: true, clause: "RFC 7518 4.8.1.2"},
-		{name: "a short p2s on an alg outside the allow-list", head: map[string]any{"p2s": "AA", "p2c": 1000}, opts: &model.JoseOptions{AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.A128KW}}, want: joseerror.ErrMalformedClaim, malformed: true, clause: "RFC 7516 5.2 step 5"},
+		{name: "a short p2s on an alg outside the allow-list", head: map[string]any{"p2s": "AA", "p2c": 1000}, opts: &model.JWEOptions{AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.A128KW}}, want: joseerror.ErrMalformedClaim, malformed: true, clause: "RFC 7516 5.2 step 5"},
 	})
 }
 
@@ -180,21 +180,21 @@ func TestDecrypt_BoundsTheP2CAPeerChooses(t *testing.T) {
 	checkHeaderCases(t, jwa.PBES2HS256A128KW, 24, decrypter, []headerCase{
 		{name: "twice OWASP's figure, the default bound", head: map[string]any{"p2s": salt, "p2c": 1_200_000}, want: joseerror.ErrDecryptionFailed, clause: "RFC 8725bis 3.13"},
 		{name: "one more than the default bound", head: map[string]any{"p2s": salt, "p2c": 1_200_001}, want: joseerror.ErrOutOfBounds, clause: "RFC 8725bis 3.13"},
-		{name: "one more than the default bound with a negative MaxPBES2Count", head: map[string]any{"p2s": salt, "p2c": 1_200_001}, opts: &model.JoseOptions{MaxPBES2Count: -1}, want: joseerror.ErrOutOfBounds, clause: "RFC 8725bis 3.13"},
+		{name: "one more than the default bound with a negative MaxPBES2Count", head: map[string]any{"p2s": salt, "p2c": 1_200_001}, opts: &model.JWEOptions{MaxPBES2Count: -1}, want: joseerror.ErrOutOfBounds, clause: "RFC 8725bis 3.13"},
 		{name: "a p2c too large for an int", head: map[string]any{"p2s": salt, "p2c": 1e300}, want: joseerror.ErrOutOfBounds, clause: "RFC 8725bis 3.13"},
-		{name: "a p2c at a lowered bound", head: map[string]any{"p2s": salt, "p2c": 5000}, opts: &model.JoseOptions{MaxPBES2Count: 5000}, want: joseerror.ErrDecryptionFailed, clause: "RFC 8725bis 3.13"},
-		{name: "a p2c above a lowered bound", head: map[string]any{"p2s": salt, "p2c": 5001}, opts: &model.JoseOptions{MaxPBES2Count: 5000}, want: joseerror.ErrOutOfBounds, clause: "RFC 8725bis 3.13"},
-		{name: "a p2c above the default bound that a raised bound allows", head: map[string]any{"p2s": salt, "p2c": 1_200_001}, opts: &model.JoseOptions{MaxPBES2Count: 1_200_001, AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.PBES2HS256A128KW}}, want: joseerror.ErrDecryptionFailed, clause: "RFC 8725bis 3.13"},
-		{name: "a p2c below the recommendation when it is required", head: map[string]any{"p2s": salt, "p2c": 999}, opts: &model.JoseOptions{RequireRecommendedPBES2Count: true}, want: joseerror.ErrOutOfBounds, clause: "RFC 7518 4.8.1.2"},
-		{name: "a p2c at the recommendation when it is required", head: map[string]any{"p2s": salt, "p2c": 1000}, opts: &model.JoseOptions{RequireRecommendedPBES2Count: true}, want: joseerror.ErrDecryptionFailed, clause: "RFC 7518 4.8.1.2"},
-		{name: "a p2c above the bound on an alg outside the allow-list", head: map[string]any{"p2s": salt, "p2c": 1_200_001}, opts: &model.JoseOptions{AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.A128KW}}, want: joseerror.ErrUnsupportedAlgorithm, clause: "RFC 7516 5.2 step 5"},
+		{name: "a p2c at a lowered bound", head: map[string]any{"p2s": salt, "p2c": 5000}, opts: &model.JWEOptions{MaxPBES2Count: 5000}, want: joseerror.ErrDecryptionFailed, clause: "RFC 8725bis 3.13"},
+		{name: "a p2c above a lowered bound", head: map[string]any{"p2s": salt, "p2c": 5001}, opts: &model.JWEOptions{MaxPBES2Count: 5000}, want: joseerror.ErrOutOfBounds, clause: "RFC 8725bis 3.13"},
+		{name: "a p2c above the default bound that a raised bound allows", head: map[string]any{"p2s": salt, "p2c": 1_200_001}, opts: &model.JWEOptions{MaxPBES2Count: 1_200_001, AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.PBES2HS256A128KW}}, want: joseerror.ErrDecryptionFailed, clause: "RFC 8725bis 3.13"},
+		{name: "a p2c below the recommendation when it is required", head: map[string]any{"p2s": salt, "p2c": 999}, opts: &model.JWEOptions{RequireRecommendedPBES2Count: true}, want: joseerror.ErrOutOfBounds, clause: "RFC 7518 4.8.1.2"},
+		{name: "a p2c at the recommendation when it is required", head: map[string]any{"p2s": salt, "p2c": 1000}, opts: &model.JWEOptions{RequireRecommendedPBES2Count: true}, want: joseerror.ErrDecryptionFailed, clause: "RFC 7518 4.8.1.2"},
+		{name: "a p2c above the bound on an alg outside the allow-list", head: map[string]any{"p2s": salt, "p2c": 1_200_001}, opts: &model.JWEOptions{AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.A128KW}}, want: joseerror.ErrUnsupportedAlgorithm, clause: "RFC 7516 5.2 step 5"},
 	})
 }
 
 func TestDecrypt_RefusesAnOversizeP2CBeforeAnyPBKDF2Runs(t *testing.T) {
 	decrypter := pairFor(t, jwa.PBES2HS512A256KW, jwa.A256GCM).decrypter
 	called := 0
-	opts := &model.JoseOptions{MaxPBES2Count: 1000, OnDecrypterError: func(model.Decrypter, error) { called++ }}
+	opts := &model.JWEOptions{MaxPBES2Count: 1000, OnDecrypterError: func(model.Decrypter, error) { called++ }}
 	token := keyedHeaderToken(t, map[string]any{"alg": "PBES2-HS512+A256KW", "enc": "A128GCM", "p2s": "AAAAAAAAAAA", "p2c": 100_000}, 24)
 	_, _, _, err := Decrypt(context.Background(), token, []model.Decrypter{decrypter, decrypter, decrypter}, opts)
 	if !errors.Is(err, joseerror.ErrOutOfBounds) || called != 0 {
@@ -246,7 +246,7 @@ func TestDecrypt_AcceptsALowP2CUnlessTheRecommendationIsRequired(t *testing.T) {
 		if _, plaintext, _, err := Decrypt(context.Background(), token, []model.Decrypter{decrypter}, nil); err != nil || string(plaintext) != "low" {
 			t.Errorf("[RFC 7518 4.8.1.2] a p2c of %d is below the recommended minimum, which is not required, so by default it must decrypt, got %v", count, err)
 		}
-		if _, plaintext, _, err := Decrypt(context.Background(), token, []model.Decrypter{decrypter}, &model.JoseOptions{RequireRecommendedPBES2Count: true}); !errors.Is(err, joseerror.ErrOutOfBounds) || plaintext != nil {
+		if _, plaintext, _, err := Decrypt(context.Background(), token, []model.Decrypter{decrypter}, &model.JWEOptions{RequireRecommendedPBES2Count: true}); !errors.Is(err, joseerror.ErrOutOfBounds) || plaintext != nil {
 			t.Errorf("[RFC 7518 4.8.1.2] with RequireRecommendedPBES2Count, a p2c of %d must be refused with ErrOutOfBounds, got %v", count, err)
 		}
 	}
@@ -354,20 +354,20 @@ func TestDecrypt_MaxPBES2CountBoundsTheIterationsOfTheWholeCall(t *testing.T) {
 		name       string
 		p2c        int
 		decrypters []model.Decrypter
-		opts       *model.JoseOptions
+		opts       *model.JWEOptions
 		want       error
 	}{
 		{name: "two decrypters at half the default bound", p2c: 600_000, decrypters: []model.Decrypter{password(), password()}, want: joseerror.ErrDecryptionFailed},
 		{name: "two decrypters at one more than half the default bound", p2c: 600_001, decrypters: []model.Decrypter{password(), password()}, want: joseerror.ErrOutOfBounds},
-		{name: "three decrypters at a third of a lowered bound", p2c: 1000, decrypters: []model.Decrypter{password(), password(), password()}, opts: &model.JoseOptions{MaxPBES2Count: 3000}, want: joseerror.ErrDecryptionFailed},
-		{name: "three decrypters at one more than a third of a lowered bound", p2c: 1001, decrypters: []model.Decrypter{password(), password(), password()}, opts: &model.JoseOptions{MaxPBES2Count: 3000}, want: joseerror.ErrOutOfBounds},
-		{name: "three decrypters whose product is one less than a lowered bound", p2c: 1000, decrypters: []model.Decrypter{password(), password(), password()}, opts: &model.JoseOptions{MaxPBES2Count: 3001}, want: joseerror.ErrDecryptionFailed},
+		{name: "three decrypters at a third of a lowered bound", p2c: 1000, decrypters: []model.Decrypter{password(), password(), password()}, opts: &model.JWEOptions{MaxPBES2Count: 3000}, want: joseerror.ErrDecryptionFailed},
+		{name: "three decrypters at one more than a third of a lowered bound", p2c: 1001, decrypters: []model.Decrypter{password(), password(), password()}, opts: &model.JWEOptions{MaxPBES2Count: 3000}, want: joseerror.ErrOutOfBounds},
+		{name: "three decrypters whose product is one less than a lowered bound", p2c: 1000, decrypters: []model.Decrypter{password(), password(), password()}, opts: &model.JWEOptions{MaxPBES2Count: 3001}, want: joseerror.ErrDecryptionFailed},
 		{name: "decrypters of another alg do not count", p2c: 1_200_000, decrypters: []model.Decrypter{other, password(), other, other}, want: joseerror.ErrDecryptionFailed},
 		{name: "a hundred decrypters at a p2c of 12,001", p2c: 12_001, decrypters: slices.Repeat([]model.Decrypter{password()}, 100), want: joseerror.ErrOutOfBounds},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			called := 0
-			opts := &model.JoseOptions{OnDecrypterError: func(model.Decrypter, error) { called++ }}
+			opts := &model.JWEOptions{OnDecrypterError: func(model.Decrypter, error) { called++ }}
 			if c.opts != nil {
 				opts.MaxPBES2Count = c.opts.MaxPBES2Count
 			}

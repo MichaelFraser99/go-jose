@@ -250,7 +250,7 @@ func TestDecrypt_AJWECritMayNotNameB64EvenWhenUnderstood(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, plaintext, _, err := Decrypt(context.Background(), token, []model.Decrypter{scriptedDecrypter{alg: jwa.Dir, cek: cek}}, &model.JoseOptions{UnderstoodCriticalHeaders: []string{"b64"}})
+	_, plaintext, _, err := Decrypt(context.Background(), token, []model.Decrypter{scriptedDecrypter{alg: jwa.Dir, cek: cek}}, &model.JWEOptions{UnderstoodCriticalHeaders: []string{"b64"}})
 	if !errors.Is(err, joseerror.ErrMissingCriticalClaim) || plaintext != nil {
 		t.Errorf("[RFC 7797 3] b64 is defined for JWS only, so a JWE recipient does not understand it, got %v", err)
 	}
@@ -478,7 +478,7 @@ func TestDecrypt_ChecksTheHeader(t *testing.T) {
 	tests := []struct {
 		name      string
 		head      map[string]any
-		opts      *model.JoseOptions
+		opts      *model.JWEOptions
 		want      []error
 		malformed bool
 	}{
@@ -496,17 +496,17 @@ func TestDecrypt_ChecksTheHeader(t *testing.T) {
 		{name: "an alg as the enc", head: map[string]any{"alg": "dir", "enc": "A128KW"}, want: []error{joseerror.ErrUnsupportedAlgorithm}},
 		{name: "zip DEF", head: map[string]any{"alg": "dir", "enc": "A128GCM", "zip": "DEF"}, want: []error{joseerror.ErrUnsupportedAlgorithm}},
 		{name: "zip of another type", head: map[string]any{"alg": "dir", "enc": "A128GCM", "zip": 1}, want: []error{joseerror.ErrMalformedToken, joseerror.ErrMalformedClaim}, malformed: true},
-		{name: "an alg outside the allow-list", head: map[string]any{"alg": "dir", "enc": "A128GCM"}, opts: &model.JoseOptions{AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.A128KW}}, want: []error{joseerror.ErrUnsupportedAlgorithm}},
-		{name: "an enc outside the allow-list", head: map[string]any{"alg": "dir", "enc": "A128GCM"}, opts: &model.JoseOptions{AllowedContentEncryptionAlgorithms: []jwa.Encryption{jwa.A256GCM}}, want: []error{joseerror.ErrUnsupportedAlgorithm}},
+		{name: "an alg outside the allow-list", head: map[string]any{"alg": "dir", "enc": "A128GCM"}, opts: &model.JWEOptions{AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.A128KW}}, want: []error{joseerror.ErrUnsupportedAlgorithm}},
+		{name: "an enc outside the allow-list", head: map[string]any{"alg": "dir", "enc": "A128GCM"}, opts: &model.JWEOptions{AllowedContentEncryptionAlgorithms: []jwa.Encryption{jwa.A256GCM}}, want: []error{joseerror.ErrUnsupportedAlgorithm}},
 		{name: "crit naming an extension not understood", head: map[string]any{"alg": "dir", "enc": "A128GCM", "crit": []any{"exp"}, "exp": 1}, want: []error{joseerror.ErrMissingCriticalClaim}},
-		{name: "crit naming a parameter that is absent", malformed: true, head: map[string]any{"alg": "dir", "enc": "A128GCM", "crit": []any{"exp"}}, opts: &model.JoseOptions{UnderstoodCriticalHeaders: []string{"exp"}}, want: []error{joseerror.ErrMissingCriticalClaim}},
+		{name: "crit naming a parameter that is absent", malformed: true, head: map[string]any{"alg": "dir", "enc": "A128GCM", "crit": []any{"exp"}}, opts: &model.JWEOptions{UnderstoodCriticalHeaders: []string{"exp"}}, want: []error{joseerror.ErrMissingCriticalClaim}},
 		{name: "an empty crit", malformed: true, head: map[string]any{"alg": "dir", "enc": "A128GCM", "crit": []any{}}, want: []error{joseerror.ErrMalformedClaim}},
-		{name: "a typ outside AcceptedTypes", head: map[string]any{"alg": "dir", "enc": "A128GCM", "typ": "JWT"}, opts: &model.JoseOptions{AcceptedTypes: []string{"secevent+jwt"}}, want: []error{joseerror.ErrMalformedClaim}},
-		{name: "no kid when one is required", head: map[string]any{"alg": "dir", "enc": "A128GCM"}, opts: &model.JoseOptions{RequireKeyIdentifier: true}, want: []error{joseerror.ErrMissingClaim}},
+		{name: "a typ outside AcceptedTypes", head: map[string]any{"alg": "dir", "enc": "A128GCM", "typ": "JWT"}, opts: &model.JWEOptions{AcceptedTypes: []string{"secevent+jwt"}}, want: []error{joseerror.ErrMalformedClaim}},
+		{name: "no kid when one is required", head: map[string]any{"alg": "dir", "enc": "A128GCM"}, opts: &model.JWEOptions{RequireKeyIdentifier: true}, want: []error{joseerror.ErrMissingClaim}},
 		{name: "a jku that is not https", malformed: true, head: map[string]any{"alg": "dir", "enc": "A128GCM", "jku": "http://example.com"}, want: []error{joseerror.ErrMalformedClaim}},
-		{name: "crit naming enc, which is present", malformed: true, head: map[string]any{"alg": "dir", "enc": "A128GCM", "crit": []any{"enc"}}, opts: &model.JoseOptions{UnderstoodCriticalHeaders: []string{"enc"}}, want: []error{joseerror.ErrMalformedClaim}},
-		{name: "crit naming p2c, which is present", malformed: true, head: map[string]any{"alg": "dir", "enc": "A128GCM", "p2c": 1000, "crit": []any{"p2c"}}, opts: &model.JoseOptions{UnderstoodCriticalHeaders: []string{"p2c"}}, want: []error{joseerror.ErrMalformedClaim}},
-		{name: "a kid that is not a string with an alg outside the allow-list", malformed: true, head: map[string]any{"alg": "dir", "enc": "A128GCM", "kid": 7}, opts: &model.JoseOptions{AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.A128KW}}, want: []error{joseerror.ErrMalformedClaim}},
+		{name: "crit naming enc, which is present", malformed: true, head: map[string]any{"alg": "dir", "enc": "A128GCM", "crit": []any{"enc"}}, opts: &model.JWEOptions{UnderstoodCriticalHeaders: []string{"enc"}}, want: []error{joseerror.ErrMalformedClaim}},
+		{name: "crit naming p2c, which is present", malformed: true, head: map[string]any{"alg": "dir", "enc": "A128GCM", "p2c": 1000, "crit": []any{"p2c"}}, opts: &model.JWEOptions{UnderstoodCriticalHeaders: []string{"p2c"}}, want: []error{joseerror.ErrMalformedClaim}},
+		{name: "a kid that is not a string with an alg outside the allow-list", malformed: true, head: map[string]any{"alg": "dir", "enc": "A128GCM", "kid": 7}, opts: &model.JWEOptions{AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.A128KW}}, want: []error{joseerror.ErrMalformedClaim}},
 		{name: "a kid that is not a string", malformed: true, head: map[string]any{"alg": "dir", "enc": "A128GCM", "kid": 7}, want: []error{joseerror.ErrMalformedClaim}},
 	}
 	for _, tt := range tests {
@@ -541,13 +541,13 @@ func TestDecrypt_AcceptsWhatTheHeaderRulesAllow(t *testing.T) {
 	tests := []struct {
 		name string
 		head map[string]any
-		opts *model.JoseOptions
+		opts *model.JWEOptions
 	}{
-		{name: "an alg and enc inside the allow-lists", opts: &model.JoseOptions{AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.A128KW, jwa.Dir}, AllowedContentEncryptionAlgorithms: []jwa.Encryption{jwa.A128GCM}}},
-		{name: "a crit naming an understood extension", head: map[string]any{"crit": []any{"exp"}, "exp": 1}, opts: &model.JoseOptions{UnderstoodCriticalHeaders: []string{"exp"}}},
+		{name: "an alg and enc inside the allow-lists", opts: &model.JWEOptions{AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.A128KW, jwa.Dir}, AllowedContentEncryptionAlgorithms: []jwa.Encryption{jwa.A128GCM}}},
+		{name: "a crit naming an understood extension", head: map[string]any{"crit": []any{"exp"}, "exp": 1}, opts: &model.JWEOptions{UnderstoodCriticalHeaders: []string{"exp"}}},
 		{name: "a b64 of false, which is a JWS parameter", head: map[string]any{"b64": false}},
 		{name: "a b64 that is not a boolean", head: map[string]any{"b64": "no"}},
-		{name: "an accepted typ", head: map[string]any{"typ": "JOSE"}, opts: &model.JoseOptions{AcceptedTypes: []string{"JOSE"}}},
+		{name: "an accepted typ", head: map[string]any{"typ": "JOSE"}, opts: &model.JWEOptions{AcceptedTypes: []string{"JOSE"}}},
 		{name: "an unknown parameter", head: map[string]any{"unknown": map[string]any{}}},
 		{name: "an apu equal to the apv, which only ECDH-ES reads", head: map[string]any{"apu": "QQ", "apv": "QQ"}},
 		{name: "an apu that is not a string, which only ECDH-ES reads", head: map[string]any{"apu": 1}},
@@ -583,7 +583,7 @@ func TestDecrypt_RefusesBadOptions(t *testing.T) {
 		name       string
 		ctx        context.Context
 		decrypters []model.Decrypter
-		opts       *model.JoseOptions
+		opts       *model.JWEOptions
 		want       error
 		mentions   string
 	}{
@@ -593,7 +593,7 @@ func TestDecrypt_RefusesBadOptions(t *testing.T) {
 		{name: "no decrypters", ctx: context.Background(), want: joseerror.ErrDecryptionFailed},
 		{name: "no decrypter of the token's alg", ctx: context.Background(), decrypters: []model.Decrypter{pairFor(t, jwa.A128KW, jwa.A128GCM).decrypter}, want: joseerror.ErrDecryptionFailed},
 		{name: "no decrypter of the token's alg, named", ctx: context.Background(), decrypters: []model.Decrypter{pairFor(t, jwa.A128KW, jwa.A128GCM).decrypter}, want: joseerror.ErrDecryptionFailed, mentions: "dir"},
-		{name: "more decrypters than MaxKeysTried", ctx: context.Background(), decrypters: []model.Decrypter{good, good, good}, opts: &model.JoseOptions{MaxKeysTried: 2}, want: joseerror.ErrTooManyKeys},
+		{name: "more decrypters than MaxKeysTried", ctx: context.Background(), decrypters: []model.Decrypter{good, good, good}, opts: &model.JWEOptions{MaxKeysTried: 2}, want: joseerror.ErrTooManyKeys},
 		{name: "a cancelled context", ctx: cancelled, decrypters: []model.Decrypter{good}, want: context.Canceled},
 	}
 	for _, tt := range tests {
@@ -615,13 +615,13 @@ func TestDecrypt_MaxKeysTriedDefaultsTo100(t *testing.T) {
 	for len(hundred) < 100 {
 		hundred = append(hundred, wrong)
 	}
-	if _, _, _, err := Decrypt(context.Background(), token, hundred, &model.JoseOptions{}); err != nil {
+	if _, _, _, err := Decrypt(context.Background(), token, hundred, &model.JWEOptions{}); err != nil {
 		t.Errorf("100 decrypters are within the default, got %v", err)
 	}
 	if _, _, _, err := Decrypt(context.Background(), token, append(hundred, wrong), nil); !errors.Is(err, joseerror.ErrTooManyKeys) {
 		t.Errorf("101 decrypters exceed the default, want ErrTooManyKeys, got %v", err)
 	}
-	if _, _, _, err := Decrypt(context.Background(), token, append(hundred, wrong), &model.JoseOptions{MaxKeysTried: -1}); !errors.Is(err, joseerror.ErrTooManyKeys) {
+	if _, _, _, err := Decrypt(context.Background(), token, append(hundred, wrong), &model.JWEOptions{MaxKeysTried: -1}); !errors.Is(err, joseerror.ErrTooManyKeys) {
 		t.Errorf("a negative MaxKeysTried means the default, want ErrTooManyKeys, got %v", err)
 	}
 }
@@ -913,7 +913,7 @@ func TestDecrypt_MaxKeysTriedCountsOnlyTheTokensAlg(t *testing.T) {
 		t.Fatal(err)
 	}
 	other := pairFor(t, jwa.A128KW, jwa.A128GCM).decrypter
-	for name, opts := range map[string]*model.JoseOptions{
+	for name, opts := range map[string]*model.JWEOptions{
 		"a bound of 1 with a decrypter of another alg": {MaxKeysTried: 1},
 		"a negative bound, which means the default":    {MaxKeysTried: -1},
 	} {
@@ -955,7 +955,7 @@ func TestDecryptAndParseHeader_RefuseAnAllowListNamingSomethingThisLibraryCannot
 	cek := randomBytes(t, 16)
 	token := dirToken(t, jwa.A128GCM, cek)
 	decrypter := scriptedDecrypter{alg: jwa.Dir, cek: cek}
-	for name, opts := range map[string]*model.JoseOptions{
+	for name, opts := range map[string]*model.JWEOptions{
 		"a JWS alg":                      {AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.Dir, jwa.RS256}},
 		"Unknown":                        {AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.Unknown}},
 		"an alg outside the enumeration": {AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.Algorithm(999)}},
@@ -997,7 +997,7 @@ func TestDecrypt_OnDecrypterErrorSeesEachFailureWhileTheResultStaysUniform(t *te
 		err       error
 	}
 	var calls []call
-	opts := &model.JoseOptions{OnDecrypterError: func(d model.Decrypter, err error) { calls = append(calls, call{d, err}) }}
+	opts := &model.JWEOptions{OnDecrypterError: func(d model.Decrypter, err error) { calls = append(calls, call{d, err}) }}
 
 	_, _, _, err := Decrypt(context.Background(), token, []model.Decrypter{failing, short}, opts)
 	if !errors.Is(err, joseerror.ErrDecryptionFailed) || errors.Is(err, outage) || strings.Contains(err.Error(), "hsm") {
@@ -1039,7 +1039,7 @@ func TestParseHeader_ReturnsTheHeaderDecryptWouldCheck(t *testing.T) {
 			}
 		})
 	}
-	if head, err := ParseHeader(headerToken(t, map[string]any{"alg": "dir", "enc": "A128GCM", "typ": "JWT"}), &model.JoseOptions{AcceptedTypes: []string{"secevent+jwt"}}); !errors.Is(err, joseerror.ErrMalformedClaim) || head != nil {
+	if head, err := ParseHeader(headerToken(t, map[string]any{"alg": "dir", "enc": "A128GCM", "typ": "JWT"}), &model.JWEOptions{AcceptedTypes: []string{"secevent+jwt"}}); !errors.Is(err, joseerror.ErrMalformedClaim) || head != nil {
 		t.Errorf("ParseHeader must apply the options Decrypt applies, got %v", err)
 	}
 }
