@@ -428,8 +428,9 @@ func validateExpectedType(header map[string]any, accepted []string) error {
 
 // NamesNestedJWT reports whether the header's cty is "JWT", which RFC 7519
 // section 5.2 requires of a Nested JWT. The comparison follows RFC 7515 section
-// 4.1.10: case-insensitive, with "application/" prepended to a value without a '/'.
-// Media-type parameters (RFC 9110 section 8.3.1) are ignored.
+// 4.1.10: case-insensitive for ASCII letters only (RFC 6838 section 4.2), with
+// "application/" prepended to a value without a '/'. Media-type parameters (RFC
+// 9110 section 8.3.1) are ignored.
 func NamesNestedJWT(header map[string]any) bool {
 	cty, _ := header["cty"].(string)
 	return mediaTypesMatch(cty, "JWT")
@@ -437,7 +438,26 @@ func NamesNestedJWT(header map[string]any) bool {
 
 func mediaTypesMatch(declared, accepted string) bool {
 	declared = withoutParameters(declared)
-	return declared != "" && strings.EqualFold(qualifyMediaType(declared), qualifyMediaType(withoutParameters(accepted)))
+	return declared != "" && equalFoldASCII(qualifyMediaType(declared), qualifyMediaType(withoutParameters(accepted)))
+}
+
+func equalFoldASCII(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range len(a) {
+		if lowerASCII(a[i]) != lowerASCII(b[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func lowerASCII(c byte) byte {
+	if 'A' <= c && c <= 'Z' {
+		return c + 'a' - 'A'
+	}
+	return c
 }
 
 func withoutParameters(mediaType string) string {
