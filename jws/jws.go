@@ -71,7 +71,7 @@ func verify(ctx context.Context, compactSerialization string, outOfBoundsPublicK
 	}
 
 	if payloadIsJSONObject && header.NamesNestedJWT(protectedHeader) {
-		return nil, nil, nil, fmt.Errorf("%wnested JWTs are not supported: the 'cty' header names JWT", joseerror.ErrMalformedToken)
+		return nil, nil, nil, fmt.Errorf("%wa JWT signed inside a JWS is not supported: the 'cty' header names JWT. A JWT signed and then encrypted is, through jwt.Validate", joseerror.ErrUnsupportedAlgorithm)
 	}
 
 	jwkRetrievers = append(jwkRetrievers, headerJwkRetrievers...)
