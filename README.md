@@ -214,7 +214,7 @@ Both apply the same rules to the token:
 
 One message can still have more than one valid token. ECDSA signatures are malleable: for an `ES256`, `ES384` or `ES512` token, anyone can replace the signature's `S` with `n - S` and get a second token that verifies. This needs no key. So do not key a replay or deduplication cache on the raw token string. Key it on a claim such as `jti` instead.
 
-`VerifyCompactSerialization` refuses a nested JWT with `ErrMalformedToken`, before any key is sought. RFC 7519 section 5.2 marks one with a `cty` of `JWT`, compared as RFC 7515 section 4.1.10 describes: ignoring the case of ASCII letters, with `application/` treated as prepended. Media-type parameters are ignored, so `application/jwt; charset=utf-8` is a nested JWT too. `Verify` does not look at `cty`, because section 4.1.10 says JWS implementations ignore it. To unwrap a nested JWT yourself, call `Verify` and verify the payload it returns.
+`VerifyCompactSerialization` refuses a JWT signed inside another JWS with `ErrUnsupportedAlgorithm`, before any key is sought. RFC 7519 allows this nesting, and this library does not implement it. A JWT signed and then encrypted is supported: see [Encrypted JWTs](#encrypted-jwts). RFC 7519 section 5.2 marks a nested JWT with a `cty` of `JWT`, compared as RFC 7515 section 4.1.10 describes: ignoring the case of ASCII letters, with `application/` treated as prepended. Media-type parameters are ignored, so `application/jwt; charset=utf-8` is a nested JWT too. `Verify` does not look at `cty`, because section 4.1.10 says JWS implementations ignore it. To unwrap a nested JWT yourself, call `Verify` and verify the payload it returns.
 
 Both try the keys from every source until one verifies the signature, up to `JoseOptions.MaxKeysTried`, which is 100 when unset. RFC 7517 section 4.5 does not require a `kid` to be unique, so a key set a peer publishes can hold thousands of keys under one `kid`, and each costs a signature verification. A token that would need more keys than the limit is refused with `ErrTooManyKeys`, not `ErrInvalidSignature`, so you can tell an oversized key set from a forgery. Only a key that a validator can be built from for the token's `alg` counts. The limit covers the keys your retriever returns too. When the limit is reached, no further `jku` or `x5u` is fetched.
 
@@ -710,7 +710,7 @@ validated, err := jwt.Validate(ctx, token, retriever, decrypters, opts, jweOpts)
 
 `Validate` decrypts a token of five segments with `jwe.Decrypt`, and returns its errors. With no decrypters, it refuses the token with `ErrUnsupportedAlgorithm`. The JWE's `cty` decides what the plaintext is (RFC 7519 section 7.2 step 8). `Validate` reads it from the protected header before it decrypts, so it can refuse an unauthenticated JWT without running any decrypter. The header is authenticated by the decryption that follows. So a token whose `cty` was changed in transit is refused either way, though the error names the shape, not `ErrDecryptionFailed`:
 
-- If `cty` names `JWT`, the plaintext is a Nested JWT. It must be a signed JWT, which `Validate` verifies with the retriever and `opts`. A plaintext that is not three segments, such as a JWE inside the JWE, is refused with `ErrMalformedToken`.
+- If `cty` names `JWT`, the plaintext is a Nested JWT. It must be a signed JWT, which `Validate` verifies with the retriever and `opts`. A JWE inside the JWE is refused with `ErrUnsupportedAlgorithm`, as this library does not implement that nesting. Any other plaintext that is not a JWS is refused with `ErrMalformedToken`.
 - Otherwise the plaintext is the claims set. RFC 7519 allows a JWT that is only encrypted. The plaintext must be a JSON object, else `ErrMalformedToken`.
 
 CAUTION: Anyone who has your public key can make a JWT that is only encrypted with `RSA-OAEP` or `ECDH-ES`. Its claims prove nothing about who wrote them. If you expect signed JWTs, an attacker can also send unsigned claims in a JWE, and the signature check would not run. So `Validate` refuses such a token with `ErrInvalidSignature`, before any decrypter runs. It refuses an encrypt-only JWT under every `alg` except the shared-key and password algorithms below, so an `alg` added later is refused too. To accept such a token, set `AllowUnauthenticatedJWT` in `jweOpts`. The flag applies to every public-key decrypter in the call. So if you accept such tokens from one partner, give that partner its own key and its own call to `Validate`.
@@ -734,7 +734,7 @@ Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 | `ErrInvalidPrivateKey` | The private key or secret given cannot be used for this algorithm |
 | `ErrInvalidSignature` | The signature does not verify against the signing input |
 | `ErrDecryptionFailed` | A JWE did not decrypt. The error is the same for a wrong key, a changed token and a decrypter that failed, as RFC 7516 section 11.5 requires. It also covers a call with no decrypter for the token's `alg` |
-| `ErrUnsupportedAlgorithm` | The algorithm named is not supported, has no validator in this library, or is not permitted by the options given |
+| `ErrUnsupportedAlgorithm` | The algorithm named is not supported, has no validator in this library, or is not permitted by the options given. It also covers a feature that RFC 7519 allows and this library does not implement, such as a JWT signed inside a JWS or encrypted inside a JWE |
 | `ErrSigningError` | Signing failed |
 | `ErrEncryptionError` | Encryption failed. The random source failed, or a custom `Encrypter` returned a key or header that `jwe.Encrypt` cannot use, such as an encrypted key of a length that `jwe.Decrypt` refuses |
 | `ErrMalformedClaim` | A claim is present but its type or value is wrong. This includes a `b64` that is not a boolean, and an `x5c` or `x5u` chain that is out of order or longer than 16 certificates |
@@ -754,7 +754,7 @@ Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 An error can match more than one sentinel. A header that breaks the specification matches `ErrMalformedToken` and also the sentinel for the fault, such as `ErrMalformedClaim` for a `kid` that is not a string. A header that is well formed but refused matches only the sentinel for the reason:
 
 - your options refuse it: an `alg` or `enc` outside an allow-list, a `typ` outside `AcceptedTypes`, no `kid` when `RequireKeyIdentifier` is set, or a `p2c` outside your bounds;
-- it names what this library does not implement: an unknown `alg` or `enc`, a `zip` other than `DEF` or any `zip` when `MaxDecompressedSize` is unset, a `crit` extension that you have not named in `UnderstoodCriticalHeaders`, or a `b64` of `false`.
+- it names what this library does not implement: a JWT signed inside a JWS or encrypted inside a JWE, an unknown `alg` or `enc`, a `zip` other than `DEF` or any `zip` when `MaxDecompressedSize` is unset, a `crit` extension that you have not named in `UnderstoodCriticalHeaders`, or a `b64` of `false`.
 
 If a header has both kinds of fault, the error reports the fault in the specification.
 
@@ -811,6 +811,8 @@ A verifier given no retriever, and neither `UseTokenProvidedKeys` nor `X509Roots
 Two option values that no token could meet now fail every call with `ErrInvalidOptions`. One is an `AllowedSigningAlgorithms` entry that is not a signature algorithm this library implements. v0.11.0 refused every token with `ErrUnsupportedAlgorithm` instead. The other is an `AcceptedTypes` entry that is not a media type name, such as one with stray whitespace. v0.11.0 refused every token with `ErrMalformedClaim` or `ErrMissingClaim`. Correct the entry. Valid options are not affected.
 
 `jws.Verify`, `jws.VerifyCompactSerialization` and `jwt.Validate` now return the context's error once `ctx` has ended before a key verifies the token, even when no fetch runs. v0.11.0 could still verify a token after `ctx` was cancelled, if every key came from your retriever.
+
+A JWS whose `cty` is `JWT`, that is a JWT signed inside another JWS, is refused with `ErrUnsupportedAlgorithm` alone. v0.11.0 refused it with `ErrMalformedToken`. RFC 7519 allows this nesting, so the token is not malformed, and this library does not implement it. For the same reason, `jwt.Validate` refuses a JWE inside a JWE with `ErrUnsupportedAlgorithm`, and `jwt.New` refuses a header whose `cty` names `JWT` with `ErrMalformedClaim`, because it signs a claims set, not a JWT.
 
 `jwk.PublicFromJwk` refuses an `oct` jwk with `ErrInvalidPublicKey`, because a symmetric key has no public half. v0.11.0 refused it with `ErrUnsupportedAlgorithm`. If you match the old sentinel for this case, match the new one.
 
@@ -882,7 +884,7 @@ Every change below is a compile error or a silent behaviour change for a consume
 - A JWT claims set of `null` is refused. `jwt.Validate` and `jws.VerifyCompactSerialization` previously returned a nil body and no error.
 - A `b64` header of `false` is refused, even when `UnderstoodCriticalHeaders` names `b64`. A `b64` that is not a JSON boolean is refused with `ErrMalformedClaim`.
 - A `typ` or `cty` header that is not a string is refused with `ErrMalformedClaim`, as RFC 7515 sections 4.1.9 and 4.1.10 require.
-- A token whose `cty` is `JWT` is refused by `jws.VerifyCompactSerialization` and `jwt.Validate` with a message naming nested JWTs. Media-type parameters on the `cty` are ignored.
+- A token whose `cty` is `JWT` is refused by `jws.VerifyCompactSerialization` and `jwt.Validate` with a message naming nested JWTs. Since v0.11.0 the error is `ErrUnsupportedAlgorithm`. See [Upgrading from 0.11.x](#upgrading-from-011x). Media-type parameters on the `cty` are ignored.
 - A token's signature is checked against at most `JoseOptions.MaxKeysTried` keys, 100 by default, across every source. A token that would need more is refused with `ErrTooManyKeys`. If your retriever returns more than 100 keys that suit one `alg`, raise the limit.
 
 ### JWKs

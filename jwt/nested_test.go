@@ -310,7 +310,8 @@ func TestValidate_RefusesANestedJWTThatIsNotAValidJWS(t *testing.T) {
 		{name: "a signature that does not verify", plaintext: tampered, cty: "JWT", retriever: retriever, want: joseerror.ErrInvalidSignature, clause: "RFC 7515 5.2"},
 		{name: "a JWS signed by another key", plaintext: signed, cty: "JWT", retriever: otherRetriever, want: joseerror.ErrInvalidSignature, clause: "RFC 7515 5.2"},
 		{name: "a claims set where a Nested JWT is named", plaintext: `{"sub":"alice"}`, cty: "JWT", retriever: retriever, want: joseerror.ErrMalformedToken, clause: "RFC 7519 7.2 step 8"},
-		{name: "a JWE nested in the JWE", plaintext: innerJWE, cty: "JWT", retriever: retriever, want: joseerror.ErrMalformedToken, clause: "RFC 7519 7.2 step 8"},
+		{name: "a JWE nested in the JWE", plaintext: innerJWE, cty: "JWT", retriever: retriever, want: joseerror.ErrUnsupportedAlgorithm, clause: "RFC 7519 7.2 step 8"},
+		{name: "four segments under a cty of JWT", plaintext: "a.b.c.d", cty: "JWT", retriever: retriever, want: joseerror.ErrMalformedToken, clause: "RFC 7519 7.2 step 8"},
 		{name: "a JWS with no cty naming it", plaintext: signed, retriever: retriever, want: joseerror.ErrMalformedToken, clause: "RFC 7519 5.2"},
 	} {
 		t.Run(c.name, func(t *testing.T) {

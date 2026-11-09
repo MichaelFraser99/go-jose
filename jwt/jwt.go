@@ -118,8 +118,10 @@ func New(signer crypto.Signer, head, body map[string]any, opts Opts) (*string, e
 // decrypters it is refused with ErrUnsupportedAlgorithm. Then, as section 7.2
 // step 8 requires:
 //   - If the JWE's "cty" is "JWT" (section 5.2), the plaintext is a Nested JWT. It
-//     is verified as a token of three segments is, so anything but a JWS, such as
-//     a JWE nested in the JWE, is ErrMalformedToken.
+//     is verified as a token of three segments is. A JWE nested in the JWE is
+//     valid RFC 7519 that this library does not implement, so it is
+//     ErrUnsupportedAlgorithm, and anything else that is not a JWS is
+//     ErrMalformedToken.
 //   - Otherwise the plaintext is the claims set, which must be a JSON object, else
 //     ErrMalformedToken. With dir, A128KW to A256KW, A128GCMKW to A256GCMKW or a
 //     PBES2 alg, only a holder of the shared key or password can have encrypted
@@ -210,6 +212,9 @@ func validateEncrypted(ctx context.Context, token string, outOfBoundsPublicKey m
 	}
 	result := &Token{EncryptionHeader: head, Decrypter: decrypter}
 	if nested {
+		if strings.Count(string(plaintext), ".") == 4 {
+			return nil, fmt.Errorf("%wa JWT encrypted inside a JWE is not supported: the plaintext is a JWE", joseerror.ErrUnsupportedAlgorithm)
+		}
 		return validateSigned(ctx, string(plaintext), outOfBoundsPublicKey, opts, result)
 	}
 
@@ -341,6 +346,9 @@ func checkProducerHeader(headBytes []byte) error {
 	_ = decoder.Decode(&emitted)
 	if err := header.CheckHeaderShape(emitted); err != nil {
 		return err
+	}
+	if header.NamesNestedJWT(emitted) {
+		return fmt.Errorf("%wNew signs a claims set, so 'cty' must not name JWT (RFC 7519 section 5.2); to nest a JWT, encrypt it with Encrypt", joseerror.ErrMalformedClaim)
 	}
 	if _, present := emitted["b64"]; present {
 		if critical, _ := emitted["crit"].([]any); !slices.Contains(critical, any("b64")) {
