@@ -297,7 +297,7 @@ head, body, err := jwt.Validate(ctx, token, retriever, &model.JoseOptions{
 
 Each is off when unset, so none of this changes what an existing caller sees, except `crit` and the error `AllowedSigningAlgorithms` reports, below.
 
-`AcceptedTypes` compares as RFC 7515 section 4.1.9 requires: it ignores the case of ASCII letters only, as RFC 6838 section 4.2 defines media type names in ASCII. So a lookalike letter such as `ſ` (a long s) does not match `s`. It treats `application/` as prepended to any value containing no `/`. So naming `example+jwt` accepts `application/example+jwt` and `Example+JWT`, and refuses `x-example+jwt`. Media-type parameters are ignored on both sides, so `example+jwt; v=1` matches `example+jwt`. A `typ` with no type before its parameters matches nothing.
+`AcceptedTypes` compares as RFC 7515 section 4.1.9 requires: it ignores the case of ASCII letters only, as RFC 6838 section 4.2 defines media type names in ASCII. So a lookalike letter such as `ſ` (a long s) does not match `s`. It treats `application/` as prepended to any value containing no `/`. So naming `example+jwt` accepts `application/example+jwt` and `Example+JWT`, and refuses `x-example+jwt`. Media-type parameters are ignored on both sides, so `example+jwt; v=1` matches `example+jwt`. Spaces and tabs before the `;` are ignored too. Whitespace at the start of the value, or at its end with no parameters, is not, so `" example+jwt"` and `"example+jwt "` are refused. A `typ` with no type before its parameters matches nothing.
 
 `RequireKeyIdentifier` refuses a `kid` that is absent or is not a non-empty string. RFC 7517 section 4.5 leaves `kid` optional, which is why it is off by default.
 
@@ -797,7 +797,7 @@ A jwk whose `key_ops` lists a value twice is now refused by `jws.GetValidatorFro
 
 `jwk.PublicFromJwk` and `jwk.PrivateFromJwk` now read an X25519 jwk as an `*ecdh` key. v0.11.0 refused it with `ErrUnsupportedAlgorithm`. `jws.GetValidatorFromJwk` refuses an X25519 jwk with `ErrInvalidPublicKey`, where v0.11.0 gave `ErrUnsupportedAlgorithm`.
 
-`AcceptedTypes` and the `cty` check now ignore the case of ASCII letters only. v0.11.0 used Unicode case folding, so a `typ` with a lookalike letter, such as `ſecevent+jwt` with a long s, matched `secevent+jwt`. Media type names are ASCII (RFC 6838 section 4.2), so no valid `typ` is affected.
+`AcceptedTypes` and the `cty` check now ignore the case of ASCII letters only. v0.11.0 used Unicode case folding, so a `typ` with a lookalike letter, such as `ſecevent+jwt` with a long s, matched `secevent+jwt`. Media type names are ASCII (RFC 6838 section 4.2), so no valid `typ` or `cty` is affected, and you need to change nothing.
 
 `jwk.PublicFromJwk` refuses an `oct` jwk with `ErrInvalidPublicKey`, because a symmetric key has no public half. v0.11.0 refused it with `ErrUnsupportedAlgorithm`. If you match the old sentinel for this case, match the new one.
 
