@@ -755,14 +755,14 @@ If a header has both kinds of fault, the error reports the fault in the specific
 
 Most errors mean that the token is bad, so the response is a 4xx. A few mean that your server or its configuration has a fault, so the response is a 5xx. Test the errors in this order, because an error can match more than one:
 
-1. `context.Canceled` and `context.DeadlineExceeded`. The request ended before the token was verified. These match no `joseerror` sentinel.
+1. Your request's own context has ended: test `ctx.Err() != nil` on the `ctx` that you passed. Send 499 for a client that went away, or 504 for your deadline. Test the context itself, not the error. A `jku` or `x5u` fetch that runs out of time also matches `context.DeadlineExceeded`, and that fault is the peer's, not yours.
 2. `ErrInvalidOptions`. Your options are wrong, and no token can pass. This is a server fault (500).
 3. The errors of your own retriever. `Validate` wraps them and adds no sentinel, so test them with `errors.Is(err, yourErr)`. A failed key store is a server fault (500 or 503).
 4. Every other sentinel. The token was refused (401, or 400 for `ErrMalformedToken` if you separate malformed requests).
 
 Three sentinels can also come from your side. Read these before you map them:
 
-- `ErrTooManyKeys` from `jwe.Decrypt` or `jwt.Validate` means that you gave more decrypters of the token's `alg` than `MaxKeysTried` allows. That is your fault. From a JWS, it can also mean that a `jku` set held too many keys, which is the peer's fault.
+- `ErrTooManyKeys` for a JWE means that you gave more decrypters of the token's `alg` than `MaxKeysTried` allows. For a JWS, it means that the signature did not verify under as many keys as `MaxKeysTried` allows. Those keys can come from your retriever or from a `jku` set the peer chose. So set `MaxKeysTried` above the number of keys that your own retriever returns. Then the error can only come from a token that names too many keys, which is the peer's fault (401). For a JWE, it is always your fault (500).
 - `ErrDecryptionFailed` is the same for every failure that depends on a key, as RFC 7516 section 11.5 requires. So a hardware module outage looks like a bad token. To tell them apart, record the cause with `OnDecrypterError`, and decide after the call:
 
 ```go
@@ -780,7 +780,7 @@ if err != nil && outage != nil {
 
 Build `jweOpts` for each request, as above, because the hook writes to a variable of that request. Do not send the cause to the sender.
 
-- `ErrApplicationError` means that a key the token names, through `jku` or `x5u`, could not be fetched or read. The peer chose that address, so it is usually the peer's fault (401). A fetch that ran out of time also matches `context.DeadlineExceeded`.
+- `ErrApplicationError` means that a key the token names, through `jku` or `x5u`, could not be fetched or read. The peer chose that address, so it is the peer's fault (401). A fetch that ran out of time also matches `context.DeadlineExceeded`, which is why step 1 tests your request's context and not the error.
 
 CAUTION: Do not send an error message to the sender of a token. A message can hold parser detail, Go type names, your configuration and text from the token. Send a fixed message, and log the error on your side.
 
