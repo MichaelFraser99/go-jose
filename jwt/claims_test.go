@@ -210,4 +210,14 @@ func TestValidate_RefusesOptionValuesNoTokenCanMeetWhateverTheToken(t *testing.T
 			}
 		}
 	}
+	for name, jweOpts := range map[string]*model.JWEOptions{
+		"a JWS alg in AllowedKeyManagementAlgorithms": {AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.ES256}},
+		"an AcceptedTypes entry with a space":         {AcceptedTypes: []string{" JWT"}},
+	} {
+		for _, token := range []string{"a.b.c", "a.b.c.d.e", "garbage"} {
+			if validated, err := Validate(context.Background(), token, nil, nil, nil, jweOpts); !errors.Is(err, joseerror.ErrInvalidOptions) || validated != nil {
+				t.Errorf("[RFC 6838 4.2, RFC 8725 3.1] JWEOptions with %s can match no token, so Validate must refuse %q with ErrInvalidOptions, even one of three segments, got %v", name, token, err)
+			}
+		}
+	}
 }

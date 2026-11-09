@@ -189,8 +189,9 @@ func checkProducerHeader(headBytes []byte) error {
 // no decrypter has the token's alg, the message says so; that reveals which
 // algs you hold keys for, as the time taken does, but nothing about a key.
 //
-// A nil ctx or decrypter, or an allow-list naming an algorithm this library
-// does not implement, is ErrInvalidOptions. ctx is checked before each
+// A nil ctx or decrypter, an allow-list naming an algorithm this library does
+// not implement, or an AcceptedTypes entry that is not a media type name, is
+// ErrInvalidOptions. ctx is checked before each
 // decrypter and after the last, and its error is returned once it ends. A
 // crypto.Decrypter takes no context, so a call already running cannot be
 // interrupted; to bound one, build its decrypter per request around a
@@ -211,7 +212,7 @@ func Decrypt(ctx context.Context, compactSerialization string, decrypters []mode
 		}
 	}
 
-	if err := checkOptions(opts); err != nil {
+	if err := CheckOptions(opts); err != nil {
 		return nil, nil, nil, err
 	}
 
@@ -315,7 +316,7 @@ func Decrypt(ctx context.Context, compactSerialization string, decrypters []mode
 // "kid". Never trust a value from it. To know which key a token was encrypted
 // with, use the decrypter Decrypt returns.
 func ParseHeader(compactSerialization string, opts *model.JWEOptions) (map[string]any, error) {
-	if err := checkOptions(opts); err != nil {
+	if err := CheckOptions(opts); err != nil {
 		return nil, err
 	}
 	_, protectedHeader, _, _, err := parseProtected(compactSerialization, opts)
@@ -341,7 +342,12 @@ func parseProtected(compactSerialization string, opts *model.JWEOptions) ([]stri
 	return components, protectedHeader, alg, enc, nil
 }
 
-func checkOptions(opts *model.JWEOptions) error {
+// CheckOptions refuses, with ErrInvalidOptions, JWE options that are wrong
+// whatever the token: an allow-list naming an algorithm this library does not
+// implement for that layer, and an AcceptedTypes entry that is not a media type
+// name (RFC 6838 section 4.2). Decrypt and ParseHeader call it before reading
+// the token.
+func CheckOptions(opts *model.JWEOptions) error {
 	if opts == nil {
 		return nil
 	}

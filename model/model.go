@@ -230,7 +230,9 @@ type JWEOptions struct {
 
 	// AcceptedTypes lists the media types the JWE's 'typ' header may name,
 	// compared as RFC 7515 section 4.1.9 requires. With none listed, 'typ' is not
-	// checked. A JWE around a Nested JWT usually has no 'typ'.
+	// checked. A JWE around a Nested JWT usually has no 'typ'. An entry that is
+	// not a media type name (RFC 6838 section 4.2) makes every call fail with
+	// ErrInvalidOptions, whatever the token, including a jwt.Validate of a JWS.
 	AcceptedTypes []string
 
 	// RequireKeyIdentifier refuses a JWE whose 'kid' header is absent or is not a

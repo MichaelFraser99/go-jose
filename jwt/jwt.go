@@ -154,6 +154,9 @@ func Validate(ctx context.Context, token string, outOfBoundsPublicKey model.Retr
 	if err := validateOptions(opts); err != nil {
 		return nil, err
 	}
+	if err := jwe.CheckOptions(jweOpts); err != nil {
+		return nil, err
+	}
 	switch segments := strings.Count(token, ".") + 1; segments {
 	case 3:
 		if opts != nil && opts.RequireEncryptedJWT {

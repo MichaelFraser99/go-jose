@@ -49,7 +49,9 @@ func CheckOptions(opts *model.JoseOptions) error {
 	for _, alg := range opts.AllowedSigningAlgorithms {
 		if !hasValidator(alg) {
 			name := alg.String()
-			if name == "" {
+			if alg == jwa.Unknown {
+				name = "jwa.Unknown, which a name GetAlgorithm does not recognise gives,"
+			} else if name == "" {
 				name = fmt.Sprintf("jwa.Algorithm(%d)", int(alg))
 			}
 			return fmt.Errorf("%wAllowedSigningAlgorithms holds %s, which is not a signature algorithm this library implements", joseerror.ErrInvalidOptions, name)
