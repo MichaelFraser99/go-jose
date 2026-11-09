@@ -214,7 +214,7 @@ Both apply the same rules to the token:
 
 One message can still have more than one valid token. ECDSA signatures are malleable: for an `ES256`, `ES384` or `ES512` token, anyone can replace the signature's `S` with `n - S` and get a second token that verifies. This needs no key. So do not key a replay or deduplication cache on the raw token string. Key it on a claim such as `jti` instead.
 
-`VerifyCompactSerialization` refuses a nested JWT with `ErrMalformedToken`, before any key is sought. RFC 7519 section 5.2 marks one with a `cty` of `JWT`, compared as RFC 7515 section 4.1.10 describes: case-insensitively, with `application/` treated as prepended. Media-type parameters are ignored, so `application/jwt; charset=utf-8` is a nested JWT too. `Verify` does not look at `cty`, because section 4.1.10 says JWS implementations ignore it. To unwrap a nested JWT yourself, call `Verify` and verify the payload it returns.
+`VerifyCompactSerialization` refuses a nested JWT with `ErrMalformedToken`, before any key is sought. RFC 7519 section 5.2 marks one with a `cty` of `JWT`, compared as RFC 7515 section 4.1.10 describes: ignoring the case of ASCII letters, with `application/` treated as prepended. Media-type parameters are ignored, so `application/jwt; charset=utf-8` is a nested JWT too. `Verify` does not look at `cty`, because section 4.1.10 says JWS implementations ignore it. To unwrap a nested JWT yourself, call `Verify` and verify the payload it returns.
 
 Both try the keys from every source until one verifies the signature, up to `JoseOptions.MaxKeysTried`, which is 100 when unset. RFC 7517 section 4.5 does not require a `kid` to be unique, so a key set a peer publishes can hold thousands of keys under one `kid`, and each costs a signature verification. A token that would need more keys than the limit is refused with `ErrTooManyKeys`, not `ErrInvalidSignature`, so you can tell an oversized key set from a forgery. Only a key that a validator can be built from for the token's `alg` counts. The limit covers the keys your retriever returns too. When the limit is reached, no further `jku` or `x5u` is fetched.
 
@@ -297,7 +297,7 @@ head, body, err := jwt.Validate(ctx, token, retriever, &model.JoseOptions{
 
 Each is off when unset, so none of this changes what an existing caller sees, except `crit` and the error `AllowedSigningAlgorithms` reports, below.
 
-`AcceptedTypes` compares as RFC 7515 section 4.1.9 requires: case-insensitively, with `application/` treated as prepended to any value containing no `/`. So naming `example+jwt` accepts `application/example+jwt` and `Example+JWT`, and refuses `x-example+jwt`. Media-type parameters are ignored on both sides, so `example+jwt; v=1` matches `example+jwt`. A `typ` with no type before its parameters matches nothing.
+`AcceptedTypes` compares as RFC 7515 section 4.1.9 requires: it ignores the case of ASCII letters only, as RFC 6838 section 4.2 defines media type names in ASCII. So a lookalike letter such as `ſ` (a long s) does not match `s`. It treats `application/` as prepended to any value containing no `/`. So naming `example+jwt` accepts `application/example+jwt` and `Example+JWT`, and refuses `x-example+jwt`. Media-type parameters are ignored on both sides, so `example+jwt; v=1` matches `example+jwt`. Spaces and tabs before the `;` are ignored too. Whitespace at the start of the value, or at its end with no parameters, is not, so `" example+jwt"` and `"example+jwt "` are refused. A `typ` with no type before its parameters matches nothing.
 
 `RequireKeyIdentifier` refuses a `kid` that is absent or is not a non-empty string. RFC 7517 section 4.5 leaves `kid` optional, which is why it is off by default.
 
@@ -701,7 +701,7 @@ To read the token, give `jwt.Validate` your decrypters:
 validated, err := jwt.Validate(ctx, token, retriever, decrypters, opts, jweOpts)
 ```
 
-`Validate` decrypts a token of five segments with `jwe.Decrypt`, and returns its errors. With no decrypters, it refuses the token with `ErrUnsupportedAlgorithm`. After decryption, the JWE's `cty` decides what the plaintext is (RFC 7519 section 7.2 step 8):
+`Validate` decrypts a token of five segments with `jwe.Decrypt`, and returns its errors. With no decrypters, it refuses the token with `ErrUnsupportedAlgorithm`. The JWE's `cty` decides what the plaintext is (RFC 7519 section 7.2 step 8). `Validate` reads it from the protected header before it decrypts, so it can refuse an unauthenticated JWT without running any decrypter. The header is authenticated by the decryption that follows. So a token whose `cty` was changed in transit is refused either way, though the error names the shape, not `ErrDecryptionFailed`:
 
 - If `cty` names `JWT`, the plaintext is a Nested JWT. It must be a signed JWT, which `Validate` verifies with the retriever and `opts`. A plaintext that is not three segments, such as a JWE inside the JWE, is refused with `ErrMalformedToken`.
 - Otherwise the plaintext is the claims set. RFC 7519 allows a JWT that is only encrypted. The plaintext must be a JSON object, else `ErrMalformedToken`.
@@ -710,7 +710,7 @@ CAUTION: Anyone who has your public key can make a JWT that is only encrypted wi
 
 A JWT that is only encrypted with `dir`, `A128KW` to `A256KW`, `A128GCMKW` to `A256GCMKW` or PBES2 is accepted, because only a holder of the shared key or password can make it. `Token.Decrypter` identifies that sender. With `RSA-OAEP` or `ECDH-ES`, `Token.Decrypter` names only your key that decrypted the token, not the sender. The signature of a Nested JWT identifies its issuer.
 
-The claim rules of `opts` apply to the claims in every case. The header rules of `jweOpts` apply to the JWE header.
+The claim rules of `opts` apply to the claims in every case. The header rules of `jweOpts` apply to the JWE header. For a JWT that is only encrypted, the JWE header is the JWT's own header (RFC 7519 section 5.1), so `AcceptedTypes` in `opts` also judges its `typ`, before any decrypter runs. A JWT that you type explicitly (RFC 8725 section 3.11) is then checked in every shape. For a Nested JWT, `opts.AcceptedTypes` judges the `typ` of the inner JWS, and the JWE needs no `typ`.
 
 To make a JWT that is only encrypted, encrypt the claims set as JSON with `jwe.Encrypt`, and do not set `cty`:
 
@@ -796,6 +796,8 @@ These are new:
 A jwk whose `key_ops` lists a value twice is now refused by `jws.GetValidatorFromJwk`, and skipped in a `jku` key set. RFC 7517 section 4.3 says this MUST NOT happen. If a key set that you rely on does it, have its publisher remove the repeated value.
 
 `jwk.PublicFromJwk` and `jwk.PrivateFromJwk` now read an X25519 jwk as an `*ecdh` key. v0.11.0 refused it with `ErrUnsupportedAlgorithm`. `jws.GetValidatorFromJwk` refuses an X25519 jwk with `ErrInvalidPublicKey`, where v0.11.0 gave `ErrUnsupportedAlgorithm`.
+
+`AcceptedTypes` and the `cty` check now ignore the case of ASCII letters only. v0.11.0 used Unicode case folding, so a `typ` with a lookalike letter, such as `ſecevent+jwt` with a long s, matched `secevent+jwt`. Media type names are ASCII (RFC 6838 section 4.2), so no valid `typ` or `cty` is affected, and you need to change nothing.
 
 A verifier given no retriever, and neither `UseTokenProvidedKeys` nor `X509Roots`, refuses every token with `ErrInvalidOptions`. v0.11.0 refused it with `ErrMalformedToken`, which blamed the token for a configuration fault. If token keys are allowed and the token names none, the error is `ErrNoKeyIdentifierMatch`. If you test for `ErrMalformedToken` in this case, test for these instead.
 
