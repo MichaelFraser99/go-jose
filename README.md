@@ -214,7 +214,7 @@ Both apply the same rules to the token:
 
 One message can still have more than one valid token. ECDSA signatures are malleable: for an `ES256`, `ES384` or `ES512` token, anyone can replace the signature's `S` with `n - S` and get a second token that verifies. This needs no key. So do not key a replay or deduplication cache on the raw token string. Key it on a claim such as `jti` instead.
 
-`VerifyCompactSerialization` refuses a nested JWT with `ErrMalformedToken`, before any key is sought. RFC 7519 section 5.2 marks one with a `cty` of `JWT`, compared as RFC 7515 section 4.1.10 describes: case-insensitively, with `application/` treated as prepended. Media-type parameters are ignored, so `application/jwt; charset=utf-8` is a nested JWT too. `Verify` does not look at `cty`, because section 4.1.10 says JWS implementations ignore it. To unwrap a nested JWT yourself, call `Verify` and verify the payload it returns.
+`VerifyCompactSerialization` refuses a nested JWT with `ErrMalformedToken`, before any key is sought. RFC 7519 section 5.2 marks one with a `cty` of `JWT`, compared as RFC 7515 section 4.1.10 describes: ignoring the case of ASCII letters, with `application/` treated as prepended. Media-type parameters are ignored, so `application/jwt; charset=utf-8` is a nested JWT too. `Verify` does not look at `cty`, because section 4.1.10 says JWS implementations ignore it. To unwrap a nested JWT yourself, call `Verify` and verify the payload it returns.
 
 Both try the keys from every source until one verifies the signature, up to `JoseOptions.MaxKeysTried`, which is 100 when unset. RFC 7517 section 4.5 does not require a `kid` to be unique, so a key set a peer publishes can hold thousands of keys under one `kid`, and each costs a signature verification. A token that would need more keys than the limit is refused with `ErrTooManyKeys`, not `ErrInvalidSignature`, so you can tell an oversized key set from a forgery. Only a key that a validator can be built from for the token's `alg` counts. The limit covers the keys your retriever returns too. When the limit is reached, no further `jku` or `x5u` is fetched.
 
@@ -297,7 +297,7 @@ head, body, err := jwt.Validate(ctx, token, retriever, &model.JoseOptions{
 
 Each is off when unset, so none of this changes what an existing caller sees, except `crit` and the error `AllowedSigningAlgorithms` reports, below.
 
-`AcceptedTypes` compares as RFC 7515 section 4.1.9 requires: case-insensitively, with `application/` treated as prepended to any value containing no `/`. So naming `example+jwt` accepts `application/example+jwt` and `Example+JWT`, and refuses `x-example+jwt`. Media-type parameters are ignored on both sides, so `example+jwt; v=1` matches `example+jwt`. A `typ` with no type before its parameters matches nothing.
+`AcceptedTypes` compares as RFC 7515 section 4.1.9 requires: it ignores the case of ASCII letters only, as RFC 6838 section 4.2 defines media type names in ASCII. So a lookalike letter such as `ſ` (a long s) does not match `s`. It treats `application/` as prepended to any value containing no `/`. So naming `example+jwt` accepts `application/example+jwt` and `Example+JWT`, and refuses `x-example+jwt`. Media-type parameters are ignored on both sides, so `example+jwt; v=1` matches `example+jwt`. Spaces and tabs before the `;` are ignored too. Whitespace at the start of the value, or at its end with no parameters, is not, so `" example+jwt"` and `"example+jwt "` are refused. A `typ` with no type before its parameters matches nothing.
 
 `RequireKeyIdentifier` refuses a `kid` that is absent or is not a non-empty string. RFC 7517 section 4.5 leaves `kid` optional, which is why it is off by default.
 
@@ -796,6 +796,8 @@ These are new:
 A jwk whose `key_ops` lists a value twice is now refused by `jws.GetValidatorFromJwk`, and skipped in a `jku` key set. RFC 7517 section 4.3 says this MUST NOT happen. If a key set that you rely on does it, have its publisher remove the repeated value.
 
 `jwk.PublicFromJwk` and `jwk.PrivateFromJwk` now read an X25519 jwk as an `*ecdh` key. v0.11.0 refused it with `ErrUnsupportedAlgorithm`. `jws.GetValidatorFromJwk` refuses an X25519 jwk with `ErrInvalidPublicKey`, where v0.11.0 gave `ErrUnsupportedAlgorithm`.
+
+`AcceptedTypes` and the `cty` check now ignore the case of ASCII letters only. v0.11.0 used Unicode case folding, so a `typ` with a lookalike letter, such as `ſecevent+jwt` with a long s, matched `secevent+jwt`. Media type names are ASCII (RFC 6838 section 4.2), so no valid `typ` or `cty` is affected, and you need to change nothing.
 
 `jwk.PublicFromJwk` refuses an `oct` jwk with `ErrInvalidPublicKey`, because a symmetric key has no public half. v0.11.0 refused it with `ErrUnsupportedAlgorithm`. If you match the old sentinel for this case, match the new one.
 
