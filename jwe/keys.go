@@ -170,7 +170,7 @@ func GetEncrypter(alg jwa.Algorithm, key crypto.PublicKey) (model.Encrypter, err
 // dir Decrypter decrypts only a JWE whose "enc" is the DirectKey's; any other
 // fails as ErrDecryptionFailed. For the PBES2 algorithms, key is a PasswordKey,
 // whose Count is ignored: each JWE names its own "p2c", which Decrypt bounds
-// with JoseOptions.MaxPBES2Count. The Decrypter's own Decrypt method runs as
+// with JWEOptions.MaxPBES2Count. The Decrypter's own Decrypt method runs as
 // many iterations as the header it is given names, so pass a PBES2 Decrypter
 // only to Decrypt.
 func GetDecrypter(alg jwa.Algorithm, key crypto.PrivateKey) (model.Decrypter, error) {

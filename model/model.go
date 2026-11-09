@@ -48,69 +48,11 @@ type JoseOptions struct {
 	// unique, so a key set a peer publishes may hold thousands of keys under one
 	// kid, each costing a signature verification. A token that would need more is
 	// refused with ErrTooManyKeys. A key that cannot be used with the token's alg
-	// costs no verification and does not count. jwe.Decrypt applies the same
-	// bound to the decrypters of the token's alg. Zero or less means 100.
+	// costs no verification and does not count. Zero or less means 100.
 	MaxKeysTried int
 
 	// AllowedSigningAlgorithms defines the list of acceptable algorithms for token signature verification. If not specified, all algorithms are permitted
 	AllowedSigningAlgorithms []jwa.Algorithm
-
-	// AllowedKeyManagementAlgorithms lists the 'alg' values a JWE may name. With
-	// none named, every key management algorithm this library implements is
-	// permitted. A JWE naming another is refused with ErrUnsupportedAlgorithm.
-	AllowedKeyManagementAlgorithms []jwa.Algorithm
-
-	// AllowedContentEncryptionAlgorithms lists the 'enc' values a JWE may name.
-	// With none named, every content encryption algorithm this library
-	// implements is permitted. A JWE naming another is refused with
-	// ErrUnsupportedAlgorithm.
-	AllowedContentEncryptionAlgorithms []jwa.Encryption
-
-	// OnDecrypterError, if set, is called by jwe.Decrypt with each decrypter that
-	// fails and its error, or an error naming the wrong CEK length it returned.
-	// Decrypt still returns the one ErrDecryptionFailed RFC 7516 section 11.5
-	// requires, so this is the only place a cause such as a hardware module
-	// outage can be seen. It runs on the caller's goroutine before the next
-	// decrypter is tried. What it receives can depend on the token, so log it
-	// and never return it to the sender.
-	OnDecrypterError func(decrypter Decrypter, err error)
-
-	// MaxPBES2Count bounds the PBKDF2 iterations one call to jwe.Decrypt may run
-	// for a PBES2 JWE. A peer chooses "p2c", and each decrypter of the token's alg
-	// runs that many, so a JWE whose "p2c" times the number of those decrypters
-	// is more than this is refused with ErrOutOfBounds before any decrypter runs.
-	// jwe.ParseHeader refuses a "p2c" above it. Zero or less means 1,200,000:
-	// draft-ietf-oauth-rfc8725bis section 3.13 recommends refusing more than
-	// twice the 600,000 iterations OWASP gives for HMAC SHA-256, which
-	// jwe.PasswordKey uses by default. So by default one password decrypter takes
-	// any token jwe.PasswordKey writes by default, and two take one of up to
-	// 600,000 iterations.
-	MaxPBES2Count int
-
-	// RequireRecommendedPBES2Count refuses a PBES2 JWE whose "p2c" is less than
-	// the 1000 that RFC 7518 section 4.8.1.2 recommends, with ErrOutOfBounds. Off
-	// by default, including when no options are passed, because the section
-	// recommends the minimum and does not require it. A low count makes the
-	// password cheap to guess from the token, and refusing the token cannot undo
-	// that once it has been sent, so turn this on to make producers raise it.
-	RequireRecommendedPBES2Count bool
-
-	// MaxDecompressedSize turns on the "zip" header (RFC 7516 section 4.1.3) and
-	// bounds the octets jwe.Decrypt inflates a DEF plaintext to. A plaintext that
-	// inflates to more is refused with ErrOutOfBounds, as
-	// draft-ietf-oauth-rfc8725bis section 3.15 recommends. Zero or less, the
-	// default, refuses every JWE with "zip" with ErrUnsupportedAlgorithm.
-	MaxDecompressedSize int
-
-	// AllowUnauthenticatedJWT lets jwt.Validate accept a JWT that is encrypted
-	// with RSA-OAEP or ECDH-ES and not signed. RFC 7519 allows such a JWT, but
-	// anyone holding the recipient's public key can make one, so its claims prove
-	// nothing about who wrote them, and a token that should have been signed can
-	// arrive without its signature. Off by default, including when no options are
-	// passed. A JWT encrypted with a shared key or password needs no such option,
-	// as only a holder of the secret can encrypt it. Set it in the options
-	// jwt.Validate applies to the JWE.
-	AllowUnauthenticatedJWT bool
 
 	// ClockSkewLeeway widens the window the iat, nbf and exp claims are judged against, to allow for clock skew between the issuer and this verifier. A value of zero or less grants none. Defaults to 0
 	ClockSkewLeeway time.Duration
@@ -165,10 +107,10 @@ type JoseOptions struct {
 	// WebCrypto gives an ECDH private key. Off by default, including when no
 	// options are passed, because no MUST forbids such a jwk.
 	//
-	// It applies to jws.GetValidatorFromJwk, jwe.GetEncrypterFromJwk,
-	// jwe.GetDecrypterFromJwk, and the jwk and jku keys of a token. A token's
-	// keys are not checked when IgnoreKeyUse is on, as no "use" or "key_ops"
-	// rule applies to them then.
+	// It applies to jws.GetValidatorFromJwk and the jwk and jku keys of a token.
+	// JWEOptions.StrictKeyOperations does the same for the jwe constructors. A
+	// token's keys are not checked when IgnoreKeyUse is on, as no "use" or
+	// "key_ops" rule applies to them then.
 	StrictKeyOperations bool
 
 	// X509ExtKeyUsages names the extended key usages that permit an x5c or x5u
@@ -196,6 +138,111 @@ type JoseOptions struct {
 	// when this claim is present, then the JWT MUST be rejected." Set ExpectedAudience
 	// to meet that MUST.
 	ExpectedAudience []string
+
+	// RequireSignedJWT makes jwt.Validate refuse a JWT that is not signed: one
+	// that is only encrypted, under any key, with ErrInvalidSignature. Off by
+	// default, including when no options are passed, because RFC 7519 allows a
+	// JWT that is only encrypted. Set it when every JWT you accept must carry an
+	// issuer's signature, for example when you also hold a shared key whose other
+	// holders must not be able to write claims of their own.
+	RequireSignedJWT bool
+
+	// RequireEncryptedJWT makes jwt.Validate refuse a JWT that is not encrypted,
+	// with ErrUnsupportedAlgorithm. Off by default, including when no options are
+	// passed. Set it when your peers have agreed to encrypt every JWT to you, so a
+	// token sent in the clear is not accepted.
+	RequireEncryptedJWT bool
+}
+
+// JWEOptions configures jwe.Decrypt and jwe.ParseHeader, and the JWE layer of
+// jwt.Validate. It is a separate type from JoseOptions so that the options of a
+// JWE and of the JWS or claims inside it cannot be swapped. A nil *JWEOptions
+// and a zero value mean the same: the defaults each field describes.
+type JWEOptions struct {
+
+	// AllowedKeyManagementAlgorithms lists the 'alg' values a JWE may name. With
+	// none named, every key management algorithm this library implements is
+	// permitted. A JWE naming another is refused with ErrUnsupportedAlgorithm.
+	AllowedKeyManagementAlgorithms []jwa.Algorithm
+
+	// AllowedContentEncryptionAlgorithms lists the 'enc' values a JWE may name.
+	// With none named, every content encryption algorithm this library
+	// implements is permitted. A JWE naming another is refused with
+	// ErrUnsupportedAlgorithm.
+	AllowedContentEncryptionAlgorithms []jwa.Encryption
+
+	// OnDecrypterError, if set, is called by jwe.Decrypt with each decrypter that
+	// fails and its error, or an error naming the wrong CEK length it returned.
+	// Decrypt still returns the one ErrDecryptionFailed RFC 7516 section 11.5
+	// requires, so this is the only place a cause such as a hardware module
+	// outage can be seen. It runs on the caller's goroutine before the next
+	// decrypter is tried. What it receives can depend on the token, so log it
+	// and never return it to the sender.
+	OnDecrypterError func(decrypter Decrypter, err error)
+
+	// MaxPBES2Count bounds the PBKDF2 iterations one call to jwe.Decrypt may run
+	// for a PBES2 JWE. A peer chooses "p2c", and each decrypter of the token's alg
+	// runs that many, so a JWE whose "p2c" times the number of those decrypters
+	// is more than this is refused with ErrOutOfBounds before any decrypter runs.
+	// jwe.ParseHeader refuses a "p2c" above it. Zero or less means 1,200,000:
+	// draft-ietf-oauth-rfc8725bis section 3.13 recommends refusing more than
+	// twice the 600,000 iterations OWASP gives for HMAC SHA-256, which
+	// jwe.PasswordKey uses by default. So by default one password decrypter takes
+	// any token jwe.PasswordKey writes by default, and two take one of up to
+	// 600,000 iterations.
+	MaxPBES2Count int
+
+	// RequireRecommendedPBES2Count refuses a PBES2 JWE whose "p2c" is less than
+	// the 1000 that RFC 7518 section 4.8.1.2 recommends, with ErrOutOfBounds. Off
+	// by default, including when no options are passed, because the section
+	// recommends the minimum and does not require it. A low count makes the
+	// password cheap to guess from the token, and refusing the token cannot undo
+	// that once it has been sent, so turn this on to make producers raise it.
+	RequireRecommendedPBES2Count bool
+
+	// MaxDecompressedSize turns on the "zip" header (RFC 7516 section 4.1.3) and
+	// bounds the octets jwe.Decrypt inflates a DEF plaintext to. A plaintext that
+	// inflates to more is refused with ErrOutOfBounds, as
+	// draft-ietf-oauth-rfc8725bis section 3.15 recommends. Zero or less, the
+	// default, refuses every JWE with "zip" with ErrUnsupportedAlgorithm.
+	MaxDecompressedSize int
+
+	// AllowUnauthenticatedJWT lets jwt.Validate accept a JWT that is encrypted
+	// with RSA-OAEP or ECDH-ES and not signed. RFC 7519 allows such a JWT, but
+	// anyone holding the recipient's public key can make one, so its claims prove
+	// nothing about who wrote them, and a token that should have been signed can
+	// arrive without its signature. Off by default, including when no options are
+	// passed. A JWT encrypted with a shared key or password needs no such option,
+	// as only a holder of the secret can encrypt it. JoseOptions.RequireSignedJWT
+	// refuses such a JWT whatever this says.
+	AllowUnauthenticatedJWT bool
+
+	// MaxKeysTried bounds how many decrypters of the token's alg jwe.Decrypt
+	// tries. More are refused with ErrTooManyKeys before any is tried. Zero or
+	// less means 100.
+	MaxKeysTried int
+
+	// AcceptedTypes lists the media types the JWE's 'typ' header may name,
+	// compared as RFC 7515 section 4.1.9 requires. With none listed, 'typ' is not
+	// checked. A JWE around a Nested JWT usually has no 'typ'.
+	AcceptedTypes []string
+
+	// RequireKeyIdentifier refuses a JWE whose 'kid' header is absent or is not a
+	// non-empty string. Off by default, as RFC 7517 section 4.5 leaves 'kid'
+	// optional.
+	RequireKeyIdentifier bool
+
+	// UnderstoodCriticalHeaders names the extension header parameters of a JWE
+	// this caller understands. A JWE whose 'crit' names anything else is refused
+	// (RFC 7516 section 4.1.13). "b64" is ignored here, as RFC 7797 defines it
+	// for JWS only.
+	UnderstoodCriticalHeaders []string
+
+	// StrictKeyOperations makes jwe.GetEncrypterFromJwk and
+	// jwe.GetDecrypterFromJwk refuse a jwk that RFC 7517 section 4.3 says SHOULD
+	// NOT be published, as JoseOptions.StrictKeyOperations does for a JWS. Off by
+	// default.
+	StrictKeyOperations bool
 }
 
 // Retriever supplies the keys a token may be verified with. A bare

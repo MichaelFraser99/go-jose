@@ -50,7 +50,7 @@ func ExampleDecrypt() {
 	if err != nil {
 		panic(err)
 	}
-	opts := &model.JoseOptions{
+	opts := &model.JWEOptions{
 		AllowedKeyManagementAlgorithms:     []jwa.Algorithm{jwa.RSAOAEP256},
 		AllowedContentEncryptionAlgorithms: []jwa.Encryption{jwa.A256GCM},
 	}

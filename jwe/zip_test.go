@@ -71,14 +71,14 @@ func TestDecrypt_InflatesADEFPlaintextUpToMaxDecompressedSize(t *testing.T) {
 	token := zipToken(t, key, "DEF", deflate(t, message))
 	for name, limit := range map[string]int{"exactly the plaintext's length": len(message), "far more than it": 1 << 30} {
 		t.Run(name, func(t *testing.T) {
-			head, plaintext, used, err := Decrypt(context.Background(), token, []model.Decrypter{decrypter}, &model.JoseOptions{MaxDecompressedSize: limit})
+			head, plaintext, used, err := Decrypt(context.Background(), token, []model.Decrypter{decrypter}, &model.JWEOptions{MaxDecompressedSize: limit})
 			if err != nil || !bytes.Equal(plaintext, message) || used != decrypter || head["zip"] != "DEF" {
 				t.Errorf("[RFC 7516 5.2 step 16] want the inflated plaintext and the header naming zip, got %d octets, %v and %v", len(plaintext), head, err)
 			}
 		})
 	}
 	empty := zipToken(t, key, "DEF", deflate(t, nil))
-	if _, plaintext, _, err := Decrypt(context.Background(), empty, []model.Decrypter{decrypter}, &model.JoseOptions{MaxDecompressedSize: 1}); err != nil || plaintext == nil || len(plaintext) != 0 {
+	if _, plaintext, _, err := Decrypt(context.Background(), empty, []model.Decrypter{decrypter}, &model.JWEOptions{MaxDecompressedSize: 1}); err != nil || plaintext == nil || len(plaintext) != 0 {
 		t.Errorf("[RFC 7516 5.2 step 16] an empty DEF plaintext must inflate to an empty, non-nil slice, got %v and %v", plaintext, err)
 	}
 }
@@ -88,17 +88,17 @@ func TestDecrypt_RefusesAZipItCannotOrMayNotInflate(t *testing.T) {
 	decrypter := zipDecrypter(t, key)
 	message := []byte(strings.Repeat("a", 1000))
 	compressed := deflate(t, message)
-	on := &model.JoseOptions{MaxDecompressedSize: 1 << 20}
+	on := &model.JWEOptions{MaxDecompressedSize: 1 << 20}
 	for _, c := range []struct {
 		name      string
 		token     string
-		opts      *model.JoseOptions
+		opts      *model.JWEOptions
 		want      error
 		malformed bool
 		clause    string
 	}{
 		{name: "decompression off", token: zipToken(t, key, "DEF", compressed), want: joseerror.ErrUnsupportedAlgorithm, clause: "RFC 7516 4.1.3"},
-		{name: "one octet more than MaxDecompressedSize", token: zipToken(t, key, "DEF", compressed), opts: &model.JoseOptions{MaxDecompressedSize: 999}, want: joseerror.ErrOutOfBounds, clause: "RFC 8725bis 3.15"},
+		{name: "one octet more than MaxDecompressedSize", token: zipToken(t, key, "DEF", compressed), opts: &model.JWEOptions{MaxDecompressedSize: 999}, want: joseerror.ErrOutOfBounds, clause: "RFC 8725bis 3.15"},
 		{name: "a zip in the wrong case", token: zipToken(t, key, "def", compressed), opts: on, want: joseerror.ErrUnsupportedAlgorithm, clause: "RFC 7516 4.1.3"},
 		{name: "an empty zip", token: zipToken(t, key, "", compressed), opts: on, want: joseerror.ErrUnsupportedAlgorithm, clause: "RFC 7516 4.1.3"},
 		{name: "a zip naming GZIP", token: zipToken(t, key, "GZIP", compressed), opts: on, want: joseerror.ErrUnsupportedAlgorithm, clause: "RFC 7516 4.1.3"},
@@ -128,7 +128,7 @@ func TestDecrypt_ADecompressionBombStopsAtMaxDecompressedSize(t *testing.T) {
 	var before, after runtime.MemStats
 	runtime.GC()
 	runtime.ReadMemStats(&before)
-	_, plaintext, _, err := Decrypt(context.Background(), token, []model.Decrypter{zipDecrypter(t, key)}, &model.JoseOptions{MaxDecompressedSize: 1 << 20})
+	_, plaintext, _, err := Decrypt(context.Background(), token, []model.Decrypter{zipDecrypter(t, key)}, &model.JWEOptions{MaxDecompressedSize: 1 << 20})
 	runtime.ReadMemStats(&after)
 	if !errors.Is(err, joseerror.ErrOutOfBounds) || plaintext != nil {
 		t.Fatalf("[RFC 8725bis 3.15] %d octets that inflate to 64 MiB must be refused with ErrOutOfBounds, got %v", len(bomb), err)
@@ -144,7 +144,7 @@ func TestParseHeader_RefusesZipUnlessDecompressionIsOn(t *testing.T) {
 	if _, err := ParseHeader(token, nil); !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) {
 		t.Errorf("[RFC 7516 4.1.3] want ErrUnsupportedAlgorithm without MaxDecompressedSize, got %v", err)
 	}
-	if head, err := ParseHeader(token, &model.JoseOptions{MaxDecompressedSize: 1}); err != nil || head["zip"] != "DEF" {
+	if head, err := ParseHeader(token, &model.JWEOptions{MaxDecompressedSize: 1}); err != nil || head["zip"] != "DEF" {
 		t.Errorf("[RFC 7516 4.1.3] with MaxDecompressedSize set, ParseHeader must return the header, got %v and %v", head, err)
 	}
 }

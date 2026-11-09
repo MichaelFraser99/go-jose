@@ -134,10 +134,10 @@ func checkProducerHeader(headBytes []byte) error {
 //
 //   - "alg" must name a key management algorithm this library implements and
 //     "enc" a content encryption algorithm it implements (sections 4.1.1 and
-//     4.1.2), each within JoseOptions.AllowedKeyManagementAlgorithms and
+//     4.1.2), each within JWEOptions.AllowedKeyManagementAlgorithms and
 //     AllowedContentEncryptionAlgorithms when set, else ErrUnsupportedAlgorithm.
 //   - "zip" must be a string, and must be "DEF" with
-//     JoseOptions.MaxDecompressedSize set, else ErrUnsupportedAlgorithm
+//     JWEOptions.MaxDecompressedSize set, else ErrUnsupportedAlgorithm
 //     (section 4.1.3). Decrypt then inflates the plaintext (RFC 1951) after it
 //     is authenticated. A plaintext that is not a DEFLATE stream is
 //     ErrMalformedToken, and one that inflates to more than
@@ -153,7 +153,7 @@ func checkProducerHeader(headBytes []byte) error {
 //   - For a PBES2 alg, "p2s" must be a base64url string of at least 8 octets
 //     and "p2c" a positive integer (RFC 7518 section 4.8.1). A peer chooses
 //     "p2c", and each PBES2 decrypter tried runs that many PBKDF2 iterations.
-//     JoseOptions.MaxPBES2Count (1,200,000 when unset) bounds the iterations of
+//     JWEOptions.MaxPBES2Count (1,200,000 when unset) bounds the iterations of
 //     the whole call, as draft-ietf-oauth-rfc8725bis section 3.13 recommends:
 //     a "p2c" times the number of decrypters of the token's alg that exceeds it
 //     is ErrOutOfBounds, before any decrypter runs. So is a "p2c" below 1000
@@ -177,7 +177,7 @@ func checkProducerHeader(headBytes []byte) error {
 // Only the decrypters passed are tried. A "jku", "jwk", "x5u" or "x5c" in the
 // header names the recipient's public key, which cannot decrypt, so none is
 // fetched or read. If more decrypters have the token's alg than
-// JoseOptions.MaxKeysTried allows (100 when unset), Decrypt refuses with
+// JWEOptions.MaxKeysTried allows (100 when unset), Decrypt refuses with
 // ErrTooManyKeys before it tries any. Otherwise it tries each in turn. Each
 // decrypter is given its own copy of the encrypted key, and the decrypters
 // share one copy of the header, separate from the one Decrypt returns.
@@ -185,7 +185,7 @@ func checkProducerHeader(headBytes []byte) error {
 // A decrypter that fails, or returns a CEK of the wrong length, is given a
 // random CEK in its place, as RFC 7516 section 11.5 advises. Every failure that
 // depends on a key is then the one ErrDecryptionFailed with one message, and
-// the decrypter's own error is passed only to JoseOptions.OnDecrypterError. If
+// the decrypter's own error is passed only to JWEOptions.OnDecrypterError. If
 // no decrypter has the token's alg, the message says so; that reveals which
 // algs you hold keys for, as the time taken does, but nothing about a key.
 //
@@ -201,7 +201,7 @@ func checkProducerHeader(headBytes []byte) error {
 // identifies the sender, and any holder of any key passed can set "kid" to
 // another's. To know which sender a token came from, use the decrypter Decrypt
 // returns, not the "kid".
-func Decrypt(ctx context.Context, compactSerialization string, decrypters []model.Decrypter, opts *model.JoseOptions) (protectedHeader map[string]any, plaintext []byte, decrypter model.Decrypter, err error) {
+func Decrypt(ctx context.Context, compactSerialization string, decrypters []model.Decrypter, opts *model.JWEOptions) (protectedHeader map[string]any, plaintext []byte, decrypter model.Decrypter, err error) {
 	if ctx == nil {
 		return nil, nil, nil, fmt.Errorf("%wthe context passed is nil", joseerror.ErrInvalidOptions)
 	}
@@ -314,7 +314,7 @@ func Decrypt(ctx context.Context, compactSerialization string, decrypters []mode
 // The header is not authenticated until Decrypt succeeds: anyone can write any
 // "kid". Never trust a value from it. To know which key a token was encrypted
 // with, use the decrypter Decrypt returns.
-func ParseHeader(compactSerialization string, opts *model.JoseOptions) (map[string]any, error) {
+func ParseHeader(compactSerialization string, opts *model.JWEOptions) (map[string]any, error) {
 	if err := checkOptions(opts); err != nil {
 		return nil, err
 	}
@@ -325,7 +325,7 @@ func ParseHeader(compactSerialization string, opts *model.JoseOptions) (map[stri
 	return protectedHeader, nil
 }
 
-func parseProtected(compactSerialization string, opts *model.JoseOptions) ([]string, map[string]any, jwa.Algorithm, jwa.Encryption, error) {
+func parseProtected(compactSerialization string, opts *model.JWEOptions) ([]string, map[string]any, jwa.Algorithm, jwa.Encryption, error) {
 	components := strings.SplitN(compactSerialization, ".", 6)
 	if len(components) != 5 {
 		return nil, nil, jwa.Unknown, jwa.UnknownEncryption, fmt.Errorf("%wa JWE Compact Serialization has exactly five parts", joseerror.ErrMalformedToken)
@@ -341,7 +341,7 @@ func parseProtected(compactSerialization string, opts *model.JoseOptions) ([]str
 	return components, protectedHeader, alg, enc, nil
 }
 
-func checkOptions(opts *model.JoseOptions) error {
+func checkOptions(opts *model.JWEOptions) error {
 	if opts == nil {
 		return nil
 	}

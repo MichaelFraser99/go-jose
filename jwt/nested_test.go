@@ -150,7 +150,7 @@ func TestValidate_ASignedJWTIsUnchangedByDecrypters(t *testing.T) {
 	r := recipientFor(t, jwa.A128KW)
 	for name, decrypters := range map[string][]model.Decrypter{"none": nil, "some": {r.decrypter}} {
 		t.Run(name, func(t *testing.T) {
-			validated, err := Validate(context.Background(), signed, retriever, decrypters, nil, &model.JoseOptions{AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.Dir}})
+			validated, err := Validate(context.Background(), signed, retriever, decrypters, nil, &model.JWEOptions{AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.Dir}})
 			if err != nil || validated.Claims["sub"] != "alice" || validated.SignatureHeader == nil || validated.EncryptionHeader != nil || validated.Decrypter != nil {
 				t.Errorf("[RFC 7519 7.2] a JWS is verified, and the decrypters and JWE options are not read, got %+v and %v", validated, err)
 			}
@@ -180,16 +180,19 @@ func TestValidate_AnEncryptOnlyJWTUnderAPublicKeyNeedsAllowUnauthenticatedJWT(t 
 			r := recipientFor(t, alg)
 			token := encryptOnly(t, r, map[string]any{"sub": "admin"})
 			_, retriever := signedJWT(t, nil)
-			for name, c := range map[string]struct{ opts, jweOpts *model.JoseOptions }{
+			for name, c := range map[string]struct {
+				opts    *model.JoseOptions
+				jweOpts *model.JWEOptions
+			}{
 				"no options":                       {},
-				"the flag in the JWS options":      {opts: &model.JoseOptions{AllowUnauthenticatedJWT: true}},
-				"the JWE options without the flag": {jweOpts: &model.JoseOptions{AllowedKeyManagementAlgorithms: []jwa.Algorithm{alg}}},
+				"RequireSignedJWT over the flag":   {opts: &model.JoseOptions{RequireSignedJWT: true}, jweOpts: &model.JWEOptions{AllowUnauthenticatedJWT: true}},
+				"the JWE options without the flag": {jweOpts: &model.JWEOptions{AllowedKeyManagementAlgorithms: []jwa.Algorithm{alg}}},
 			} {
 				if validated, err := Validate(context.Background(), token, retriever, []model.Decrypter{r.decrypter}, c.opts, c.jweOpts); !errors.Is(err, joseerror.ErrInvalidSignature) || validated != nil {
 					t.Errorf("[RFC 8725 2.1] with %s, anyone holding the recipient's public key could have written this JWT, so it must be refused with ErrInvalidSignature, got %v", name, err)
 				}
 			}
-			validated, err := Validate(context.Background(), token, retriever, []model.Decrypter{r.decrypter}, nil, &model.JoseOptions{AllowUnauthenticatedJWT: true})
+			validated, err := Validate(context.Background(), token, retriever, []model.Decrypter{r.decrypter}, nil, &model.JWEOptions{AllowUnauthenticatedJWT: true})
 			if err != nil || validated.Claims["sub"] != "admin" || validated.SignatureHeader != nil {
 				t.Errorf("[RFC 7519 7.2 step 10] with AllowUnauthenticatedJWT in the JWE options, the encrypt-only JWT must be accepted, got %+v and %v", validated, err)
 			}
@@ -237,10 +240,10 @@ func TestValidate_EachLayerHasItsOwnOptions(t *testing.T) {
 	if _, err := Validate(context.Background(), token, retriever, decrypters, &model.JoseOptions{AcceptedTypes: []string{"JWT"}, RequireKeyIdentifier: false}, nil); err != nil {
 		t.Errorf("[RFC 7519 5.1] AcceptedTypes in the JWS options applies to the inner JWS, whose typ is JWT, not to the JWE, which has none, got %v", err)
 	}
-	if _, err := Validate(context.Background(), token, retriever, decrypters, nil, &model.JoseOptions{AcceptedTypes: []string{"JWT"}}); !errors.Is(err, joseerror.ErrMissingClaim) {
+	if _, err := Validate(context.Background(), token, retriever, decrypters, nil, &model.JWEOptions{AcceptedTypes: []string{"JWT"}}); !errors.Is(err, joseerror.ErrMissingClaim) {
 		t.Errorf("[RFC 7519 5.1] AcceptedTypes in the JWE options applies to the JWE, which has no typ, got %v", err)
 	}
-	if _, err := Validate(context.Background(), token, retriever, decrypters, nil, &model.JoseOptions{AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.A256KW}}); !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) {
+	if _, err := Validate(context.Background(), token, retriever, decrypters, nil, &model.JWEOptions{AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.A256KW}}); !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) {
 		t.Errorf("[RFC 8725 3.1] the JWE options' allow-list applies to the JWE's alg, got %v", err)
 	}
 	if _, err := Validate(context.Background(), token, retriever, decrypters, &model.JoseOptions{AllowedSigningAlgorithms: []jwa.Algorithm{jwa.RS256}}, nil); !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) {
@@ -352,6 +355,9 @@ func TestEncrypt_RefusesWhatIsNotASignedJWT(t *testing.T) {
 		{name: "a header that is not base64url", token: "!!." + parts[1] + "." + parts[2], want: joseerror.ErrMalformedToken, clause: "RFC 7515 7.1"},
 		{name: "a header that is not a JSON object", token: base64.RawURLEncoding.EncodeToString([]byte(`[1]`)) + "." + parts[1] + "." + parts[2], want: joseerror.ErrMalformedToken, clause: "RFC 7515 7.1"},
 		{name: "a signature that is not base64url", token: parts[0] + "." + parts[1] + ".a=b", want: joseerror.ErrMalformedToken, clause: "RFC 7515 7.1"},
+		{name: "an alg of none", token: base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none"}`)) + "." + parts[1] + ".", want: joseerror.ErrUnsupportedAlgorithm, clause: "RFC 8725 3.1"},
+		{name: "a key management alg", token: base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RSA-OAEP"}`)) + "." + parts[1] + "." + parts[2], want: joseerror.ErrUnsupportedAlgorithm, clause: "RFC 7515 4.1.1"},
+		{name: "no alg", token: base64.RawURLEncoding.EncodeToString([]byte(`{"typ":"JWT"}`)) + "." + parts[1] + "." + parts[2], want: joseerror.ErrUnsupportedAlgorithm, clause: "RFC 7515 4.1.1"},
 		{name: "a cty naming another type", token: signed, head: map[string]any{"cty": "json"}, want: joseerror.ErrMalformedClaim, clause: "RFC 7519 5.2"},
 		{name: "a cty that is not a string", token: signed, head: map[string]any{"cty": 1}, want: joseerror.ErrMalformedClaim, clause: "RFC 7519 5.2"},
 		{name: "a zip", token: signed, head: map[string]any{"zip": "DEF"}, want: joseerror.ErrUnsupportedAlgorithm, clause: "RFC 8725bis 3.6"},
@@ -384,5 +390,48 @@ func TestEncrypt_SetsCtyAndLeavesTheHeadAlone(t *testing.T) {
 		if err != nil || validated.EncryptionHeader["cty"] != "JWT" || validated.EncryptionHeader["kid"] != "k" {
 			t.Errorf("[RFC 7519 5.2] the JWE's cty must be JWT, got %+v and %v", validated, err)
 		}
+	}
+}
+
+func TestValidate_RequireSignedJWTAndRequireEncryptedJWTPinTheShape(t *testing.T) {
+	shared := recipientFor(t, jwa.A128KW)
+	public := recipientFor(t, jwa.RSAOAEP256)
+	signed, retriever := signedJWT(t, map[string]any{"sub": "alice"})
+	nested, err := Encrypt(shared.encrypter, jwa.A128GCM, signed, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sharedOnly := encryptOnly(t, shared, map[string]any{"sub": "alice"})
+	publicOnly := encryptOnly(t, public, map[string]any{"sub": "alice"})
+	decrypters := []model.Decrypter{shared.decrypter, public.decrypter}
+	allow := &model.JWEOptions{AllowUnauthenticatedJWT: true}
+	for _, c := range []struct {
+		name  string
+		token string
+		opts  *model.JoseOptions
+		want  error
+	}{
+		{name: "a signed JWT, signature required", token: signed, opts: &model.JoseOptions{RequireSignedJWT: true}},
+		{name: "a Nested JWT, signature required", token: nested, opts: &model.JoseOptions{RequireSignedJWT: true}},
+		{name: "a shared-key encrypt-only JWT, signature required", token: sharedOnly, opts: &model.JoseOptions{RequireSignedJWT: true}, want: joseerror.ErrInvalidSignature},
+		{name: "a public-key encrypt-only JWT allowed by jweOpts, signature required", token: publicOnly, opts: &model.JoseOptions{RequireSignedJWT: true}, want: joseerror.ErrInvalidSignature},
+		{name: "a signed JWT, encryption required", token: signed, opts: &model.JoseOptions{RequireEncryptedJWT: true}, want: joseerror.ErrUnsupportedAlgorithm},
+		{name: "a Nested JWT, encryption required", token: nested, opts: &model.JoseOptions{RequireEncryptedJWT: true}},
+		{name: "a shared-key encrypt-only JWT, encryption required", token: sharedOnly, opts: &model.JoseOptions{RequireEncryptedJWT: true}},
+		{name: "a Nested JWT, both required", token: nested, opts: &model.JoseOptions{RequireSignedJWT: true, RequireEncryptedJWT: true}},
+		{name: "a signed JWT, both required", token: signed, opts: &model.JoseOptions{RequireSignedJWT: true, RequireEncryptedJWT: true}, want: joseerror.ErrUnsupportedAlgorithm},
+		{name: "a shared-key encrypt-only JWT, both required", token: sharedOnly, opts: &model.JoseOptions{RequireSignedJWT: true, RequireEncryptedJWT: true}, want: joseerror.ErrInvalidSignature},
+		{name: "a signed JWT, neither required", token: signed},
+		{name: "a shared-key encrypt-only JWT, neither required", token: sharedOnly},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			validated, err := Validate(context.Background(), c.token, retriever, decrypters, c.opts, allow)
+			if c.want == nil && (err != nil || validated == nil) {
+				t.Errorf("[RFC 7519 7.2] this shape meets the options, so it must be accepted, got %v", err)
+			}
+			if c.want != nil && (!errors.Is(err, c.want) || validated != nil) {
+				t.Errorf("[RFC 7519 7.2] this shape is not the one the options require, so want %v, got %v", c.want, err)
+			}
+		})
 	}
 }

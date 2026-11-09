@@ -64,7 +64,7 @@ func TestDecrypt_RecoversThePlaintextOfEachRFCExample(t *testing.T) {
 	for _, id := range []string{"RFC7516-A.1", "RFC7516-A.3", "RFC7520-5.2", "RFC7520-5.3", "RFC7520-5.4", "RFC7520-5.5", "RFC7520-5.6", "RFC7520-5.7", "RFC7520-5.8", "RFC7520-5.9"} {
 		t.Run(id, func(t *testing.T) {
 			example := byID[id]
-			opts := &model.JoseOptions{MaxDecompressedSize: len(example.Plaintext)}
+			opts := &model.JWEOptions{MaxDecompressedSize: len(example.Plaintext)}
 			head, plaintext, _, err := Decrypt(context.Background(), example.Compact, []model.Decrypter{exampleDecrypter(t, example)}, opts)
 			if err != nil {
 				t.Fatalf("[RFC 7516 5.2] %s must decrypt, got %s", id, err)
@@ -159,14 +159,14 @@ func TestDecrypt_RefusesTheRFCsCompressedExampleUnlessDecompressionIsOnAndBigEno
 	example := examples(t)["RFC7520-5.9"]
 	decrypter := exampleDecrypter(t, example)
 	for name, c := range map[string]struct {
-		opts *model.JoseOptions
+		opts *model.JWEOptions
 		want error
 	}{
 		"no options":                       {opts: nil, want: joseerror.ErrUnsupportedAlgorithm},
-		"MaxDecompressedSize unset":        {opts: &model.JoseOptions{}, want: joseerror.ErrUnsupportedAlgorithm},
-		"MaxDecompressedSize negative":     {opts: &model.JoseOptions{MaxDecompressedSize: -1}, want: joseerror.ErrUnsupportedAlgorithm},
-		"MaxDecompressedSize one too few":  {opts: &model.JoseOptions{MaxDecompressedSize: len(example.Plaintext) - 1}, want: joseerror.ErrOutOfBounds},
-		"MaxDecompressedSize of one octet": {opts: &model.JoseOptions{MaxDecompressedSize: 1}, want: joseerror.ErrOutOfBounds},
+		"MaxDecompressedSize unset":        {opts: &model.JWEOptions{}, want: joseerror.ErrUnsupportedAlgorithm},
+		"MaxDecompressedSize negative":     {opts: &model.JWEOptions{MaxDecompressedSize: -1}, want: joseerror.ErrUnsupportedAlgorithm},
+		"MaxDecompressedSize one too few":  {opts: &model.JWEOptions{MaxDecompressedSize: len(example.Plaintext) - 1}, want: joseerror.ErrOutOfBounds},
+		"MaxDecompressedSize of one octet": {opts: &model.JWEOptions{MaxDecompressedSize: 1}, want: joseerror.ErrOutOfBounds},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, plaintext, d, err := Decrypt(context.Background(), example.Compact, []model.Decrypter{decrypter}, c.opts)
