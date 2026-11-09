@@ -61,8 +61,9 @@ type JoseOptions struct {
 	ClockSkewLeeway time.Duration
 
 	// AcceptedTypes lists the media types the 'typ' header may name. They are
-	// compared as RFC 7515 section 4.1.9 requires: case-insensitively, with
-	// "application/" treated as prepended to any value containing no "/".
+	// compared as RFC 7515 section 4.1.9 requires: ignoring the case of ASCII
+	// letters only (RFC 6838 section 4.2), with "application/" treated as
+	// prepended to any value containing no "/".
 	//
 	// With none listed, 'typ' is not checked. An entry that is not a media type
 	// name (RFC 6838 section 4.2), such as "", " JWT" or "*/*", can match no

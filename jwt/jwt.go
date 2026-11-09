@@ -128,6 +128,8 @@ func New(signer crypto.Signer, head, body map[string]any, opts Opts) (*string, e
 //     them, and the token is refused with ErrInvalidSignature unless
 //     jweOpts.AllowUnauthenticatedJWT is set. With opts.RequireSignedJWT set, a
 //     JWT that is not nested is refused with ErrInvalidSignature under any key.
+//     The JWE's header is then the JWT's own, so opts.AcceptedTypes judges its
+//     "typ" (RFC 7519 section 5.1), as jweOpts.AcceptedTypes does.
 //     Both refusals depend only on the protected header, so they are made before
 //     any decrypter runs.
 //
@@ -194,6 +196,11 @@ func validateEncrypted(ctx context.Context, token string, outOfBoundsPublicKey m
 	if !nested {
 		if err := checkUnsigned(unverified, opts, jweOpts); err != nil {
 			return nil, err
+		}
+		if opts != nil {
+			if err := header.ValidateExpectedType(unverified, opts.AcceptedTypes); err != nil {
+				return nil, err
+			}
 		}
 	}
 

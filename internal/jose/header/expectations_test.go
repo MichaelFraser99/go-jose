@@ -59,6 +59,11 @@ func TestValidateHeader_TheExpectedTypeIsComparedAsAMediaType(t *testing.T) {
 		"a parameter with no type":                    {reference: "RFC 7515 4.1.9, RFC 9110 8.3.1", accepted: []string{"example+jwt"}, typ: ";example+jwt"},
 		"a parameter with no type, accepted as such":  {reference: "RFC 7515 4.1.9, RFC 9110 8.3.1", accepted: []string{";v=1"}, typ: ";v=1"},
 		"an empty typ when an empty type is accepted": {reference: "RFC 7515 4.1.9, RFC 9110 8.3.1", accepted: []string{""}, typ: ""},
+		"a long s for an s":                           {reference: "RFC 7515 4.1.9, RFC 6838 4.2", accepted: []string{"secevent+jwt"}, typ: "\u017fecevent+jwt"},
+		"a long s in the application/ form":           {reference: "RFC 7515 4.1.9, RFC 6838 4.2", accepted: []string{"secevent+jwt"}, typ: "application/\u017fecevent+jwt"},
+		"a Kelvin sign for a k":                       {reference: "RFC 7515 4.1.9, RFC 6838 4.2", accepted: []string{"token+jwt"}, typ: "to\u212aen+jwt"},
+		"an accepted type holding a long s":           {reference: "RFC 7515 4.1.9, RFC 6838 4.2", accepted: []string{"\u017fecevent+jwt"}, typ: "secevent+jwt"},
+		"a Kelvin sign accepted as itself":            {reference: "RFC 7515 4.1.9, RFC 6838 4.2", accepted: []string{"to\u212aen+jwt"}, typ: "TO\u212aEN+JWT", accept: true},
 	}
 
 	for name, tc := range tests {
