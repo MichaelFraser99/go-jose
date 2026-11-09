@@ -232,7 +232,7 @@ A JOSE header can name the key that signed the token, through `jwk`, `jku`, `x5c
 `jwk` and `jku` are off by default, including when you pass no options, because anyone can sign a token and name their own key. A token that verifies against such a key proves only that its signer holds that key. Turn `UseTokenProvidedKeys` on only when your application ties those keys to a party you trust some other way:
 
 ```go
-head, body, err := jwt.Validate(ctx, token, nil, &model.JoseOptions{UseTokenProvidedKeys: true})
+validated, err := jwt.Validate(ctx, token, nil, nil, &model.JoseOptions{UseTokenProvidedKeys: true}, nil)
 ```
 
 Setting `X509Roots` does not turn `jwk` or `jku` on.
@@ -246,10 +246,10 @@ When you supply your own retriever and also use a header source, both are tried.
 The two remote headers name a URL this library fetches. Supply the client it should use. The example below uses `x5u`; `jku` also needs `UseTokenProvidedKeys`:
 
 ```go
-head, body, err := jwt.Validate(ctx, token, nil, &model.JoseOptions{
+validated, err := jwt.Validate(ctx, token, nil, nil, &model.JoseOptions{
     HttpClient: &http.Client{Transport: yourGuardedTransport},
     X509Roots:  roots,
-})
+}, nil)
 ```
 
 Both URLs come from the header of the token being verified, so this library makes an outbound request to an address a peer chose, before the signature is checked. Give the client a transport that rejects the destinations your deployment will not allow, such as private, loopback, link-local and other reserved ranges. The body is capped at 4 MiB whatever client you supply. Each fetch uses a copy of your client without its cookie jar. The fetch sends no cookies, and a cookie the server sets does not go into your jar. RFC 8725 section 3.10 asks for this.
@@ -292,12 +292,12 @@ Set `JoseOptions.StrictKeyOperations` to refuse such a jwk. Then a `key_ops` of 
 Most JOSE profiles pin their own `typ`, many require a `kid`, and RFC 7515 section 4.1.11 says a JWS whose `crit` lists an extension the recipient does not understand **MUST** be rejected. Rather than decoding the header yourself to check those, say what you expect:
 
 ```go
-head, body, err := jwt.Validate(ctx, token, retriever, &model.JoseOptions{
+validated, err := jwt.Validate(ctx, token, retriever, nil, &model.JoseOptions{
     AcceptedTypes:             []string{"example+jwt"},
     RequireKeyIdentifier:      true,
     UnderstoodCriticalHeaders: []string{"x-example"},
     AllowedSigningAlgorithms:  []jwa.Algorithm{jwa.ES256, jwa.RS256},
-})
+}, nil)
 ```
 
 Each is off when unset, so none of this changes what an existing caller sees, except `crit` and the error `AllowedSigningAlgorithms` reports, below.
@@ -324,7 +324,7 @@ RFC 5280 path validation takes a trust anchor as an **input**. A chain cannot vo
 roots := x509.NewCertPool()
 roots.AppendCertsFromPEM(issuerRootPEM)
 
-head, body, err := jwt.Validate(ctx, token, nil, &model.JoseOptions{X509Roots: roots})
+validated, err := jwt.Validate(ctx, token, nil, nil, &model.JoseOptions{X509Roots: roots}, nil)
 ```
 
 With no `X509Roots` configured, a token's `x5c` and `x5u` headers contribute no key. They are not an error — section 4.1.6 makes use of the header OPTIONAL — so the token still verifies if another key source does, and fails with `ErrMalformedToken` if none does.
@@ -341,10 +341,10 @@ That first certificate must also be one whose key may verify a signature. `x5c` 
 - **Extended key usage.** RFC 5280 section 4.2.1.12 says that when the extension is present, the certificate "MUST only be used for one of the purposes indicated". No purpose is registered for JWS, so you name the ones you accept in `JoseOptions.X509ExtKeyUsages`. When it is unset, only the signing certificate is checked: if its extension is present, it must name `anyExtendedKeyUsage`. When it is set, it is passed to Go's chain verification, which nests extended key usage, so the signing certificate and every CA above it must permit one of those purposes. A certificate with no extended key usage extension is accepted either way. A signing certificate or intermediate whose extension names no purpose is refused in every case, because the section defines it as a sequence of at least one. Go's chain verification treats such an extension as no restriction at all, so this library checks every chain it returns, and accepts the certificate when at least one chain has no such intermediate. The trust anchor is not checked: RFC 5280 section 6.1.1 takes from it only a name and a key.
 
 ```go
-head, body, err := jwt.Validate(ctx, token, nil, &model.JoseOptions{
+validated, err := jwt.Validate(ctx, token, nil, nil, &model.JoseOptions{
     X509Roots:        roots,
     X509ExtKeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageCodeSigning},
-})
+}, nil)
 ```
 
 Naming `x509.ExtKeyUsageAny` turns the purpose check off, as it does in Go's `x509.VerifyOptions`. A purpose Go has no constant for, such as a private OID, cannot be named, so a certificate restricted to one is accepted only with the check off. A refusal for either usage matches `ErrNoKeyIdentifierMatch`, as a chain that does not validate does.
@@ -757,6 +757,37 @@ An error can match more than one sentinel. A header that breaks the specificatio
 - it names what this library does not implement: a JWT signed inside a JWS or encrypted inside a JWE, an unknown `alg` or `enc`, a `zip` other than `DEF` or any `zip` when `MaxDecompressedSize` is unset, a `crit` extension that you have not named in `UnderstoodCriticalHeaders`, or a `b64` of `false`.
 
 If a header has both kinds of fault, the error reports the fault in the specification.
+
+### Errors and HTTP responses
+
+Most errors mean that the token is bad, so the response is a 4xx. A few mean that your server or its configuration has a fault, so the response is a 5xx. Test the errors in this order, because an error can match more than one:
+
+1. Your request's own context has ended: test `ctx.Err() != nil` on the `ctx` that you passed. Send 499 for a client that went away, or 504 for your deadline. Test the context itself, not the error. A `jku` or `x5u` fetch that runs out of time also matches `context.DeadlineExceeded`, and that fault is the peer's, not yours.
+2. `ErrInvalidOptions`. Your options are wrong, and no token can pass. This is a server fault (500).
+3. The errors of your own retriever. `Validate` wraps them and adds no sentinel, so test them with `errors.Is(err, yourErr)`. A failed key store is a server fault (500 or 503).
+4. Every other sentinel. The token was refused (401, or 400 for `ErrMalformedToken` if you separate malformed requests).
+
+Three sentinels can also come from your side. Read these before you map them:
+
+- `ErrTooManyKeys` for a JWE means that you gave more decrypters of the token's `alg` than `MaxKeysTried` allows. For a JWS, it means that the signature did not verify under as many keys as `MaxKeysTried` allows. Those keys can come from your retriever or from a `jku` set the peer chose. So set `MaxKeysTried` above the number of keys that your own retriever returns. Then the error can only come from a token that names too many keys, which is the peer's fault (401). For a JWE, it is always your fault (500).
+- `ErrDecryptionFailed` is the same for every failure that depends on a key, as RFC 7516 section 11.5 requires. So a hardware module outage looks like a bad token. To tell them apart, record the cause with `OnDecrypterError`, and decide after the call:
+
+```go
+var outage error
+jweOpts := &model.JWEOptions{OnDecrypterError: func(_ model.Decrypter, err error) {
+	if errors.Is(err, errHSMUnavailable) {
+		outage = err
+	}
+}}
+validated, err := jwt.Validate(ctx, token, retriever, decrypters, opts, jweOpts)
+if err != nil && outage != nil {
+	return http.StatusServiceUnavailable
+}
+```
+
+Build `jweOpts` for each request, as above, because the hook writes to a variable of that request. Do not send the cause to the sender.
+
+- `ErrApplicationError` means that a key the token names, through `jku` or `x5u`, could not be fetched or read. The peer chose that address, so it is the peer's fault (401). A fetch that ran out of time also matches `context.DeadlineExceeded`, which is why step 1 tests your request's context and not the error.
 
 CAUTION: Do not send an error message to the sender of a token. A message can hold parser detail, Go type names, your configuration and text from the token. Send a fixed message, and log the error on your side.
 
