@@ -70,7 +70,7 @@ func CompleteRSAPrivateKey(privateKey *rsa.PrivateKey) (*rsa.PrivateKey, error) 
 	if err != nil {
 		return nil, err
 	}
-	return keycopy.RSAPrivateKey(completed), nil
+	return completed, nil
 }
 
 func checkRSAPublicKey(publicKey *rsa.PublicKey, class error) error {
@@ -103,7 +103,7 @@ func completeRSAPrivateKey(privateKey *rsa.PrivateKey) (*rsa.PrivateKey, error) 
 			return nil, fmt.Errorf("%wthe primes of an RSA private key must be positive", jose_errors.ErrInvalidPrivateKey)
 		}
 	}
-	candidate := &rsa.PrivateKey{PublicKey: privateKey.PublicKey, D: privateKey.D, Primes: primes}
+	candidate := keycopy.RSAPrivateKey(&rsa.PrivateKey{PublicKey: privateKey.PublicKey, D: privateKey.D, Primes: primes})
 	if err := candidate.Validate(); err != nil {
 		return nil, fmt.Errorf("%wthe members of an RSA private key are not one key: %w", jose_errors.ErrInvalidPrivateKey, err)
 	}
