@@ -110,7 +110,8 @@ func New(signer crypto.Signer, head, body map[string]any, opts Opts) (*string, e
 // different types, so they cannot be swapped.
 //
 // A token of three segments is a JWS (RFC 7515 section 7.1): it is verified with
-// outOfBoundsPublicKey and opts, and decrypters and jweOpts are not read. With
+// outOfBoundsPublicKey and opts. Decrypters and jweOpts are checked by
+// jwe.CheckOptions, as for every token, and not otherwise used. With
 // opts.RequireEncryptedJWT set, it is refused with ErrUnsupportedAlgorithm.
 //
 // A token of five segments is a JWE (RFC 7516 section 9). It is decrypted with

@@ -191,7 +191,8 @@ type JWEOptions struct {
 	// for a PBES2 JWE. A peer chooses "p2c", and each decrypter of the token's alg
 	// runs that many, so a JWE whose "p2c" times the number of those decrypters
 	// is more than this is refused with ErrOutOfBounds before any decrypter runs.
-	// jwe.ParseHeader refuses a "p2c" above it. Zero or less means 1,200,000:
+	// jwe.ParseHeader and jwe.Decrypt refuse a "p2c" above it, whatever the
+	// decrypters. Zero or less means 1,200,000:
 	// draft-ietf-oauth-rfc8725bis section 3.13 recommends refusing more than
 	// twice the 600,000 iterations OWASP gives for HMAC SHA-256, which
 	// jwe.PasswordKey uses by default. So by default one password decrypter takes
