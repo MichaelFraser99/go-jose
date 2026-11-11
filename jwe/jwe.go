@@ -80,6 +80,13 @@ func encrypt(random io.Reader, encrypter model.Encrypter, enc jwa.Encryption, pl
 			return "", fmt.Errorf("%wthe %s header cannot be encoded as JSON: %s", joseerror.ErrMalformedClaim, jsonutils.QuoteBounded(name), err.Error())
 		}
 		given[name] = encoded
+		decoder := json.NewDecoder(bytes.NewReader(encoded))
+		decoder.UseNumber()
+		var copied any
+		if err := decoder.Decode(&copied); err != nil {
+			return "", fmt.Errorf("%wthe %s header cannot be decoded from its JSON: %s", joseerror.ErrMalformedClaim, jsonutils.QuoteBounded(name), err.Error())
+		}
+		h[name] = copied
 	}
 	cek, encryptedKey, err := encrypter.WrapKey(random, enc, h)
 	if err != nil {
@@ -392,7 +399,7 @@ func inflate(compressed []byte, limit int) ([]byte, error) {
 		return nil, fmt.Errorf("%wthe plaintext inflates to more than the %d octets MaxDecompressedSize allows", joseerror.ErrOutOfBounds, limit)
 	}
 	if source.Len() > 0 {
-		return nil, fmt.Errorf("%wthe 'zip' header names DEF, and %d octets follow the final block of the DEFLATE stream (RFC 1951 section 3.2.3)", joseerror.ErrMalformedToken, source.Len())
+		return nil, fmt.Errorf("%wthe 'zip' header names DEF, and the plaintext continues after the final block of the DEFLATE stream (RFC 1951 section 3.2.3)", joseerror.ErrMalformedToken)
 	}
 	return slices.Clip(inflated), nil
 }

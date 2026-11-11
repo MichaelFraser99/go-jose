@@ -1132,3 +1132,33 @@ func TestEncrypt_AcceptsAnEncrypterThatWritesAGivenParameterAgainUnchanged(t *te
 		t.Errorf("want the header to carry n of 1, got %v and %v", head, err)
 	}
 }
+
+func TestEncrypt_AnEncrypterCannotModifyTheCallersHead(t *testing.T) {
+	pair := pairFor(t, jwa.A128KW, jwa.A128GCM)
+	writer := headerRewriter{Encrypter: pair.encrypter, rewrite: func(h map[string]any) {
+		h["nested"].(map[string]any)["a"] = "rewritten"
+		h["list"].([]any)[0] = "rewritten"
+	}}
+	head := map[string]any{"nested": map[string]any{"a": "given"}, "list": []any{"given"}}
+	if _, err := Encrypt(writer, jwa.A128GCM, []byte("p"), head); !errors.Is(err, joseerror.ErrEncryptionError) {
+		t.Errorf("want the rewrite refused with ErrEncryptionError, got %v", err)
+	}
+	if head["nested"].(map[string]any)["a"] != "given" || head["list"].([]any)[0] != "given" {
+		t.Errorf("head is not modified, even inside a member, got %v", head)
+	}
+}
+
+func TestEncrypt_EmitsAnIntegerInHeadExactly(t *testing.T) {
+	pair := pairFor(t, jwa.A128KW, jwa.A128GCM)
+	token, err := Encrypt(pair.encrypter, jwa.A128GCM, []byte("p"), map[string]any{"n": uint64(1<<60 + 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := base64.RawURLEncoding.DecodeString(strings.SplitN(token, ".", 2)[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"n":1152921504606846977`) {
+		t.Errorf("[RFC 8259 6] an integer in head must be emitted exactly, got %s", encoded)
+	}
+}

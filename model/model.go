@@ -344,16 +344,18 @@ func (j *Jwks) RetrieveByKeyID(kid string) ([]map[string]any, error) {
 	return keys, nil
 }
 
-// Add appends jwk to the set. A nil set, or a jwk with no string "kty", which
-// RFC 7517 section 4.1 requires of every JWK, is refused with ErrKeystoreError.
-// With Opts.EnforceUniqueKIDs, a jwk whose "kid" is not a string, or names a
-// kid the set already holds, is refused with ErrKeystoreError too.
+// Add appends jwk to the set. A nil set, or a jwk whose "kty" is absent, empty
+// or not a string, is refused with ErrKeystoreError: RFC 7517 section 4.1
+// requires a "kty" of every JWK. With Opts.EnforceUniqueKIDs, a jwk whose "kid"
+// is not a string, or names a kid the set already holds, is refused with
+// ErrKeystoreError too. A jwk with no "kid" is always accepted, as RFC 7517
+// section 4.5 makes "kid" optional.
 func (j *Jwks) Add(jwk map[string]any) error {
 	if j == nil {
 		return fmt.Errorf("%wa jwk cannot be added to a nil key set", joseerror.ErrKeystoreError)
 	}
-	if _, ok := jwk["kty"].(string); !ok {
-		return fmt.Errorf("%wa jwk must have a string \"kty\" member (RFC 7517 section 4.1)", joseerror.ErrKeystoreError)
+	if kty, _ := jwk["kty"].(string); kty == "" {
+		return fmt.Errorf("%wa jwk must have a non-empty string \"kty\" member (RFC 7517 section 4.1)", joseerror.ErrKeystoreError)
 	}
 	if kid, ok := jwk["kid"]; ok && j.Opts.EnforceUniqueKIDs {
 		if sKid, ok := kid.(string); !ok {
