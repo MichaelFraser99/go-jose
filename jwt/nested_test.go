@@ -634,3 +634,31 @@ func TestValidate_ADecryptOnlyRecipientStillUsesAKeyTheTokenNames(t *testing.T) 
 		t.Errorf("[RFC 7515 4.1.3] with UseTokenProvidedKeys, the jwk the token names must verify it, got %+v and %v", validated, err)
 	}
 }
+
+func TestValidate_ErrTooManyKeysComesOnlyFromTheSignatureAndTooManyDecryptersAreAnOptionsFault(t *testing.T) {
+	r := recipientFor(t, jwa.A128KW)
+	signed, _ := signedJWT(t, map[string]any{"sub": "alice"})
+	nested, err := Encrypt(r.encrypter, jwa.A128GCM, signed, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wrongKeys []crypto.PublicKey
+	for range 3 {
+		other, err := jws.GetSigner(jwa.ES256, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wrongKeys = append(wrongKeys, other.Public())
+	}
+	wrong := func() ([]crypto.PublicKey, error) { return wrongKeys, nil }
+
+	if _, err := Validate(context.Background(), nested, wrong, []model.Decrypter{r.decrypter}, &model.JoseOptions{MaxKeysTried: 2}, nil); !errors.Is(err, joseerror.ErrTooManyKeys) || errors.Is(err, joseerror.ErrInvalidOptions) {
+		t.Errorf("[RFC 7519 7.2 step 8] the signature of the Nested JWT did not verify under the 2 keys allowed, so want ErrTooManyKeys alone, got %v", err)
+	}
+	for name, token := range map[string]string{"a nested JWT": nested, "a JWS": signed} {
+		decrypters := []model.Decrypter{r.decrypter, r.decrypter, r.decrypter}
+		if _, err := Validate(context.Background(), token, wrong, decrypters, nil, &model.JWEOptions{MaxKeysTried: 2}); !errors.Is(err, joseerror.ErrInvalidOptions) || errors.Is(err, joseerror.ErrTooManyKeys) {
+			t.Errorf("3 decrypters of one alg are more than the 2 MaxKeysTried allows, so want ErrInvalidOptions for %s, whatever the token, got %v", name, err)
+		}
+	}
+}

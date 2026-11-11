@@ -163,7 +163,7 @@ func Validate(ctx context.Context, token string, outOfBoundsPublicKey model.Retr
 	if err := validateOptions(opts); err != nil {
 		return nil, err
 	}
-	if err := jwe.CheckOptions(jweOpts); err != nil {
+	if err := jwe.CheckOptions(decrypters, jweOpts); err != nil {
 		return nil, err
 	}
 	if outOfBoundsPublicKey == nil && len(decrypters) > 0 {

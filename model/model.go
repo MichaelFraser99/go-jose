@@ -224,9 +224,9 @@ type JWEOptions struct {
 	// refuses such a JWT whatever this says.
 	AllowUnauthenticatedJWT bool
 
-	// MaxKeysTried bounds how many decrypters of the token's alg jwe.Decrypt
-	// tries. More are refused with ErrTooManyKeys before any is tried. Zero or
-	// less means 100.
+	// MaxKeysTried bounds how many decrypters of one alg jwe.Decrypt may be
+	// given. More make every call fail with ErrInvalidOptions, whatever the
+	// token. Zero or less means 100.
 	MaxKeysTried int
 
 	// AcceptedTypes lists the media types the JWE's 'typ' header may name,
