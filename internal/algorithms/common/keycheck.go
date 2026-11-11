@@ -58,7 +58,9 @@ func CheckRSAPrivateKey(privateKey *rsa.PrivateKey) error {
 // accepts. The copy shares no memory with privateKey and carries its primes and
 // CRT values. A key with no primes has them recovered from n, e and d by NIST
 // SP 800-56B Rev. 2 Appendix C.1, which assumes n is the product of two primes,
-// so a key with no primes whose modulus has more than two is refused.
+// so a key with no primes whose modulus has more than two is refused, as is
+// one whose modulus is prime. A modulus over MaximumRSAModulusBits is refused
+// before any private member is checked.
 func CompleteRSAPrivateKey(privateKey *rsa.PrivateKey) (*rsa.PrivateKey, error) {
 	if privateKey == nil {
 		return nil, fmt.Errorf("%wan RSA key needs a positive modulus and exponent", jose_errors.ErrInvalidPrivateKey)
@@ -87,11 +89,11 @@ func completeRSAPrivateKey(privateKey *rsa.PrivateKey) (*rsa.PrivateKey, error) 
 	if privateKey.D == nil || privateKey.D.Sign() <= 0 || privateKey.D.Cmp(privateKey.N) >= 0 {
 		return nil, fmt.Errorf("%wthe d of an RSA private key is a positive integer less than n", jose_errors.ErrInvalidPrivateKey)
 	}
+	if bits := privateKey.N.BitLen(); bits > MaximumRSAModulusBits {
+		return nil, fmt.Errorf("%wan RSA private key is checked only up to a %d-bit modulus, got %d", jose_errors.ErrInvalidPrivateKey, MaximumRSAModulusBits, bits)
+	}
 	primes := privateKey.Primes
 	if len(primes) == 0 {
-		if bits := privateKey.N.BitLen(); bits > MaximumRSAModulusBits {
-			return nil, fmt.Errorf("%wthe primes of an RSA private key are recovered only up to a %d-bit modulus, got %d", jose_errors.ErrInvalidPrivateKey, MaximumRSAModulusBits, bits)
-		}
 		recovered, err := recoverRSAPrimes(rand.Reader, privateKey.N, privateKey.E, privateKey.D)
 		if err != nil {
 			return nil, err
@@ -119,6 +121,12 @@ func recoverRSAPrimes(random io.Reader, n *big.Int, e int, d *big.Int) ([]*big.I
 	m := new(big.Int).Mul(d, big.NewInt(int64(e)))
 	m.Sub(m, one)
 	if m.Bit(0) == 1 {
+		return nil, errRSAPrimesNotFound
+	}
+	if shared := new(big.Int).GCD(nil, nil, m, n); shared.Cmp(one) > 0 {
+		return []*big.Int{shared, new(big.Int).Div(n, shared)}, nil
+	}
+	if n.ProbablyPrime(0) {
 		return nil, errRSAPrimesNotFound
 	}
 	t := m.TrailingZeroBits()
