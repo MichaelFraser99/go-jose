@@ -90,7 +90,7 @@ func completeRSAPrivateKey(privateKey *rsa.PrivateKey) (*rsa.PrivateKey, error) 
 		return nil, fmt.Errorf("%wthe d of an RSA private key is a positive integer less than n", jose_errors.ErrInvalidPrivateKey)
 	}
 	if bits := privateKey.N.BitLen(); bits > MaximumRSAModulusBits {
-		return nil, fmt.Errorf("%wan RSA private key is checked only up to a %d-bit modulus, got %d", jose_errors.ErrInvalidPrivateKey, MaximumRSAModulusBits, bits)
+		return nil, fmt.Errorf("%wan RSA private key is checked only up to a modulus of %d bits, got %d", jose_errors.ErrInvalidPrivateKey, MaximumRSAModulusBits, bits)
 	}
 	primes := privateKey.Primes
 	if len(primes) == 0 {
