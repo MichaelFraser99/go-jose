@@ -322,9 +322,12 @@ func (j *Jwks) UnmarshalJSON(data []byte) error {
 //
 // RFC 7517 section 4.5 does not require a kid to be unique within a key set, so a
 // set may legitimately carry more than one key under one kid, as an issuer mid key
-// rotation does. An error is returned only when no key carries the kid. Keys with
-// an absent or non-string kid are ignored.
+// rotation does. An error is returned only when no key carries the kid, as it is
+// for a nil set. Keys with an absent or non-string kid are ignored.
 func (j *Jwks) RetrieveByKeyID(kid string) ([]map[string]any, error) {
+	if j == nil {
+		return nil, fmt.Errorf("%wno matching key found for provided key ID, as the key set is nil", joseerror.ErrKeystoreError)
+	}
 	var keys []map[string]any
 	for _, key := range j.Keys {
 		if keyKid, ok := key["kid"]; ok {
@@ -341,7 +344,17 @@ func (j *Jwks) RetrieveByKeyID(kid string) ([]map[string]any, error) {
 	return keys, nil
 }
 
+// Add appends jwk to the set. A nil set, or a jwk with no string "kty", which
+// RFC 7517 section 4.1 requires of every JWK, is refused with ErrKeystoreError.
+// With Opts.EnforceUniqueKIDs, a jwk whose "kid" is not a string, or names a
+// kid the set already holds, is refused with ErrKeystoreError too.
 func (j *Jwks) Add(jwk map[string]any) error {
+	if j == nil {
+		return fmt.Errorf("%wa jwk cannot be added to a nil key set", joseerror.ErrKeystoreError)
+	}
+	if _, ok := jwk["kty"].(string); !ok {
+		return fmt.Errorf("%wa jwk must have a string \"kty\" member (RFC 7517 section 4.1)", joseerror.ErrKeystoreError)
+	}
 	if kid, ok := jwk["kid"]; ok && j.Opts.EnforceUniqueKIDs {
 		if sKid, ok := kid.(string); !ok {
 			return fmt.Errorf("%wmalformed key ID found for JWK", joseerror.ErrKeystoreError)

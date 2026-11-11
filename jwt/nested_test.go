@@ -573,3 +573,28 @@ func TestValidate_AcceptedTypesJudgesTheTypOfEveryShapeOfJWT(t *testing.T) {
 		})
 	}
 }
+
+type ctyRewriter struct {
+	model.Encrypter
+	rewrite func(map[string]any)
+}
+
+func (c ctyRewriter) WrapKey(random io.Reader, enc jwa.Encryption, head map[string]any) ([]byte, []byte, error) {
+	cek, key, err := c.Encrypter.WrapKey(random, enc, head)
+	c.rewrite(head)
+	return cek, key, err
+}
+
+func TestEncrypt_RefusesAnEncrypterThatUndoesTheCtyOfANestedJWT(t *testing.T) {
+	r := recipientFor(t, jwa.A128KW)
+	signed, _ := signedJWT(t, nil)
+	for name, rewrite := range map[string]func(map[string]any){
+		"removes it":           func(h map[string]any) { delete(h, "cty") },
+		"names another type":   func(h map[string]any) { h["cty"] = "json" },
+		"changes it to a list": func(h map[string]any) { h["cty"] = []any{"JWT"} },
+	} {
+		if token, err := Encrypt(ctyRewriter{Encrypter: r.encrypter, rewrite: rewrite}, jwa.A128GCM, signed, nil); !errors.Is(err, joseerror.ErrEncryptionError) || token != "" {
+			t.Errorf("[RFC 7519 5.2] an encrypter that %s leaves a Nested JWT that does not say so, so want ErrEncryptionError and no token, got %v", name, err)
+		}
+	}
+}

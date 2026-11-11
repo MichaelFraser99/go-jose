@@ -38,7 +38,9 @@ const defaultMaxKeysTried = 100
 // alg requires, else the ErrMalformedClaim, ErrMissingClaim,
 // ErrMissingCriticalClaim or ErrUnsupportedAlgorithm naming the fault. A JWE
 // Encrypted Key of a length Decrypt refuses for alg, such as a non-empty one
-// for dir or ECDH-ES, is ErrEncryptionError. The AAD is the base64url-encoded
+// for dir or ECDH-ES, is ErrEncryptionError, as is an encrypter that rewrites
+// or removes a parameter of head, or "alg" or "enc", from the header it is
+// given. The AAD is the base64url-encoded
 // header (section 5.1 step 14), and the Initialization Vector is random.
 func Encrypt(encrypter model.Encrypter, enc jwa.Encryption, plaintext []byte, head map[string]any) (string, error) {
 	return encrypt(rand.Reader, encrypter, enc, plaintext, head)
@@ -71,12 +73,22 @@ func encrypt(random io.Reader, encrypter model.Encrypter, enc jwa.Encryption, pl
 	h["alg"] = alg.String()
 	h["enc"] = enc.String()
 
+	given := map[string][]byte{}
+	for name, value := range h {
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return "", fmt.Errorf("%wthe %s header cannot be encoded as JSON: %s", joseerror.ErrMalformedClaim, jsonutils.QuoteBounded(name), err.Error())
+		}
+		given[name] = encoded
+	}
 	cek, encryptedKey, err := encrypter.WrapKey(random, enc, h)
 	if err != nil {
 		return "", err
 	}
-	if h["alg"] != alg.String() || h["enc"] != enc.String() {
-		return "", fmt.Errorf("%wthe encrypter rewrote the 'alg' or 'enc' header", joseerror.ErrEncryptionError)
+	for name, encoded := range given {
+		if rewritten, err := json.Marshal(h[name]); err != nil || !bytes.Equal(rewritten, encoded) {
+			return "", fmt.Errorf("%wthe encrypter rewrote or removed the %s header", joseerror.ErrEncryptionError, jsonutils.QuoteBounded(name))
+		}
 	}
 	if _, found := h["zip"]; found {
 		return "", fmt.Errorf("%wthe encrypter added a 'zip' header to plaintext that was not compressed", joseerror.ErrEncryptionError)
@@ -365,7 +377,8 @@ func CheckOptions(opts *model.JWEOptions) error {
 }
 
 func inflate(compressed []byte, limit int) ([]byte, error) {
-	reader := flate.NewReader(bytes.NewReader(compressed))
+	source := bytes.NewReader(compressed)
+	reader := flate.NewReader(source)
 	defer func() { _ = reader.Close() }()
 	read := int64(limit)
 	if read < math.MaxInt64 {
@@ -377,6 +390,9 @@ func inflate(compressed []byte, limit int) ([]byte, error) {
 	}
 	if len(inflated) > limit {
 		return nil, fmt.Errorf("%wthe plaintext inflates to more than the %d octets MaxDecompressedSize allows", joseerror.ErrOutOfBounds, limit)
+	}
+	if source.Len() > 0 {
+		return nil, fmt.Errorf("%wthe 'zip' header names DEF, and %d octets follow the final block of the DEFLATE stream (RFC 1951 section 3.2.3)", joseerror.ErrMalformedToken, source.Len())
 	}
 	return slices.Clip(inflated), nil
 }

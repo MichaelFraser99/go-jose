@@ -305,7 +305,7 @@ type headerShape struct {
 // rules ValidateHeader applies to one it receives.
 //
 // "jku" and "x5u" must be HTTPS URLs (sections 4.1.2 and 4.1.5), "jwk" an object
-// (section 4.1.3), "kid", "typ" and "cty" strings (sections 4.1.4, 4.1.9 and
+// with no private key member (section 4.1.3 names a public key), "kid", "typ" and "cty" strings (sections 4.1.4, 4.1.9 and
 // 4.1.10), "x5c" a non-empty array of base64 DER certificates (section 4.1.6),
 // and "x5t" and "x5t#S256" base64url (sections 4.1.7 and 4.1.8). "crit" must be
 // a non-empty array of distinct names, each present in the header and none
@@ -347,6 +347,16 @@ func readHeaderShape(header map[string]any, mode mode) (headerShape, error) {
 	params.jwk, err = jsonutils.RetrieveClaim[map[string]any](header, "jwk")
 	if err != nil && !errors.Is(err, joseerror.ErrMissingClaim) {
 		return headerShape{}, err
+	}
+	if params.jwk != nil {
+		if err := refusePrivateMembers("jwk", *params.jwk); err != nil {
+			return headerShape{}, err
+		}
+	}
+	if epk, ok := header["epk"].(map[string]any); ok && mode == jweMode {
+		if err := refusePrivateMembers("epk", epk); err != nil {
+			return headerShape{}, err
+		}
 	}
 
 	params.kid, err = jsonutils.RetrieveClaim[string](header, "kid")
@@ -402,6 +412,19 @@ func readHeaderShape(header map[string]any, mode mode) (headerShape, error) {
 	}
 
 	return params, nil
+}
+
+var privateKeyMembers = []string{"d", "p", "q", "dp", "dq", "qi", "oth", "k", "priv"}
+
+var publicKeyClause = map[string]string{"jwk": "RFC 7515 section 4.1.3", "epk": "RFC 7518 section 4.6.1.1"}
+
+func refusePrivateMembers(name string, key map[string]any) error {
+	for _, member := range privateKeyMembers {
+		if _, present := key[member]; present {
+			return fmt.Errorf("%wthe '%s' header is a public key (%s), and holds the private member %q", joseerror.ErrMalformedClaim, name, publicKeyClause[name], member)
+		}
+	}
+	return nil
 }
 
 // ValidateExpectedType refuses a header whose "typ" is not one of accepted, as

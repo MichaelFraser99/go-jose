@@ -508,6 +508,8 @@ func TestDecrypt_ChecksTheHeader(t *testing.T) {
 		{name: "crit naming p2c, which is present", malformed: true, head: map[string]any{"alg": "dir", "enc": "A128GCM", "p2c": 1000, "crit": []any{"p2c"}}, opts: &model.JWEOptions{UnderstoodCriticalHeaders: []string{"p2c"}}, want: []error{joseerror.ErrMalformedClaim}},
 		{name: "a kid that is not a string with an alg outside the allow-list", malformed: true, head: map[string]any{"alg": "dir", "enc": "A128GCM", "kid": 7}, opts: &model.JWEOptions{AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.A128KW}}, want: []error{joseerror.ErrMalformedClaim}},
 		{name: "a kid that is not a string", malformed: true, head: map[string]any{"alg": "dir", "enc": "A128GCM", "kid": 7}, want: []error{joseerror.ErrMalformedClaim}},
+		{name: "a jwk holding a private member", malformed: true, head: map[string]any{"alg": "dir", "enc": "A128GCM", "jwk": map[string]any{"kty": "oct", "k": "AQAB"}}, want: []error{joseerror.ErrMalformedClaim}},
+		{name: "an epk holding a private member under an alg that does not read it", malformed: true, head: map[string]any{"alg": "dir", "enc": "A128GCM", "epk": map[string]any{"kty": "OKP", "crv": "X25519", "x": "AQAB", "d": "AQAB"}}, want: []error{joseerror.ErrMalformedClaim}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -677,12 +679,17 @@ func TestEncrypt_RefusesWhatItCannotEmit(t *testing.T) {
 		{name: "a head whose crit names an absent parameter", encrypter: kw, enc: jwa.A128GCM, head: map[string]any{"crit": []any{"exp"}}, want: joseerror.ErrMissingCriticalClaim},
 		{name: "a head whose crit names enc", encrypter: kw, enc: jwa.A128GCM, head: map[string]any{"crit": []any{"enc"}}, want: joseerror.ErrMalformedClaim},
 		{name: "a head with a jku that is not https", encrypter: kw, enc: jwa.A128GCM, head: map[string]any{"jku": "http://example.com"}, want: joseerror.ErrMalformedClaim},
+		{name: "a head with a jwk holding a private member", encrypter: kw, enc: jwa.A128GCM, head: map[string]any{"jwk": map[string]any{"kty": "EC", "crv": "P-256", "x": "AQAB", "y": "AQAB", "d": "AQAB"}}, want: joseerror.ErrMalformedClaim},
+		{name: "a head with an epk holding a private member under an alg that does not read it", encrypter: kw, enc: jwa.A128GCM, head: map[string]any{"epk": map[string]any{"kty": "OKP", "crv": "X25519", "x": "AQAB", "d": "AQAB"}}, want: joseerror.ErrMalformedClaim},
 		{name: "a head holding a value JSON cannot encode", encrypter: kw, enc: jwa.A128GCM, head: map[string]any{"x": make(chan int)}, want: joseerror.ErrMalformedClaim},
 		{name: "a head holding NaN", encrypter: kw, enc: jwa.A128GCM, head: map[string]any{"x": math.NaN()}, want: joseerror.ErrMalformedClaim},
 		{name: "a dir key of the wrong length for enc", encrypter: dir, enc: jwa.A256GCM, want: joseerror.ErrInvalidPublicKey},
 		{name: "an encrypter that rewrites alg", encrypter: headerRewriter{Encrypter: kw, rewrite: func(h map[string]any) { h["alg"] = "none" }}, enc: jwa.A128GCM, want: joseerror.ErrEncryptionError},
 		{name: "an encrypter that rewrites enc", encrypter: headerRewriter{Encrypter: kw, rewrite: func(h map[string]any) { h["enc"] = "A256GCM" }}, enc: jwa.A128GCM, want: joseerror.ErrEncryptionError},
 		{name: "an encrypter that deletes alg", encrypter: headerRewriter{Encrypter: kw, rewrite: func(h map[string]any) { delete(h, "alg") }}, enc: jwa.A128GCM, want: joseerror.ErrEncryptionError},
+		{name: "an encrypter that rewrites a parameter of head", encrypter: headerRewriter{Encrypter: kw, rewrite: func(h map[string]any) { h["kid"] = "attacker" }}, enc: jwa.A128GCM, head: map[string]any{"kid": "recipient"}, want: joseerror.ErrEncryptionError},
+		{name: "an encrypter that removes a parameter of head", encrypter: headerRewriter{Encrypter: kw, rewrite: func(h map[string]any) { delete(h, "cty") }}, enc: jwa.A128GCM, head: map[string]any{"cty": "JWT"}, want: joseerror.ErrEncryptionError},
+		{name: "an encrypter that rewrites a member inside a parameter of head", encrypter: headerRewriter{Encrypter: kw, rewrite: func(h map[string]any) { h["x"].(map[string]any)["y"] = 2 }}, enc: jwa.A128GCM, head: map[string]any{"x": map[string]any{"y": 1}}, want: joseerror.ErrEncryptionError},
 		{name: "an encrypter returning a short CEK", encrypter: headerRewriter{Encrypter: kw, cek: make([]byte, 15)}, enc: jwa.A128GCM, want: joseerror.ErrEncryptionError},
 		{name: "a dir encrypter returning an encrypted key", encrypter: headerRewriter{Encrypter: dir, key: []byte{1}}, enc: jwa.A128GCM, want: joseerror.ErrEncryptionError},
 		{name: "an ECDH-ES encrypter returning an encrypted key", encrypter: headerRewriter{Encrypter: agreement, key: make([]byte, 24)}, enc: jwa.A128GCM, want: joseerror.ErrEncryptionError},
@@ -1110,5 +1117,18 @@ func TestDecryptAndParseHeader_RefuseAnAcceptedTypeNoTypCanMatch(t *testing.T) {
 		if _, err := ParseHeader("not.a.token.at.all", opts); !errors.Is(err, joseerror.ErrInvalidOptions) {
 			t.Errorf("[RFC 6838 4.2] AcceptedTypes %q names no media type, so ParseHeader must refuse with ErrInvalidOptions whatever the token, got %v", entry, err)
 		}
+	}
+}
+
+func TestEncrypt_AcceptsAnEncrypterThatWritesAGivenParameterAgainUnchanged(t *testing.T) {
+	pair := pairFor(t, jwa.A128KW, jwa.A128GCM)
+	again := headerRewriter{Encrypter: pair.encrypter, rewrite: func(h map[string]any) { h["n"] = 1.0 }}
+	token, err := Encrypt(again, jwa.A128GCM, []byte("p"), map[string]any{"n": 1})
+	if err != nil {
+		t.Fatalf("[RFC 7516 5.1 step 13] the header emitted is the same JSON, so it must be accepted, got %v", err)
+	}
+	head, _, _, err := Decrypt(context.Background(), token, []model.Decrypter{pair.decrypter}, nil)
+	if err != nil || head["n"] != 1.0 {
+		t.Errorf("want the header to carry n of 1, got %v and %v", head, err)
 	}
 }
