@@ -154,12 +154,20 @@ func New(signer crypto.Signer, head, body map[string]any, opts Opts) (*string, e
 // When opts.ExpectedAudience is set, aud must name one of its values (section 4.1.3).
 // Options whose ExpectedAudience holds an empty string are refused with
 // ErrInvalidOptions, whatever the token.
+//
+// With decrypters and a nil outOfBoundsPublicKey, an encrypt-only JWT can
+// still pass, so the options are not wrong. A JWS, signed alone or nested, is
+// then refused as the token's fault: ErrInvalidSignature, matching
+// ErrNoKeyIdentifierMatch, unless a key the token names verifies it.
 func Validate(ctx context.Context, token string, outOfBoundsPublicKey model.Retriever, decrypters []model.Decrypter, opts *model.JoseOptions, jweOpts *model.JWEOptions) (*Token, error) {
 	if err := validateOptions(opts); err != nil {
 		return nil, err
 	}
 	if err := jwe.CheckOptions(jweOpts); err != nil {
 		return nil, err
+	}
+	if outOfBoundsPublicKey == nil && len(decrypters) > 0 {
+		outOfBoundsPublicKey = noSigningKeys
 	}
 	switch segments := strings.Count(token, ".") + 1; segments {
 	case 3:
@@ -227,6 +235,10 @@ func validateEncrypted(ctx context.Context, token string, outOfBoundsPublicKey m
 	}
 	result.Claims = body
 	return result, nil
+}
+
+func noSigningKeys() ([]crypto.PublicKey, error) {
+	return nil, fmt.Errorf("%wno retriever was given, so only a key the token names, or an encrypt-only JWT, can pass", joseerror.ErrNoKeyIdentifierMatch)
 }
 
 func checkUnsigned(head map[string]any, opts *model.JoseOptions, jweOpts *model.JWEOptions) error {
