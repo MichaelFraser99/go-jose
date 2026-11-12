@@ -277,6 +277,8 @@ A key from a `jwk` header, or a member of a `jku` set, verifies the token only w
 
 A `jku` set is never used whole because nothing in it matched. When no member qualifies, the set contributes no key and the `jku` retriever's error matches `ErrNoKeyIdentifierMatch`. `VerifyCompactSerialization` then tries the next key source. If no key verifies, it reports `ErrInvalidSignature`, and the error also matches `ErrNoKeyIdentifierMatch`, unless another source failed.
 
+A `jwk` header names a public key (RFC 7515 section 4.1.3). A `jwk` header that holds a private key member, `d`, `p`, `q`, `dp`, `dq`, `qi`, `oth`, `k` or `priv`, makes the header malformed. The token is refused with `ErrMalformedToken` and `ErrMalformedClaim`, whether or not `UseTokenProvidedKeys` is set. The same applies to a JWE's `jwk` and `epk`. The member names are case-sensitive, so `D` is not a private member.
+
 When a key source fails, verification continues with the next source. A source fails when a fetch fails, a body is too large, a body does not decode, or your retriever returns an error. A key the token carries in its header, a `jwk` or an `x5c`, is different. Its bytes are in the signed header, so a fault in it is the same every time. So when verification reaches such a key and it cannot be used, the token is refused at once, and no later source is tried. A carried key that is only not selected, such as a `jwk` whose `kid` differs from the header's or an `x5c` chain that reaches none of your roots, gives way like any other source. Verification stops at the first key that verifies, so a key from your own retriever, which is tried first, can verify the token before a carried key is read. If no key verifies the signature, the error wraps each failure. It matches `ErrApplicationError` for a failed fetch, and `context.DeadlineExceeded` or `context.Canceled` when applicable. It does not match `ErrInvalidSignature`. A `kid`, `alg`, `use` or `key_ops` of the wrong JSON type disqualifies a `jku` member, and refuses an inline `jwk` with `ErrMalformedClaim`, whatever the header holds.
 
 No RFC makes `use` or `key_ops` a requirement: section 4.3 leaves it to each application to say which, if either, it honours. This library honours both by default. Set `JoseOptions.IgnoreKeyUse` to skip that check. It never relaxes the `kid` and `alg` rules.
@@ -433,7 +435,7 @@ A jwk with no `kty` is refused with `ErrInvalidPublicKey` or `ErrInvalidPrivateK
 
 `model.Jwks` holds a JWK Set. Decoding JSON into it follows RFC 7517 section 5: the document must be an object with a `keys` member holding an array of JWKs. Anything else is refused with `ErrKeystoreError`, including a missing `keys`, `"keys": null` and a document that is itself `null`. A field that may hold no set should be a `*model.Jwks`, which `null` leaves nil. The member is found by its exact name, `keys`, as RFC 7515 section 5.3 compares names; `KEYS`, `Keys` and other spellings are ignored like any unknown member. An element of the `keys` array that is `null` or not a JSON object is refused. A document that is not UTF-8, or that holds an unpaired UTF-16 surrogate escape, is refused with `ErrKeystoreError`. RFC 8259 sections 8.1 and 8.2 give these rules.
 
-`Opts.EnforceUniqueKIDs` applies to `Add` only. Decoding keeps every key, including keys with the same `kid`.
+`Add` refuses a jwk whose `kty` is absent, empty or not a string, with `ErrKeystoreError`, as RFC 7517 section 4.1 requires a `kty`. Decoding does not apply this rule, because RFC 7517 section 5 says that a member a reader cannot use is skipped, not that the set is refused. `Opts.EnforceUniqueKIDs` applies to `Add` only. With it, `Add` refuses a `kid` that the set already holds, or one that is not a string, and accepts any number of jwks with no `kid`. Decoding keeps every key, including keys with the same `kid`. A nil `*model.Jwks` holds no key: `RetrieveByKeyID` returns `ErrKeystoreError` and `Add` refuses with it, so neither panics.
 
 `Jwks.RetrieveByKeyID` returns every key that carries the given `kid`, in set order, because RFC 7517 section 4.5 does not make a `kid` unique. It returns an error only when no key carries it.
 
@@ -474,7 +476,7 @@ Any other `crypto.Signer`, such as a KMS signer, is called as Go's `crypto.Signe
 - `New` refuses an `alg` outside `jwa`, such as `jwa.Algorithm(999)`, with `ErrUnsupportedAlgorithm`. RFC 7515 section 4.1.1 says `alg` must be present and understood.
 - `New` checks the header it will sign with the same rules `Validate` applies, and returns the same errors. So it does not sign a header that its own `Validate` refuses for its shape:
   - `jku` and `x5u` must be HTTPS URLs. RFC 7515 sections 4.1.2 and 4.1.5 require TLS.
-  - `jwk` must be a JSON object (section 4.1.3).
+  - `jwk` must be a JSON object, and must not hold a private key member: `d`, `p`, `q`, `dp`, `dq`, `qi`, `oth`, `k` or `priv` (section 4.1.3 names a public key).
   - `kid`, `typ` and `cty` must be strings (sections 4.1.4, 4.1.9 and 4.1.10).
   - `x5c` must be a non-empty array of base64 DER certificates (section 4.1.6).
   - `x5t` and `x5t#S256` must be base64url (sections 4.1.7 and 4.1.8).
@@ -616,7 +618,7 @@ If you give `Decrypt` more passwords, or raise `Count` above 600,000, the recipi
 `Decrypt` refuses a token with a `zip` header by default, with `ErrUnsupportedAlgorithm`. To decrypt such a token, set `JWEOptions.MaxDecompressedSize` to the largest plaintext that you accept, in octets. draft-ietf-oauth-rfc8725bis section 3.15 recommends a limit, and gives 250 KB as an example. `Decrypt` then inflates a `DEF` plaintext (RFC 1951) after the token is authenticated:
 
 - A plaintext that inflates to more than `MaxDecompressedSize` octets is refused with `ErrOutOfBounds`. `Decrypt` stops when it reaches the limit, so a small token cannot make it allocate more.
-- A plaintext that is not a DEFLATE stream is refused with `ErrMalformedToken`.
+- A plaintext that is not a DEFLATE stream is refused with `ErrMalformedToken`, and so is one that continues after the final block of its stream.
 - A `zip` other than `DEF` is refused with `ErrUnsupportedAlgorithm`, and a `zip` that is not a string with `ErrMalformedToken`.
 
 ### RSA1_5
@@ -666,7 +668,7 @@ decrypter, known := decryptersByKid[kid]
 
 CAUTION: The header is not authenticated until `Decrypt` succeeds. Anyone can write any `kid`. Use it only to select a decrypter, and identify the sender with `used`.
 
-A header can name a key with `jku`, `jwk`, `x5u` or `x5c`. In a JWE, that key is the public key of the recipient, and a public key cannot decrypt. Thus `Decrypt` does not fetch or read these keys. Only the decrypters that you give are used.
+A header can name a key with `jku`, `jwk`, `x5u` or `x5c`. In a JWE, that key is the public key of the recipient, and a public key cannot decrypt. Thus `Decrypt` does not fetch these keys or use them. It checks only their form: for example, a `jwk` that holds a private key member is refused. Only the decrypters that you give are used.
 
 `Decrypt` takes a `*model.JWEOptions`. Its fields:
 

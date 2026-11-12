@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -106,6 +107,8 @@ func TestDecrypt_RefusesAZipItCannotOrMayNotInflate(t *testing.T) {
 		{name: "a zip of null", token: zipToken(t, key, nil, compressed), opts: on, want: joseerror.ErrMalformedClaim, malformed: true, clause: "RFC 7516 4.1.3"},
 		{name: "a plaintext that is not DEFLATE", token: zipToken(t, key, "DEF", []byte{0xff, 0xff, 0xff, 0xff}), opts: on, want: joseerror.ErrMalformedToken, malformed: true, clause: "RFC 1951"},
 		{name: "an empty plaintext", token: zipToken(t, key, "DEF", nil), opts: on, want: joseerror.ErrMalformedToken, malformed: true, clause: "RFC 1951"},
+		{name: "octets after the final block", token: zipToken(t, key, "DEF", append(slices.Clone(compressed), 0x00)), opts: on, want: joseerror.ErrMalformedToken, malformed: true, clause: "RFC 1951 3.2.3"},
+		{name: "a second DEFLATE stream after the final block", token: zipToken(t, key, "DEF", append(slices.Clone(compressed), deflate(t, []byte("smuggled"))...)), opts: on, want: joseerror.ErrMalformedToken, malformed: true, clause: "RFC 1951 3.2.3"},
 		{name: "a truncated DEFLATE stream", token: zipToken(t, key, "DEF", compressed[:len(compressed)/2]), opts: on, want: joseerror.ErrMalformedToken, malformed: true, clause: "RFC 1951"},
 		{name: "a stream that fails the tag", token: zipToken(t, randomBytes(t, 16), "DEF", []byte{0xff}), opts: on, want: joseerror.ErrDecryptionFailed, clause: "RFC 7516 11.5"},
 	} {

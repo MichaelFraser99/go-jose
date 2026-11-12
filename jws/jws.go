@@ -57,7 +57,7 @@ func CheckOptions(opts *model.JoseOptions) error {
 		if !hasValidator(alg) {
 			name := alg.String()
 			if alg == jwa.Unknown {
-				name = "jwa.Unknown, which a name GetAlgorithm does not recognise gives,"
+				name = "jwa.Unknown (what GetAlgorithm returns for a name it does not recognise)"
 			} else if name == "" {
 				name = fmt.Sprintf("jwa.Algorithm(%d)", int(alg))
 			}
