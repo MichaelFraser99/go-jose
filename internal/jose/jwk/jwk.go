@@ -246,17 +246,14 @@ var signatureKeyTypes = map[jwa.Algorithm]keyType{
 	jwa.MLDSA87: {kty: "AKP"},
 }
 
-var readableCurves = map[string][]string{
-	"EC":  {"P-256", "P-384", "P-521"},
-	"OKP": {"Ed25519", "X25519"},
-}
-
 // KeyTypeServes reports whether a jwk's "kty", and its "crv" where the key type
 // has one, can serve the JWS alg. RFC 7518 sections 3.2 to 3.5 give oct to HS*,
 // RSA to RS* and PS*, and EC to ES256, ES384 and ES512 on P-256, P-384 and P-521.
-// RFC 8037 section 3.1 and RFC 9864 give OKP Ed25519 to EdDSA and Ed25519, and
-// RFC 9964 gives AKP to ML-DSA. A "kty" or "crv" that is absent, not a string, or
-// not one this library reads is not judged here, so reading the key reports it.
+// RFC 9864 gives OKP Ed25519 to Ed25519, and this library implements EdDSA (RFC
+// 8037 section 3.1) with Ed25519 only. RFC 9964 gives AKP to ML-DSA. Any other
+// string "crv" cannot serve the alg. A "kty" that is absent, not a string or not
+// one this library reads, and a "crv" that is absent or not a string, are not
+// judged here, so reading the key reports them.
 func KeyTypeServes(jwk map[string]any, alg string) bool {
 	want, known := signatureKeyTypes[jwa.GetAlgorithm(alg)]
 	if !known {
@@ -270,7 +267,7 @@ func KeyTypeServes(jwk map[string]any, alg string) bool {
 		return false
 	}
 	crv, ok := jwk["crv"].(string)
-	if !ok || want.crv == "" || !slices.Contains(readableCurves[kty], crv) {
+	if !ok || want.crv == "" {
 		return true
 	}
 	return crv == want.crv

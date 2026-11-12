@@ -75,8 +75,10 @@ type JoseOptions struct {
 	// across every key source. RFC 7517 section 4.5 does not require a kid to be
 	// unique, so a key set a peer publishes may hold thousands of keys under one
 	// kid, each costing a signature verification. A token that would need more is
-	// refused with ErrTooManyKeys. A key that cannot be used with the token's alg
-	// costs no verification and does not count. Zero or less means 100.
+	// refused with ErrTooManyKeys. A KeySet, jku or jwk key that is not selected,
+	// because its kid, alg, use, key_ops or key type does not match the token,
+	// costs no verification and does not count, nor does any key that cannot be
+	// used with the token's alg. Zero or less means 100.
 	MaxKeysTried int
 
 	// AllowedSigningAlgorithms lists the 'alg' values a JWS may name. With none

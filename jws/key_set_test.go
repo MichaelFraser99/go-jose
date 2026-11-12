@@ -506,3 +506,68 @@ func TestVerify_AMemberWhoseKeyTypeCannotServeTheAlgIsNotSelected(t *testing.T) 
 		})
 	}
 }
+
+func TestVerify_ACurveTheAlgDoesNotNameIsNotSelected(t *testing.T) {
+	coordinate := func(size int) string {
+		octets := make([]byte, size)
+		if _, err := rand.Read(octets); err != nil {
+			t.Fatal(err)
+		}
+		return base64.RawURLEncoding.EncodeToString(octets)
+	}
+	edSigner, err := jws.GetSignerFromPrivateKey(jwa.Ed25519, newEd25519Key(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ecSigner := es256Signer(t, keySetSigner(t))
+
+	tests := map[string]struct {
+		signer model.Signer
+		member map[string]any
+		clause string
+	}{
+		"an EC secp256k1 member for ES256": {signer: ecSigner, member: map[string]any{"kty": "EC", "crv": "secp256k1", "x": coordinate(32), "y": coordinate(32)}, clause: "RFC 7518 3.4"},
+		"an EC P-256K member for ES256":    {signer: ecSigner, member: map[string]any{"kty": "EC", "crv": "P-256K", "x": coordinate(32), "y": coordinate(32)}, clause: "RFC 7518 3.4"},
+		"an OKP X448 member for Ed25519":   {signer: edSigner, member: map[string]any{"kty": "OKP", "crv": "X448", "x": coordinate(56)}, clause: "RFC 9864 2.2"},
+		"an OKP Ed448 member for Ed25519":  {signer: edSigner, member: map[string]any{"kty": "OKP", "crv": "Ed448", "x": coordinate(57)}, clause: "RFC 9864 2.2"},
+	}
+	for name, tc := range tests {
+		paths := map[string]func(t *testing.T) error{
+			"KeySet": func(t *testing.T) error {
+				token := keySetToken(t, tc.signer, map[string]any{})
+				_, _, err := jws.Verify(context.Background(), token, nil, &model.JoseOptions{KeySet: &model.Jwks{Keys: []map[string]any{tc.member}}})
+				return err
+			},
+			"jku": func(t *testing.T) error {
+				server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					_ = json.NewEncoder(w).Encode(model.Jwks{Keys: []map[string]any{tc.member}})
+				}))
+				t.Cleanup(server.Close)
+				token := keySetToken(t, tc.signer, map[string]any{"jku": server.URL})
+				_, _, err := jws.Verify(context.Background(), token, nil, &model.JoseOptions{UseTokenProvidedKeys: true, HttpClient: server.Client()})
+				return err
+			},
+			"an inline jwk": func(t *testing.T) error {
+				token := keySetToken(t, tc.signer, map[string]any{"jwk": tc.member})
+				_, _, err := jws.Verify(context.Background(), token, nil, &model.JoseOptions{UseTokenProvidedKeys: true})
+				return err
+			},
+		}
+		for path, verify := range paths {
+			t.Run(name+" through "+path, func(t *testing.T) {
+				err := verify(t)
+				if !errors.Is(err, joseerror.ErrInvalidSignature) || !errors.Is(err, joseerror.ErrNoKeyIdentifierMatch) || errors.Is(err, joseerror.ErrApplicationError) {
+					t.Errorf("[%s] a key on a curve the alg does not name cannot serve it, so it is not selected, got %v", tc.clause, err)
+				}
+			})
+		}
+	}
+}
+
+func TestVerify_AnInlineJwkOfAnUnknownKeyTypeIsStillRefusedByTheReader(t *testing.T) {
+	token := keySetToken(t, es256Signer(t, keySetSigner(t)), map[string]any{"jwk": map[string]any{"kty": "XYZ"}})
+	_, _, err := jws.Verify(context.Background(), token, nil, &model.JoseOptions{UseTokenProvidedKeys: true})
+	if !errors.Is(err, joseerror.ErrApplicationError) || !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || errors.Is(err, joseerror.ErrNoKeyIdentifierMatch) {
+		t.Errorf("[RFC 7517 4.1] a kty this library does not implement is reported as unsupported, not as a mismatch, got %v", err)
+	}
+}

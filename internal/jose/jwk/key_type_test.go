@@ -129,6 +129,13 @@ func TestCheckMember_AKeyTypeThatCannotServeTheAlgIsNotAMatch(t *testing.T) {
 		"an OKP X25519 jwk for Ed25519": {jwk: map[string]any{"kty": "OKP", "crv": "X25519"}, alg: "Ed25519", clause: "RFC 9864 2.2"},
 		"an AKP jwk for PS256":          {jwk: map[string]any{"kty": "AKP"}, alg: "PS256", clause: "RFC 7518 3.5"},
 		"an OKP Ed25519 jwk for ES256":  {jwk: map[string]any{"kty": "OKP", "crv": "Ed25519"}, alg: "ES256", clause: "RFC 7518 3.4"},
+		"an EC secp256k1 jwk for ES256": {jwk: map[string]any{"kty": "EC", "crv": "secp256k1"}, alg: "ES256", clause: "RFC 7518 3.4"},
+		"an EC P-256K jwk for ES256":    {jwk: map[string]any{"kty": "EC", "crv": "P-256K"}, alg: "ES256", clause: "RFC 7518 3.4"},
+		"an EC P-192 jwk for ES256":     {jwk: map[string]any{"kty": "EC", "crv": "P-192"}, alg: "ES256", clause: "RFC 7518 3.4"},
+		"an EC p-256 jwk for ES256":     {jwk: map[string]any{"kty": "EC", "crv": "p-256"}, alg: "ES256", clause: "RFC 7518 3.4"},
+		"an OKP X448 jwk for Ed25519":   {jwk: map[string]any{"kty": "OKP", "crv": "X448"}, alg: "Ed25519", clause: "RFC 9864 2.2"},
+		"an OKP Ed448 jwk for Ed25519":  {jwk: map[string]any{"kty": "OKP", "crv": "Ed448"}, alg: "Ed25519", clause: "RFC 9864 2.2"},
+		"an OKP Ed448 jwk for EdDSA":    {jwk: map[string]any{"kty": "OKP", "crv": "Ed448"}, alg: "EdDSA", clause: "RFC 8037 3.1"},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -139,7 +146,7 @@ func TestCheckMember_AKeyTypeThatCannotServeTheAlgIsNotAMatch(t *testing.T) {
 	}
 }
 
-func TestCheckMember_AKeyTypeOrCurveThisLibraryDoesNotReadIsLeftToTheReader(t *testing.T) {
+func TestCheckMember_AnUnreadableKeyTypeOrAMissingCurveIsLeftToTheReader(t *testing.T) {
 	tests := map[string]struct {
 		jwk map[string]any
 		alg string
@@ -147,10 +154,9 @@ func TestCheckMember_AKeyTypeOrCurveThisLibraryDoesNotReadIsLeftToTheReader(t *t
 		"no kty":            {jwk: map[string]any{}, alg: "ES256"},
 		"a kty of a number": {jwk: map[string]any{"kty": 7}, alg: "ES256"},
 		"an unknown kty":    {jwk: map[string]any{"kty": "XYZ"}, alg: "ES256"},
-		"an unknown EC crv": {jwk: map[string]any{"kty": "EC", "crv": "P-192"}, alg: "ES256"},
 		"an EC crv number":  {jwk: map[string]any{"kty": "EC", "crv": 1}, alg: "ES256"},
 		"no EC crv":         {jwk: map[string]any{"kty": "EC"}, alg: "ES256"},
-		"OKP Ed448":         {jwk: map[string]any{"kty": "OKP", "crv": "Ed448"}, alg: "EdDSA"},
+		"an OKP crv null":   {jwk: map[string]any{"kty": "OKP", "crv": nil}, alg: "Ed25519"},
 		"an unknown alg":    {jwk: map[string]any{"kty": "RSA"}, alg: "XYZ"},
 	}
 	for name, tc := range tests {

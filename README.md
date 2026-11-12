@@ -252,8 +252,12 @@ func refresh(document []byte) error {
     return nil
 }
 
-head, payload, err := jws.Verify(ctx, token, nil, &model.JoseOptions{KeySet: current.Load()})
+func verify(ctx context.Context, token string) (map[string]any, []byte, error) {
+    return jws.Verify(ctx, token, nil, &model.JoseOptions{KeySet: current.Load()})
+}
 ```
+
+Store a set before you serve requests. Until the first `Store`, `current.Load()` returns nil, so `KeySet` is unset and every call fails with `ErrInvalidOptions`.
 
 ## Keys a token carries
 
@@ -310,7 +314,7 @@ A key from a `jwk` header, a member of a `jku` set, or a member of your `JoseOpt
 
 - Its `kid` is absent or equals the header's `kid`. RFC 7515 section 4.1.4 calls the header's `kid` a hint, and RFC 7517 section 4.5 makes a jwk's `kid` optional, so a key that names no `kid` stays a candidate.
 - Its `alg` is absent or equals the header's `alg`. RFC 8725 section 3.1 says "each key MUST be used with exactly one algorithm". `EdDSA` and `Ed25519` count as equal, because with an Ed25519 key they name the same algorithm. A key that names no `alg` stays a candidate, since RFC 7517 section 4.4 makes `alg` optional. Such a key verifies under any algorithm its key type allows, so pin `AllowedSigningAlgorithms` to bind it to one.
-- Its `kty`, and its `crv` where the key type has one, can serve the header's `alg`. RFC 7518 sections 3.2 to 3.5 give `oct` to `HS256` to `HS512`, `RSA` to the RS and PS families, and `EC` to `ES256`, `ES384` and `ES512` on P-256, P-384 and P-521. RFC 8037 section 3.1 and RFC 9864 give `OKP` with `crv` `Ed25519` to `EdDSA` and `Ed25519`, so an `X25519` key never verifies. RFC 9964 gives `AKP` to the ML-DSA algorithms, and its `alg` names the parameter set.
+- Its `kty`, and its `crv` where the key type has one, can serve the header's `alg`. RFC 7518 sections 3.2 to 3.5 give `oct` to `HS256` to `HS512`, `RSA` to the RS and PS families, and `EC` to `ES256`, `ES384` and `ES512` on P-256, P-384 and P-521. RFC 9864 gives `OKP` with `crv` `Ed25519` to `Ed25519`. This library implements `EdDSA` (RFC 8037 section 3.1) with `Ed25519` only, so it gives `EdDSA` the same key. RFC 9964 gives `AKP` to the ML-DSA algorithms, and its `alg` names the parameter set. Any other `crv` string is not selected, such as `secp256k1`, `X25519` or `Ed448`. A key with no `crv`, or a `crv` that is not a string, is left to the key reader, which refuses it.
 - Its `use` is absent or `"sig"`, and its `key_ops` is absent or includes `"verify"`. RFC 7517 sections 4.2 and 4.3 let a publisher mark a key as not for verifying signatures.
 
 A set is never used whole because nothing in it matched. When no member of a `jku` set or of `KeySet` qualifies, that set contributes no key, and the result matches `ErrNoKeyIdentifierMatch`. `VerifyCompactSerialization` then tries the next key source. If no key verifies, it reports `ErrInvalidSignature`, and the error also matches `ErrNoKeyIdentifierMatch`, unless another source failed.
@@ -784,7 +788,7 @@ Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 | `ErrMissingCriticalClaim` | A header named in `crit` is absent, or names an extension this library does not understand, or `b64` is `false` |
 | `ErrNoKeyIdentifierMatch` | No key could be selected. The `kid` matches nothing, your `KeySet` or a `jku` set holds no usable key that matches the header, a certificate chain does not reach a configured root, or an `x5t` thumbprint does not match the chain. It also covers a token that names no key, when you give no retriever and rely on the keys a token names |
 | `ErrKeystoreError` | A `model.Jwks` lookup or addition failed, or a document decoded into `model.Jwks` is not a JWK Set |
-| `ErrApplicationError` | Key material a header named could not be obtained, decoded or used. Covers a failed `jku` or `x5u` fetch, a local decode of what one returned (an empty `x5u` body is a failed decode), and an inline `jwk` of a key type or curve this library does not support. A fetch that ran out of time also matches `context.DeadlineExceeded`, and one cancelled through `ctx` matches `context.Canceled` |
+| `ErrApplicationError` | Key material a header named could not be obtained, decoded or used. Covers a failed `jku` or `x5u` fetch, a local decode of what one returned (an empty `x5u` body is a failed decode), and an inline `jwk` that this library cannot read, such as one whose `kty` it does not support or whose `crv` is missing. An inline `jwk` on a curve the `alg` does not name is not selected, so it gives `ErrNoKeyIdentifierMatch` instead. A fetch that ran out of time also matches `context.DeadlineExceeded`, and one cancelled through `ctx` matches `context.Canceled` |
 | `ErrMalformedToken` | The token is not a well formed JOSE object: it breaks RFC 7515 or RFC 7516. A well-formed token that your options refuse, or that names what this library does not implement, does not match it |
 | `ErrExpired` | The current time is not before the token's `exp`, allowing for `ClockSkewLeeway` |
 | `ErrNotYetValid` | The token's `nbf` or `iat` is after the current time, allowing for `ClockSkewLeeway` |
