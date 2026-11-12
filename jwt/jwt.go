@@ -162,14 +162,18 @@ func New(signer crypto.Signer, head, body map[string]any, opts Opts) (*string, e
 // order: types, then times, then RequiredClaims, ExpectedIssuer and
 // ExpectedAudience, and the first failure is returned.
 //
-// Validate first calls CheckOptions, so options that are wrong whatever the
-// token are refused with ErrInvalidOptions before the token is read.
+// Before it reads the token, Validate refuses a nil ctx with ErrInvalidOptions
+// and calls CheckOptions, so options that are wrong whatever the token are
+// refused with ErrInvalidOptions too.
 //
 // With decrypters and a nil outOfBoundsPublicKey, an encrypt-only JWT can
 // still pass, so the options are not wrong. A JWS, signed alone or nested, is
 // then refused as the token's fault: ErrInvalidSignature, matching
 // ErrNoKeyIdentifierMatch, unless a key the token names verifies it.
 func Validate(ctx context.Context, token string, outOfBoundsPublicKey model.Retriever, decrypters []model.Decrypter, opts *model.JoseOptions, jweOpts *model.JWEOptions) (*Token, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("%wthe context passed is nil", joseerror.ErrInvalidOptions)
+	}
 	if err := CheckOptions(opts, decrypters, jweOpts); err != nil {
 		return nil, err
 	}

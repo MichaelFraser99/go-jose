@@ -265,10 +265,10 @@ func TestValidate_RequiredClaims(t *testing.T) {
 func TestValidate_AMissingRequiredClaimIsNamedInTheError(t *testing.T) {
 	claimsTestFixClock(t, claimsTestNow)
 	err := claimsTestValidate(t, `{"iss":"https://issuer.example","exp":1800000000}`, &model.JoseOptions{RequiredClaims: []string{"iss", "sub", "exp"}})
-	if !errors.Is(err, joseerror.ErrMissingClaim) || !strings.Contains(err.Error(), "the 'sub' claim") {
-		t.Fatalf("[RFC 7519 4.1] the error must name the absent claim 'sub' as every claim error names a claim, got %v", err)
+	if !errors.Is(err, joseerror.ErrMissingClaim) || !strings.Contains(err.Error(), `the "sub" claim`) {
+		t.Fatalf(`[RFC 7519 4.1] the error must name the absent claim "sub", quoted, got %v`, err)
 	}
-	for _, present := range []string{"'iss'", "'exp'"} {
+	for _, present := range []string{`"iss"`, `"exp"`} {
 		if strings.Contains(err.Error(), present) {
 			t.Errorf("[RFC 7519 4.1] the error must not name %s, which is present, got %q", present, err)
 		}
@@ -383,6 +383,42 @@ func TestCheckOptions_RefusesWhatValidateRefusesBeforeReadingTheToken(t *testing
 	} {
 		if err := CheckOptions(opts, nil, nil); err != nil {
 			t.Errorf("[RFC 7519 4.1] %s can be met by a token, so CheckOptions must accept them, got %v", name, err)
+		}
+	}
+}
+
+func TestValidate_AMissingRequiredClaimNameIsQuotedAndBounded(t *testing.T) {
+	long := strings.Repeat("n", 100_000)
+	for name, tt := range map[string]struct {
+		claim    string
+		mustHave string
+	}{
+		"a 100,000-character name":     {claim: long, mustHave: `"` + strings.Repeat("n", 64) + `"...`},
+		"a name holding a line break":  {claim: "x\nlevel=INFO", mustHave: `"x\nlevel=INFO"`},
+		"a name holding an apostrophe": {claim: "it's", mustHave: `"it's"`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			claimsTestFixClock(t, claimsTestNow)
+			err := claimsTestValidate(t, `{}`, &model.JoseOptions{RequiredClaims: []string{tt.claim}})
+			if !errors.Is(err, joseerror.ErrMissingClaim) {
+				t.Fatalf("[RFC 7519 4.1] a token without %s must be refused with ErrMissingClaim, got %v", name, err)
+			}
+			if strings.ContainsAny(err.Error(), "\n\r") || len(err.Error()) > 256 {
+				t.Errorf("[RFC 7519 4.1] the claim name must be quoted and cut, got %d bytes: %q", len(err.Error()), err)
+			}
+			if !strings.Contains(err.Error(), tt.mustHave) {
+				t.Errorf("[RFC 7519 4.1] the error must hold %s, got %q", tt.mustHave, err)
+			}
+		})
+	}
+}
+
+func TestValidate_ANilContextIsRefusedBeforeTheTokenIsRead(t *testing.T) {
+	var unset context.Context
+	for _, token := range []string{"garbage", "a.b.c", "a.b.c.d.e"} {
+		validated, err := Validate(unset, token, nil, nil, nil, nil)
+		if !errors.Is(err, joseerror.ErrInvalidOptions) || validated != nil {
+			t.Errorf("a nil ctx can bound no fetch, so Validate must refuse it with ErrInvalidOptions whatever the token %q, got %v", token, err)
 		}
 	}
 }

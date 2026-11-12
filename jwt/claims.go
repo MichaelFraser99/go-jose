@@ -61,7 +61,7 @@ func validateClaims(body map[string]any, opts *model.JoseOptions) error {
 	}
 	for _, name := range opts.RequiredClaims {
 		if _, present := body[name]; !present {
-			return fmt.Errorf("%wthe '%s' claim is required", joseerror.ErrMissingClaim, name)
+			return fmt.Errorf("%wthe %s claim is required", joseerror.ErrMissingClaim, jsonutils.QuoteBounded(name))
 		}
 	}
 	if err := checkIssuer(body, opts.ExpectedIssuer); err != nil {

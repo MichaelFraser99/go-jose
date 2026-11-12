@@ -552,26 +552,53 @@ opts := &model.JoseOptions{ExpectedIssuer: []string{"https://issuer.example"}}
 
 `ExpectedIssuer` compares the claim only. It does not show that the key that verified the token belongs to that issuer. RFC 8725 section 3.8 requires that check too, and the application must make it. So give `Validate` a retriever that returns the keys of that issuer only.
 
-To accept several issuers, call `Validate` once for each issuer. Give each call the retriever of that issuer, and an `ExpectedIssuer` that names that issuer only:
+To accept several issuers, call `Validate` once for each issuer. Give each call the retriever of that issuer, and an `ExpectedIssuer` that names that issuer only. Try the issuers in a fixed order, and return the first token that passes. `Example_severalIssuers` in `jwt/example_test.go` runs this code:
 
 ```go
-retrievers := map[string]model.Retriever{
-	"https://a.example": retrieverA,
-	"https://b.example": retrieverB,
+type issuerKeys struct {
+	issuer    string
+	retriever model.Retriever
 }
-var validated *jwt.Token
-var err error
-for issuer, retriever := range retrievers {
-	opts := &model.JoseOptions{ExpectedIssuer: []string{issuer}}
-	validated, err = jwt.Validate(ctx, token, retriever, nil, opts, nil)
-	if err == nil {
-		break
+
+var refusedAfterTheSignature = []error{
+	joseerror.ErrExpired,
+	joseerror.ErrNotYetValid,
+	joseerror.ErrMissingClaim,
+	joseerror.ErrMalformedClaim,
+	joseerror.ErrIssuerMismatch,
+	joseerror.ErrAudienceMismatch,
+}
+
+func validateFromOneOf(ctx context.Context, token string, issuers []issuerKeys) (*jwt.Token, error) {
+	if len(issuers) == 0 {
+		return nil, fmt.Errorf("%wno issuer is configured", joseerror.ErrInvalidOptions)
 	}
-}
-if err != nil {
-	return err
+	failures := make([]error, 0, len(issuers))
+	for _, candidate := range issuers {
+		opts := &model.JoseOptions{ExpectedIssuer: []string{candidate.issuer}}
+		validated, err := jwt.Validate(ctx, token, candidate.retriever, nil, opts, nil)
+		if err == nil {
+			return validated, nil
+		}
+		failures = append(failures, err)
+	}
+	for _, err := range failures {
+		for _, reason := range refusedAfterTheSignature {
+			if errors.Is(err, reason) {
+				return nil, err
+			}
+		}
+	}
+	for _, err := range failures {
+		if !errors.Is(err, joseerror.ErrInvalidSignature) {
+			return nil, err
+		}
+	}
+	return nil, failures[0]
 }
 ```
+
+When every call fails, return the error of a call whose keys verified the signature. That call refused the token on its claims, such as `ErrExpired` or `ErrIssuerMismatch`, so its error is the true reason. A call with the keys of another issuer fails earlier, with `ErrInvalidSignature`. A fault in the header, such as an `ErrMalformedClaim`, is the same in every call, so returning it is also correct. If no call got past the signature, return the first error that does not match `ErrInvalidSignature`, such as a failure of your key store, so that an outage maps to a 5xx. Otherwise return `ErrInvalidSignature`. With no issuers configured, return an error that matches `ErrInvalidOptions`, not a nil token.
 
 Do not name several issuers in one call that has the keys of more than one of them. Then issuer B can sign a token whose `iss` names issuer A, and the token passes. Name several values in one call only when they are names of one issuer.
 
