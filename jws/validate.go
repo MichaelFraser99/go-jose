@@ -42,7 +42,7 @@ import (
 func GetValidator(alg jwa.Algorithm, publicKey crypto.PublicKey) (model.Validator, error) {
 	construct, ok := validatorConstructors[alg]
 	if !ok {
-		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg.String())
+		return nil, notASignatureAlgorithm(alg)
 	}
 	v, err := construct(publicKey)
 	if err != nil {
@@ -86,11 +86,13 @@ func hasValidator(alg jwa.Algorithm) bool {
 // must suit alg as GetValidator requires. RFC 8725 section 3.1 requires each key
 // to be used with exactly one algorithm, so a jwk carrying an "alg" member is
 // refused unless that member is the string alg names, with "EdDSA" and
-// "Ed25519" naming the same algorithm. A jwk whose "use" is present and is not
-// "sig", or whose "key_ops" is present and lacks "verify", is refused too, as
-// RFC 7517 sections 4.2 and 4.3 mark it as not for verifying signatures. So is a
-// jwk whose "key_ops" lists a value twice, or whose "use" of "sig" is not
-// consistent with its "key_ops", both of which section 4.3 says MUST NOT happen.
+// "Ed25519" naming the same algorithm. Its "kid" and "alg" must be strings (RFC
+// 7517 sections 4.5 and 4.4). A jwk whose "use" is present and is not "sig", or
+// whose "key_ops" is present and lacks "verify", is refused too, as RFC 7517
+// sections 4.2 and 4.3 mark it as not for verifying signatures. So is a jwk
+// whose "key_ops" lists a value twice, or whose "use" and "key_ops" are not
+// consistent, both of which section 4.3 says MUST NOT happen. "key_ops" may be
+// a []any or a []string.
 // Every refusal carries ErrInvalidPublicKey. To verify with such a key anyway,
 // read it with jwk.PublicFromJwk and pass it to GetValidator, which applies no
 // key-use rule.
@@ -103,18 +105,15 @@ func GetValidatorFromJwk(alg jwa.Algorithm, publicJwk map[string]any, opts *mode
 	case jwa.HS256, jwa.HS384, jwa.HS512:
 		return nil, fmt.Errorf("%wvalidators cannot be created for symmetric algorithms", joseerror.ErrUnsupportedAlgorithm)
 	case jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512, jwa.A128KW, jwa.A192KW, jwa.A256KW, jwa.Dir, jwa.ECDHES, jwa.ECDHESA128KW, jwa.ECDHESA192KW, jwa.ECDHESA256KW, jwa.A128GCMKW, jwa.A192GCMKW, jwa.A256GCMKW, jwa.PBES2HS256A128KW, jwa.PBES2HS384A192KW, jwa.PBES2HS512A256KW, jwa.Unknown:
-		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg.String())
+		return nil, notASignatureAlgorithm(alg)
 	default:
-		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg.String())
+		return nil, notASignatureAlgorithm(alg)
 	}
-	if member, present := publicJwk["alg"]; present {
-		if name, isString := member.(string); !eddsa.SameAlgorithm(name, alg.String()) {
-			named := "a value that is not a string"
-			if isString {
-				named = jsonutils.QuoteBounded(name)
-			}
-			return nil, fmt.Errorf("%wthe jwk's alg %s does not name %s", joseerror.ErrInvalidPublicKey, named, alg.String())
-		}
+	if err := internal_jwk.CheckMemberShape(publicJwk, joseerror.ErrInvalidPublicKey, false); err != nil {
+		return nil, err
+	}
+	if name, present := publicJwk["alg"].(string); present && !eddsa.SameAlgorithm(name, alg.String()) {
+		return nil, fmt.Errorf("%wthe jwk's alg %s does not name %s", joseerror.ErrInvalidPublicKey, jsonutils.QuoteBounded(name), alg.String())
 	}
 	if err := internal_jwk.CheckKeyUse(publicJwk, "verify", joseerror.ErrInvalidPublicKey, joseerror.ErrInvalidPublicKey, opts != nil && opts.StrictKeyOperations); err != nil {
 		return nil, err

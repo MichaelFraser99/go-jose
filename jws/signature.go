@@ -88,9 +88,9 @@ func GetSigner(alg jwa.Algorithm, opts *model.Opts) (model.Signer, error) {
 	case jwa.EdDSA:
 		return nil, errSignWithEdDSA
 	case jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512, jwa.A128KW, jwa.A192KW, jwa.A256KW, jwa.Dir, jwa.ECDHES, jwa.ECDHESA128KW, jwa.ECDHESA192KW, jwa.ECDHESA256KW, jwa.A128GCMKW, jwa.A192GCMKW, jwa.A256GCMKW, jwa.PBES2HS256A128KW, jwa.PBES2HS384A192KW, jwa.PBES2HS512A256KW, jwa.Unknown:
-		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg)
+		return nil, notASignatureAlgorithm(alg)
 	default:
-		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg)
+		return nil, notASignatureAlgorithm(alg)
 	}
 
 	if err != nil {
@@ -139,9 +139,9 @@ func GetSignerFromPrivateKey(alg jwa.Algorithm, privateKey crypto.PrivateKey) (m
 	case jwa.EdDSA:
 		return nil, errSignWithEdDSA
 	case jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512, jwa.A128KW, jwa.A192KW, jwa.A256KW, jwa.Dir, jwa.ECDHES, jwa.ECDHESA128KW, jwa.ECDHESA192KW, jwa.ECDHESA256KW, jwa.A128GCMKW, jwa.A192GCMKW, jwa.A256GCMKW, jwa.PBES2HS256A128KW, jwa.PBES2HS384A192KW, jwa.PBES2HS512A256KW, jwa.Unknown:
-		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg)
+		return nil, notASignatureAlgorithm(alg)
 	default:
-		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg)
+		return nil, notASignatureAlgorithm(alg)
 	}
 
 	if err != nil {
@@ -154,26 +154,29 @@ func GetSignerFromPrivateKey(alg jwa.Algorithm, privateKey crypto.PrivateKey) (m
 //
 // # Returns a Signer implementation for the given algorithm and jwk-format private key
 //
-// alg - Determines which signer type gets returned
+// alg - Determines which signer type gets returned. One that is not a signature
+// algorithm this library implements is refused with ErrUnsupportedAlgorithm, and
+// so is EdDSA, as RFC 9864 section 4.1.2 deprecates it: sign with Ed25519.
 //
 // privateJwk - jwk format private key. Its "kty" selects the key type, as
 // jwk.PrivateFromJwk reads it. For HS256, HS384 and HS512 it must be an "oct"
 // jwk (RFC 7518 section 6.4), and its "k" is the secret, held to the length
 // GetSigner requires. For every other algorithm it must be a private key that
-// GetSignerFromPrivateKey accepts for alg, and an "oct" jwk is refused. EdDSA is
-// refused with ErrUnsupportedAlgorithm, as RFC 9864 section 4.1.2 deprecates it:
-// sign with Ed25519. RFC 8725 section 3.1 requires each key to be used with
-// exactly one algorithm, so a jwk carrying an "alg" member is refused unless
-// that member is the string alg names, with "EdDSA" and "Ed25519" naming the
-// same algorithm. A jwk whose "use" is present and is not "sig", or whose
-// "key_ops" is present and lacks "sign", is refused too, as RFC 7517 sections
-// 4.2 and 4.3 mark it as not for computing signatures. So is a jwk whose
-// "key_ops" lists a value twice, or whose "use" of "sig" is not consistent with
-// its "key_ops", both of which section 4.3 says MUST NOT happen. Every
-// refusal of the jwk, including one that holds no private key, carries
-// ErrInvalidPrivateKey. To sign with a key whose "use" or "key_ops" is refused,
-// read it with jwk.PrivateFromJwk and pass it to GetSignerFromPrivateKey, or a
-// secret to GetSigner as Opts.SecretKey. Neither applies a key-use rule.
+// GetSignerFromPrivateKey accepts for alg, and an "oct" jwk is refused. Its
+// "kid" and "alg" must be strings (RFC 7517 sections 4.5 and 4.4). RFC 8725
+// section 3.1 requires each key to be used with exactly one algorithm, so a jwk
+// carrying an "alg" member is refused unless that member is the string alg
+// names, except that an "alg" of "EdDSA" is accepted for Ed25519, the one
+// algorithm it names with an Ed25519 key. A jwk whose "use" is present and is
+// not "sig", or whose "key_ops" is present and lacks "sign", is refused too, as
+// RFC 7517 sections 4.2 and 4.3 mark it as not for computing signatures. So is
+// a jwk whose "key_ops" lists a value twice, or whose "use" and "key_ops" are
+// not consistent, both of which section 4.3 says MUST NOT happen. "key_ops" may
+// be a []any, as encoding/json decodes it, or a []string. Every refusal of the
+// jwk, including one that holds no private key, carries ErrInvalidPrivateKey.
+// To sign with a key whose "use" or "key_ops" is refused, read it with
+// jwk.PrivateFromJwk and pass it to GetSignerFromPrivateKey, or a secret to
+// GetSigner as Opts.SecretKey. Neither applies a key-use rule.
 //
 // opts - may be nil. With StrictKeyOperations on, a jwk that section 4.3 says
 // SHOULD NOT be published is refused too. No other field applies here.
@@ -186,18 +189,15 @@ func GetSignerFromJwk(alg jwa.Algorithm, privateJwk map[string]any, opts *model.
 	case jwa.EdDSA:
 		return nil, errSignWithEdDSA
 	case jwa.RSAOAEP, jwa.RSAOAEP256, jwa.RSAOAEP384, jwa.RSAOAEP512, jwa.A128KW, jwa.A192KW, jwa.A256KW, jwa.Dir, jwa.ECDHES, jwa.ECDHESA128KW, jwa.ECDHESA192KW, jwa.ECDHESA256KW, jwa.A128GCMKW, jwa.A192GCMKW, jwa.A256GCMKW, jwa.PBES2HS256A128KW, jwa.PBES2HS384A192KW, jwa.PBES2HS512A256KW, jwa.Unknown:
-		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg.String())
+		return nil, notASignatureAlgorithm(alg)
 	default:
-		return nil, fmt.Errorf("%w'%s'", joseerror.ErrUnsupportedAlgorithm, alg.String())
+		return nil, notASignatureAlgorithm(alg)
 	}
-	if member, present := privateJwk["alg"]; present {
-		if name, isString := member.(string); !eddsa.SameAlgorithm(name, alg.String()) {
-			named := "a value that is not a string"
-			if isString {
-				named = jsonutils.QuoteBounded(name)
-			}
-			return nil, fmt.Errorf("%wthe jwk's alg %s does not name %s", joseerror.ErrInvalidPrivateKey, named, alg.String())
-		}
+	if err := internal_jwk.CheckMemberShape(privateJwk, joseerror.ErrInvalidPrivateKey, false); err != nil {
+		return nil, err
+	}
+	if name, present := privateJwk["alg"].(string); present && !eddsa.SameAlgorithm(name, alg.String()) {
+		return nil, fmt.Errorf("%wthe jwk's alg %s does not name %s", joseerror.ErrInvalidPrivateKey, jsonutils.QuoteBounded(name), alg.String())
 	}
 	if err := internal_jwk.CheckKeyUse(privateJwk, "sign", joseerror.ErrInvalidPrivateKey, joseerror.ErrInvalidPrivateKey, opts != nil && opts.StrictKeyOperations); err != nil {
 		return nil, err

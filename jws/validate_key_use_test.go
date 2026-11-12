@@ -44,6 +44,8 @@ func TestGetValidatorFromJwk_RefusesAJwkMarkedAsNotForVerifying(t *testing.T) {
 		"key_ops listing sign twice":                      {members: map[string]any{"key_ops": []any{"sign", "verify", "sign"}}, clause: "RFC 7517 4.3"},
 		"use of sig and key_ops of sign":                  {members: map[string]any{"use": "sig", "key_ops": []any{"sign"}}, clause: "RFC 7517 4.3"},
 		"use of enc and key_ops of verify":                {members: map[string]any{"use": "enc", "key_ops": []any{"verify"}}, clause: "RFC 7517 4.2"},
+		"key_ops built in Go as []string of verify":       {members: map[string]any{"key_ops": []string{"verify"}}, accept: true, clause: "RFC 7517 4.3"},
+		"key_ops built in Go as []string of sign":         {members: map[string]any{"key_ops": []string{"sign"}}, clause: "RFC 7517 4.3"},
 		"use of sig and key_ops of verify and decrypt":    {members: map[string]any{"use": "sig", "key_ops": []any{"verify", "decrypt"}}, clause: "RFC 7517 4.3"},
 		"use of sig and key_ops of deriveBits and verify": {members: map[string]any{"use": "sig", "key_ops": []any{"deriveBits", "verify"}}, clause: "RFC 7517 4.3"},
 		"no use and key_ops of verify and decrypt":        {members: map[string]any{"key_ops": []any{"verify", "decrypt"}}, accept: true, clause: "RFC 7517 4.3"},

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/MichaelFraser99/go-jose/internal/httputils"
@@ -205,6 +206,9 @@ func TestRetrieveJKU_ASelectionOfNoMemberReportsNoKeyIdentifierMatch(t *testing.
 			if !errors.Is(err, joseerror.ErrNoKeyIdentifierMatch) {
 				t.Errorf("[%s] an empty selection must report that no key matched, so the next key source is tried, got %v", tc.clause, err)
 			}
+			if strings.Contains(err.Error(), "identifiers specified in the jose header") || !strings.Contains(err.Error(), "no member selected") {
+				t.Errorf("[%s] the token may name no kid, so the message must say no member was selected, not that header identifiers failed to match, got %q", tc.clause, err.Error())
+			}
 		})
 	}
 }
@@ -245,7 +249,13 @@ func TestInlineJWK_KeyUse(t *testing.T) {
 		"key_ops with verify is used":                       {member: member{"key_ops": []any{"verify"}}, clause: "RFC 7517 4.3"},
 		"use enc is not used":                               {member: member{"use": "enc"}, wantErr: joseerror.ErrNoKeyIdentifierMatch, clause: "RFC 7517 4.2"},
 		"key_ops without verify is not used":                {member: member{"key_ops": []any{"encrypt"}}, wantErr: joseerror.ErrNoKeyIdentifierMatch, clause: "RFC 7517 4.3"},
-		"use sig with key_ops lacking verify":               {member: member{"use": "sig", "key_ops": []any{"encrypt"}}, wantErr: joseerror.ErrNoKeyIdentifierMatch, clause: "RFC 7517 4.3"},
+		"use sig with key_ops lacking verify":               {member: member{"use": "sig", "key_ops": []any{"sign"}}, wantErr: joseerror.ErrNoKeyIdentifierMatch, clause: "RFC 7517 4.3"},
+		"use sig with key_ops of only encrypt":              {member: member{"use": "sig", "key_ops": []any{"encrypt"}}, wantErr: joseerror.ErrMalformedClaim, clause: "RFC 7517 4.3"},
+		"use enc with key_ops of verify":                    {member: member{"use": "enc", "key_ops": []any{"verify"}}, wantErr: joseerror.ErrMalformedClaim, clause: "RFC 7517 4.3"},
+		"key_ops built in Go as a []string":                 {member: member{"key_ops": []string{"verify"}}, clause: "RFC 7517 4.3"},
+		"key_ops built in Go without verify":                {member: member{"key_ops": []string{"sign"}}, wantErr: joseerror.ErrNoKeyIdentifierMatch, clause: "RFC 7517 4.3"},
+		"key_ops built in Go listing verify twice":          {member: member{"key_ops": []string{"verify", "verify"}}, wantErr: joseerror.ErrMalformedClaim, clause: "RFC 7517 4.3"},
+		"key_ops that is null":                              {member: member{"key_ops": nil}, wantErr: joseerror.ErrMalformedClaim, clause: "RFC 7517 4.3"},
 		"use that is not a string":                          {member: member{"use": 7}, wantErr: joseerror.ErrMalformedClaim, clause: "RFC 7517 4.2"},
 		"key_ops that is not an array":                      {member: member{"key_ops": "verify"}, wantErr: joseerror.ErrMalformedClaim, clause: "RFC 7517 4.3"},
 		"key_ops holding a non-string":                      {member: member{"key_ops": []any{true, "verify"}}, wantErr: joseerror.ErrMalformedClaim, clause: "RFC 7517 4.3"},
@@ -266,6 +276,9 @@ func TestInlineJWK_KeyUse(t *testing.T) {
 			if tc.wantErr != nil {
 				if !errors.Is(err, tc.wantErr) {
 					t.Errorf("[%s] expected %v, got %d keys and %v", tc.clause, tc.wantErr, len(keys), err)
+				}
+				if malformed := errors.Is(tc.wantErr, joseerror.ErrMalformedClaim); malformed != errors.Is(err, joseerror.ErrMalformedToken) {
+					t.Errorf("[%s] a jwk header that breaks RFC 7517 makes the header malformed, and only such a jwk may match ErrMalformedToken, got %v", tc.clause, err)
 				}
 				return
 			}
@@ -299,8 +312,8 @@ func TestInlineJWK_AMemberOfTheWrongTypeIsMalformed(t *testing.T) {
 			jwk, _ := p256Jwk(t, tc.member)
 
 			keys, err := InlineJWK(jwk, tc.kid, "ES256", false, false)()
-			if !errors.Is(err, joseerror.ErrMalformedClaim) {
-				t.Errorf("[%s] a jwk member of the wrong JSON type must be refused as malformed, got %d keys and %v", tc.clause, len(keys), err)
+			if !errors.Is(err, joseerror.ErrMalformedClaim) || !errors.Is(err, joseerror.ErrMalformedToken) {
+				t.Errorf("[%s] a jwk member of the wrong JSON type makes the header malformed, so it must match ErrMalformedToken and ErrMalformedClaim, got %d keys and %v", tc.clause, len(keys), err)
 			}
 			if errors.Is(err, joseerror.ErrNoKeyIdentifierMatch) {
 				t.Errorf("[%s] a malformed jwk must not be reported as one that merely matched nothing, got %v", tc.clause, err)

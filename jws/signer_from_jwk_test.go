@@ -13,6 +13,7 @@ import (
 	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"hash"
 	"maps"
@@ -428,6 +429,10 @@ func TestGetSignerFromJwk_RefusesAJwkMarkedAsNotForSigning(t *testing.T) {
 		"key_ops listing verify twice":                  {members: map[string]any{"key_ops": []any{"verify", "sign", "verify"}}, clause: "RFC 7517 4.3"},
 		"use of sig and key_ops of verify":              {members: map[string]any{"use": "sig", "key_ops": []any{"verify"}}, clause: "RFC 7517 4.3"},
 		"use of enc and key_ops of sign":                {members: map[string]any{"use": "enc", "key_ops": []any{"sign"}}, clause: "RFC 7517 4.2"},
+		"key_ops built in Go as []string of sign":       {members: map[string]any{"key_ops": []string{"sign"}}, accept: true, clause: "RFC 7517 4.3"},
+		"key_ops built in Go as []string of verify":     {members: map[string]any{"key_ops": []string{"verify"}}, clause: "RFC 7517 4.3"},
+		"key_ops built in Go listing sign twice":        {members: map[string]any{"key_ops": []string{"sign", "sign"}}, clause: "RFC 7517 4.3"},
+		"key_ops built in Go as []int":                  {members: map[string]any{"key_ops": []int{1}}, clause: "RFC 7517 4.3"},
 		"use of sig and key_ops of sign and verify":     {members: map[string]any{"use": "sig", "key_ops": []any{"sign", "verify"}}, accept: true, clause: "RFC 7517 4.3"},
 		"use of sig and key_ops naming an extension":    {members: map[string]any{"use": "sig", "key_ops": []any{"sign", "x-audit"}}, accept: true, clause: "RFC 7517 4.3"},
 		"use of sig and key_ops of sign and encrypt":    {members: map[string]any{"use": "sig", "key_ops": []any{"sign", "encrypt"}}, clause: "RFC 7517 4.3"},
@@ -508,6 +513,62 @@ func TestGetSignerFromJwk_RefusesAnAlgorithmThatIsNotForSigningWithAJwk(t *testi
 				}
 			})
 		}
+	}
+}
+
+func TestGetSignerFromJwkAndGetValidatorFromJwk_RefuseAKidThatIsNotAString(t *testing.T) {
+	pair := ecJwkPair(t, elliptic.P256())
+	tests := map[string]struct {
+		kid    any
+		accept bool
+	}{
+		"a string kid":       {kid: "key-1", accept: true},
+		"an empty string":    {kid: "", accept: true},
+		"a number":           {kid: 123},
+		"a JSON number":      {kid: json.Number("123")},
+		"null":               {kid: nil},
+		"an array of string": {kid: []any{"key-1"}},
+		"an object":          {kid: map[string]any{"kid": "key-1"}},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			private := maps.Clone(pair.private)
+			private["kid"] = tc.kid
+			public := maps.Clone(pair.public)
+			public["kid"] = tc.kid
+			signer, signErr := jws.GetSignerFromJwk(jwa.ES256, private, nil)
+			validator, validateErr := jws.GetValidatorFromJwk(jwa.ES256, public, nil)
+			if tc.accept {
+				if signErr != nil || validateErr != nil {
+					t.Errorf("[RFC 7517 4.5] a kid that is a string must be accepted, got %v and %v", signErr, validateErr)
+				}
+				return
+			}
+			if !errors.Is(signErr, joseerror.ErrInvalidPrivateKey) || signer != nil {
+				t.Errorf("[RFC 7517 4.5] kid is a string, so a private jwk whose kid is %s must be refused with ErrInvalidPrivateKey, got %v and %v", name, signer, signErr)
+			}
+			if !errors.Is(validateErr, joseerror.ErrInvalidPublicKey) || validator != nil {
+				t.Errorf("[RFC 7517 4.5] kid is a string, so a public jwk whose kid is %s must be refused with ErrInvalidPublicKey, got %v and %v", name, validator, validateErr)
+			}
+		})
+	}
+}
+
+func TestGetSignerFromJwk_NamesAnAlgorithmArgumentThatHasNoName(t *testing.T) {
+	p256 := ecJwkPair(t, elliptic.P256()).private
+	for alg, want := range map[jwa.Algorithm]string{jwa.Unknown: "jwa.Unknown", jwa.Algorithm(999): "jwa.Algorithm(999)", jwa.Algorithm(-1): "jwa.Algorithm(-1)", jwa.RSAOAEP: "RSA-OAEP"} {
+		t.Run(want, func(t *testing.T) {
+			_, signErr := jws.GetSignerFromJwk(alg, p256, nil)
+			_, validateErr := jws.GetValidatorFromJwk(alg, p256, nil)
+			_, fromKeyErr := jws.GetSignerFromPrivateKey(alg, nil)
+			_, generateErr := jws.GetSigner(alg, nil)
+			_, validatorErr := jws.GetValidator(alg, nil)
+			for _, err := range []error{signErr, validateErr, fromKeyErr, generateErr, validatorErr} {
+				if !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), "''") {
+					t.Errorf("[RFC 7515 4.1.1] the refusal must name the algorithm argument as %s, got %v", want, err)
+				}
+			}
+		})
 	}
 }
 
