@@ -62,7 +62,8 @@ var senderAuthenticatingEncryption = []jwa.Algorithm{
 //
 // The header must keep the rules Validate applies to the parameters RFC 7515 section 4.1
 // registers, with the same errors: "jku" and "x5u" HTTPS URLs, "kid", "typ" and "cty"
-// strings, "jwk" an object, "x5c" base64 DER certificates, "x5t" and "x5t#S256"
+// strings, "jwk" a public key object whose "kid", "alg", "use" and "key_ops" keep
+// RFC 7517 sections 4.2 to 4.5, "x5c" base64 DER certificates, "x5t" and "x5t#S256"
 // base64url, and "crit" a non-empty array of distinct names that the header holds and
 // RFC 7515 does not define. A "b64" of false is refused with ErrMissingCriticalClaim:
 // RFC 7797 section 3 then signs the payload unencoded, and New always encodes it. A

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/MichaelFraser99/go-jose/internal/httputils"
@@ -139,6 +140,12 @@ func selectionCases() map[string]selectionCase {
 		"a member with a malformed use is used when key use is ignored": {
 			members: []member{{"use": 7, "key_ops": "encrypt"}}, ignoreKeyUse: true, want: []int{0}, clause: "RFC 7517 4.3",
 		},
+		"a member whose use and key_ops are not consistent is skipped for the next member": {
+			members: []member{{"use": "sig", "key_ops": []any{"verify", "encrypt"}}, {"use": "sig", "key_ops": []any{"verify"}}}, want: []int{1}, clause: "RFC 7517 4.3",
+		},
+		"a member whose use and key_ops are not consistent is the only one and is skipped": {
+			members: []member{{"use": "sig", "key_ops": []any{"deriveKey", "verify"}}}, want: nil, clause: "RFC 7517 4.3",
+		},
 		"a member whose alg differs is not used when key use is ignored": {
 			members: []member{{"use": "enc", "alg": "ES384"}}, ignoreKeyUse: true, want: nil, clause: "RFC 8725 3.1",
 		},
@@ -181,10 +188,11 @@ func TestRetrieveJKU_ASelectionOfNoMemberReportsNoKeyIdentifierMatch(t *testing.
 		kid    *string
 		clause string
 	}{
-		"a kid that matches no member":   {member: member{"kid": "issued"}, kid: model.Pointer("some-other-key"), clause: "RFC 7515 4.1.4"},
-		"an alg that matches no member":  {member: member{"alg": "ES384"}, clause: "RFC 8725 3.1"},
-		"a member marked for encryption": {member: member{"use": "enc"}, clause: "RFC 7517 4.2"},
-		"a member without verify in ops": {member: member{"key_ops": []any{"encrypt"}}, clause: "RFC 7517 4.3"},
+		"a kid that matches no member":                      {member: member{"kid": "issued"}, kid: model.Pointer("some-other-key"), clause: "RFC 7515 4.1.4"},
+		"an alg that matches no member":                     {member: member{"alg": "ES384"}, clause: "RFC 8725 3.1"},
+		"a member marked for encryption":                    {member: member{"use": "enc"}, clause: "RFC 7517 4.2"},
+		"a member without verify in ops":                    {member: member{"key_ops": []any{"encrypt"}}, clause: "RFC 7517 4.3"},
+		"a member whose use and key_ops are not consistent": {member: member{"use": "sig", "key_ops": []any{"verify", "decrypt"}}, clause: "RFC 7517 4.3"},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -197,6 +205,9 @@ func TestRetrieveJKU_ASelectionOfNoMemberReportsNoKeyIdentifierMatch(t *testing.
 			}
 			if !errors.Is(err, joseerror.ErrNoKeyIdentifierMatch) {
 				t.Errorf("[%s] an empty selection must report that no key matched, so the next key source is tried, got %v", tc.clause, err)
+			}
+			if strings.Contains(err.Error(), "identifiers specified in the jose header") || !strings.Contains(err.Error(), "no member selected") {
+				t.Errorf("[%s] the token may name no kid, so the message must say no member was selected, not that header identifiers failed to match, got %q", tc.clause, err.Error())
 			}
 		})
 	}
@@ -234,18 +245,28 @@ func TestInlineJWK_KeyUse(t *testing.T) {
 		wantErr      error
 		clause       string
 	}{
-		"use sig is used":                       {member: member{"use": "sig"}, clause: "RFC 7517 4.2"},
-		"key_ops with verify is used":           {member: member{"key_ops": []any{"verify"}}, clause: "RFC 7517 4.3"},
-		"use enc is not used":                   {member: member{"use": "enc"}, wantErr: joseerror.ErrNoKeyIdentifierMatch, clause: "RFC 7517 4.2"},
-		"key_ops without verify is not used":    {member: member{"key_ops": []any{"encrypt"}}, wantErr: joseerror.ErrNoKeyIdentifierMatch, clause: "RFC 7517 4.3"},
-		"use sig with key_ops lacking verify":   {member: member{"use": "sig", "key_ops": []any{"encrypt"}}, wantErr: joseerror.ErrNoKeyIdentifierMatch, clause: "RFC 7517 4.3"},
-		"use that is not a string":              {member: member{"use": 7}, wantErr: joseerror.ErrMalformedClaim, clause: "RFC 7517 4.2"},
-		"key_ops that is not an array":          {member: member{"key_ops": "verify"}, wantErr: joseerror.ErrMalformedClaim, clause: "RFC 7517 4.3"},
-		"key_ops holding a non-string":          {member: member{"key_ops": []any{true, "verify"}}, wantErr: joseerror.ErrMalformedClaim, clause: "RFC 7517 4.3"},
-		"use enc when key use is ignored":       {member: member{"use": "enc", "key_ops": []any{"encrypt"}}, ignoreKeyUse: true, clause: "RFC 7517 4.3"},
-		"malformed use when key use ignored":    {member: member{"use": 7, "key_ops": "x"}, ignoreKeyUse: true, clause: "RFC 7517 4.3"},
-		"key_ops listing verify twice":          {member: member{"key_ops": []any{"verify", "verify"}}, wantErr: joseerror.ErrMalformedClaim, clause: "RFC 7517 4.3"},
-		"repeated key_ops when key use ignored": {member: member{"key_ops": []any{"verify", "verify"}}, ignoreKeyUse: true, clause: "RFC 7517 4.3"},
+		"use sig is used":                                   {member: member{"use": "sig"}, clause: "RFC 7517 4.2"},
+		"key_ops with verify is used":                       {member: member{"key_ops": []any{"verify"}}, clause: "RFC 7517 4.3"},
+		"use enc is not used":                               {member: member{"use": "enc"}, wantErr: joseerror.ErrNoKeyIdentifierMatch, clause: "RFC 7517 4.2"},
+		"key_ops without verify is not used":                {member: member{"key_ops": []any{"encrypt"}}, wantErr: joseerror.ErrNoKeyIdentifierMatch, clause: "RFC 7517 4.3"},
+		"use sig with key_ops lacking verify":               {member: member{"use": "sig", "key_ops": []any{"sign"}}, wantErr: joseerror.ErrNoKeyIdentifierMatch, clause: "RFC 7517 4.3"},
+		"use sig with key_ops of only encrypt":              {member: member{"use": "sig", "key_ops": []any{"encrypt"}}, wantErr: joseerror.ErrMalformedClaim, clause: "RFC 7517 4.3"},
+		"use enc with key_ops of verify":                    {member: member{"use": "enc", "key_ops": []any{"verify"}}, wantErr: joseerror.ErrMalformedClaim, clause: "RFC 7517 4.3"},
+		"key_ops built in Go as a []string":                 {member: member{"key_ops": []string{"verify"}}, clause: "RFC 7517 4.3"},
+		"key_ops built in Go without verify":                {member: member{"key_ops": []string{"sign"}}, wantErr: joseerror.ErrNoKeyIdentifierMatch, clause: "RFC 7517 4.3"},
+		"key_ops built in Go listing verify twice":          {member: member{"key_ops": []string{"verify", "verify"}}, wantErr: joseerror.ErrMalformedClaim, clause: "RFC 7517 4.3"},
+		"key_ops that is null":                              {member: member{"key_ops": nil}, wantErr: joseerror.ErrMalformedClaim, clause: "RFC 7517 4.3"},
+		"use that is not a string":                          {member: member{"use": 7}, wantErr: joseerror.ErrMalformedClaim, clause: "RFC 7517 4.2"},
+		"key_ops that is not an array":                      {member: member{"key_ops": "verify"}, wantErr: joseerror.ErrMalformedClaim, clause: "RFC 7517 4.3"},
+		"key_ops holding a non-string":                      {member: member{"key_ops": []any{true, "verify"}}, wantErr: joseerror.ErrMalformedClaim, clause: "RFC 7517 4.3"},
+		"use enc when key use is ignored":                   {member: member{"use": "enc", "key_ops": []any{"encrypt"}}, ignoreKeyUse: true, clause: "RFC 7517 4.3"},
+		"malformed use when key use ignored":                {member: member{"use": 7, "key_ops": "x"}, ignoreKeyUse: true, clause: "RFC 7517 4.3"},
+		"key_ops listing verify twice":                      {member: member{"key_ops": []any{"verify", "verify"}}, wantErr: joseerror.ErrMalformedClaim, clause: "RFC 7517 4.3"},
+		"repeated key_ops when key use ignored":             {member: member{"key_ops": []any{"verify", "verify"}}, ignoreKeyUse: true, clause: "RFC 7517 4.3"},
+		"use sig with key_ops of verify":                    {member: member{"use": "sig", "key_ops": []any{"verify"}}, clause: "RFC 7517 4.3"},
+		"use sig with key_ops of verify and encrypt":        {member: member{"use": "sig", "key_ops": []any{"verify", "encrypt"}}, wantErr: joseerror.ErrMalformedClaim, clause: "RFC 7517 4.3"},
+		"use sig with key_ops of unwrapKey and verify":      {member: member{"use": "sig", "key_ops": []any{"unwrapKey", "verify"}}, wantErr: joseerror.ErrMalformedClaim, clause: "RFC 7517 4.3"},
+		"inconsistent use and key_ops when key use ignored": {member: member{"use": "sig", "key_ops": []any{"verify", "encrypt"}}, ignoreKeyUse: true, clause: "RFC 7517 4.3"},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -255,6 +276,9 @@ func TestInlineJWK_KeyUse(t *testing.T) {
 			if tc.wantErr != nil {
 				if !errors.Is(err, tc.wantErr) {
 					t.Errorf("[%s] expected %v, got %d keys and %v", tc.clause, tc.wantErr, len(keys), err)
+				}
+				if malformed := errors.Is(tc.wantErr, joseerror.ErrMalformedClaim); malformed != errors.Is(err, joseerror.ErrMalformedToken) {
+					t.Errorf("[%s] a jwk header that breaks RFC 7517 makes the header malformed, and only such a jwk may match ErrMalformedToken, got %v", tc.clause, err)
 				}
 				return
 			}
@@ -288,8 +312,8 @@ func TestInlineJWK_AMemberOfTheWrongTypeIsMalformed(t *testing.T) {
 			jwk, _ := p256Jwk(t, tc.member)
 
 			keys, err := InlineJWK(jwk, tc.kid, "ES256", false, false)()
-			if !errors.Is(err, joseerror.ErrMalformedClaim) {
-				t.Errorf("[%s] a jwk member of the wrong JSON type must be refused as malformed, got %d keys and %v", tc.clause, len(keys), err)
+			if !errors.Is(err, joseerror.ErrMalformedClaim) || !errors.Is(err, joseerror.ErrMalformedToken) {
+				t.Errorf("[%s] a jwk member of the wrong JSON type makes the header malformed, so it must match ErrMalformedToken and ErrMalformedClaim, got %d keys and %v", tc.clause, len(keys), err)
 			}
 			if errors.Is(err, joseerror.ErrNoKeyIdentifierMatch) {
 				t.Errorf("[%s] a malformed jwk must not be reported as one that merely matched nothing, got %v", tc.clause, err)

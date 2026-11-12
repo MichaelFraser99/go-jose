@@ -305,8 +305,9 @@ type headerShape struct {
 // rules ValidateHeader applies to one it receives.
 //
 // "jku" and "x5u" must be HTTPS URLs (sections 4.1.2 and 4.1.5), "jwk" an object
-// with no private key member (section 4.1.3 names a public key), "kid", "typ" and "cty" strings (sections 4.1.4, 4.1.9 and
-// 4.1.10), "x5c" a non-empty array of base64 DER certificates (section 4.1.6),
+// with no private key member (section 4.1.3 names a public key) whose members
+// pass jwk.CheckMemberShape, as an inline jwk must to verify, "kid", "typ" and
+// "cty" strings (sections 4.1.4, 4.1.9 and 4.1.10), "x5c" a non-empty array of base64 DER certificates (section 4.1.6),
 // and "x5t" and "x5t#S256" base64url (sections 4.1.7 and 4.1.8). "crit" must be
 // a non-empty array of distinct names, each present in the header and none
 // defined by RFC 7515 (section 4.1.11). Each fault is ErrMalformedClaim, except
@@ -315,8 +316,14 @@ type headerShape struct {
 // ErrMissingCriticalClaim, since this library handles only a base64url-encoded
 // payload.
 func CheckHeaderShape(header map[string]any) error {
-	if _, err := readHeaderShape(header, jwsMode); err != nil {
+	params, err := readHeaderShape(header, jwsMode)
+	if err != nil {
 		return err
+	}
+	if params.jwk != nil {
+		if err := jwk.CheckMemberShape(*params.jwk, joseerror.ErrMalformedClaim, true); err != nil {
+			return err
+		}
 	}
 	return refuseUnencodedPayload(header)
 }

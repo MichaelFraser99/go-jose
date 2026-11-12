@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"hash"
 	"io"
@@ -58,9 +59,9 @@ func ECDSAPrivateKeyFromJwk(jwk map[string]any) (*ecdsa.PrivateKey, error) {
 		return nil, err
 	}
 
-	dBytes, err := jsonutils.ExtractAndDecodeBase64urlString(jwk, "d")
+	dBytes, err := PrivateMember(jwk, "d", "an EC private key jwk", jsonutils.ExtractAndDecodeBase64urlString)
 	if err != nil {
-		return nil, fmt.Errorf("%wan EC private key jwk must carry 'd': %w", jose_errors.ErrInvalidPrivateKey, err)
+		return nil, err
 	}
 	return ecdsaPrivateKeyOfPoint(dBytes, publicKey)
 }
@@ -345,9 +346,9 @@ func X25519PrivateKeyFromJwk(jwk map[string]any) (*ecdh.PrivateKey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error extracting 'x' parameter from jwk: %w", err)
 	}
-	dBytes, err := jsonutils.ExtractAndDecodeBase64urlString(jwk, "d")
+	dBytes, err := PrivateMember(jwk, "d", "an X25519 private key jwk", jsonutils.ExtractAndDecodeBase64urlString)
 	if err != nil {
-		return nil, fmt.Errorf("error extracting 'd' parameter from jwk: %w", err)
+		return nil, err
 	}
 
 	private, err := ecdh.X25519().NewPrivateKey(dBytes)
@@ -469,9 +470,9 @@ func EdDSAPrivateKeyFromJwk(jwk map[string]any) (*ed25519.PrivateKey, error) {
 		return nil, fmt.Errorf("error extracting 'x' parameter from jwk: %w", err)
 	}
 
-	dBytes, err := jsonutils.ExtractAndDecodeBase64urlString(jwk, "d")
+	dBytes, err := PrivateMember(jwk, "d", "an Ed25519 private key jwk", jsonutils.ExtractAndDecodeBase64urlString)
 	if err != nil {
-		return nil, fmt.Errorf("error extracting 'd' parameter from jwk: %w", err)
+		return nil, err
 	}
 
 	if len(dBytes) != ed25519.SeedSize {
@@ -505,9 +506,9 @@ func RSAPrivateKeyFromJwk(jwk map[string]any) (*rsa.PrivateKey, error) {
 		return nil, fmt.Errorf("%wthe public members of an RSA private jwk are not a public key: %w", jose_errors.ErrInvalidPrivateKey, err)
 	}
 
-	dBytes, err := extractBase64urlUInt(jwk, "d")
+	dBytes, err := PrivateMember(jwk, "d", "an RSA private key jwk", extractBase64urlUInt)
 	if err != nil {
-		return nil, fmt.Errorf("error extracting 'd' parameter from jwk: %w", err)
+		return nil, err
 	}
 
 	if jsonutils.KeyPresent(jwk, "oth") {
@@ -718,13 +719,28 @@ func ProduceMac(h hash.Hash, digest []byte) []byte {
 	return h.Sum(nil)
 }
 
+// PrivateMember reads the private member name of a jwk with read, and refuses
+// it with ErrInvalidPrivateKey. A member that is absent also matches
+// ErrMissingClaim, and one that read refuses keeps the sentinel read gives
+// it. keyJwk names the jwk in the message, such as "an RSA private key jwk".
+func PrivateMember(jwk map[string]any, name, keyJwk string, read func(map[string]any, string) ([]byte, error)) ([]byte, error) {
+	value, err := read(jwk, name)
+	if errors.Is(err, jose_errors.ErrMissingClaim) {
+		return nil, fmt.Errorf("%w%s must carry '%s': %w", jose_errors.ErrInvalidPrivateKey, keyJwk, name, err)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%wthe '%s' of %s is malformed: %w", jose_errors.ErrInvalidPrivateKey, name, keyJwk, err)
+	}
+	return value, nil
+}
+
 // SecretKeyFromJwk reads the jwk of a symmetric key. RFC 7518 section 6.4.1
 // makes "k" the base64url encoding of the key value, so a "k" that is absent,
 // not a string, not strict base64url or of no octets is refused.
 func SecretKeyFromJwk(jwk map[string]any) ([]byte, error) {
-	key, err := jsonutils.ExtractAndDecodeBase64urlString(jwk, "k")
+	key, err := PrivateMember(jwk, "k", "an oct jwk", jsonutils.ExtractAndDecodeBase64urlString)
 	if err != nil {
-		return nil, fmt.Errorf("%wan oct jwk must carry 'k': %w", jose_errors.ErrInvalidPrivateKey, err)
+		return nil, err
 	}
 	if len(key) == 0 {
 		return nil, fmt.Errorf("%wthe 'k' of an oct jwk holds no octets", jose_errors.ErrInvalidPrivateKey)
