@@ -576,6 +576,7 @@ func TestDecrypt_RefusesBadOptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	other := pairFor(t, jwa.A128KW, jwa.A128GCM).decrypter
 	var typedNil *rsaTypedNil
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -593,7 +594,8 @@ func TestDecrypt_RefusesBadOptions(t *testing.T) {
 		{name: "no decrypters", ctx: context.Background(), want: joseerror.ErrDecryptionFailed},
 		{name: "no decrypter of the token's alg", ctx: context.Background(), decrypters: []model.Decrypter{pairFor(t, jwa.A128KW, jwa.A128GCM).decrypter}, want: joseerror.ErrDecryptionFailed},
 		{name: "no decrypter of the token's alg, named", ctx: context.Background(), decrypters: []model.Decrypter{pairFor(t, jwa.A128KW, jwa.A128GCM).decrypter}, want: joseerror.ErrDecryptionFailed, mentions: "dir"},
-		{name: "more decrypters than MaxKeysTried", ctx: context.Background(), decrypters: []model.Decrypter{good, good, good}, opts: &model.JWEOptions{MaxKeysTried: 2}, want: joseerror.ErrTooManyKeys},
+		{name: "more decrypters of one alg than MaxKeysTried", ctx: context.Background(), decrypters: []model.Decrypter{good, good, good}, opts: &model.JWEOptions{MaxKeysTried: 2}, want: joseerror.ErrInvalidOptions, mentions: "dir"},
+		{name: "more decrypters of another alg than MaxKeysTried", ctx: context.Background(), decrypters: []model.Decrypter{good, other, other}, opts: &model.JWEOptions{MaxKeysTried: 1}, want: joseerror.ErrInvalidOptions, mentions: "A128KW"},
 		{name: "a cancelled context", ctx: cancelled, decrypters: []model.Decrypter{good}, want: context.Canceled},
 	}
 	for _, tt := range tests {
@@ -618,11 +620,11 @@ func TestDecrypt_MaxKeysTriedDefaultsTo100(t *testing.T) {
 	if _, _, _, err := Decrypt(context.Background(), token, hundred, &model.JWEOptions{}); err != nil {
 		t.Errorf("100 decrypters are within the default, got %v", err)
 	}
-	if _, _, _, err := Decrypt(context.Background(), token, append(hundred, wrong), nil); !errors.Is(err, joseerror.ErrTooManyKeys) {
-		t.Errorf("101 decrypters exceed the default, want ErrTooManyKeys, got %v", err)
+	if _, _, _, err := Decrypt(context.Background(), token, append(hundred, wrong), nil); !errors.Is(err, joseerror.ErrInvalidOptions) {
+		t.Errorf("101 decrypters exceed the default, want ErrInvalidOptions, got %v", err)
 	}
-	if _, _, _, err := Decrypt(context.Background(), token, append(hundred, wrong), &model.JWEOptions{MaxKeysTried: -1}); !errors.Is(err, joseerror.ErrTooManyKeys) {
-		t.Errorf("a negative MaxKeysTried means the default, want ErrTooManyKeys, got %v", err)
+	if _, _, _, err := Decrypt(context.Background(), token, append(hundred, wrong), &model.JWEOptions{MaxKeysTried: -1}); !errors.Is(err, joseerror.ErrInvalidOptions) {
+		t.Errorf("a negative MaxKeysTried means the default, want ErrInvalidOptions, got %v", err)
 	}
 }
 
@@ -905,7 +907,7 @@ func TestDecrypt_ADecrypterCannotChangeTheReturnedHeaderOrAnotherDecryptersEncry
 	}
 }
 
-func TestDecrypt_MaxKeysTriedCountsOnlyTheTokensAlg(t *testing.T) {
+func TestDecrypt_MaxKeysTriedCountsEachAlgApart(t *testing.T) {
 	cek := randomBytes(t, 16)
 	token := dirToken(t, jwa.A128GCM, cek)
 	right, err := GetDecrypter(jwa.Dir, DirectKey{Key: cek, Enc: jwa.A128GCM})
@@ -913,12 +915,13 @@ func TestDecrypt_MaxKeysTriedCountsOnlyTheTokensAlg(t *testing.T) {
 		t.Fatal(err)
 	}
 	other := pairFor(t, jwa.A128KW, jwa.A128GCM).decrypter
+	another := pairFor(t, jwa.A256KW, jwa.A128GCM).decrypter
 	for name, opts := range map[string]*model.JWEOptions{
-		"a bound of 1 with a decrypter of another alg": {MaxKeysTried: 1},
-		"a negative bound, which means the default":    {MaxKeysTried: -1},
+		"a bound of 1 with one decrypter of each of two other algs": {MaxKeysTried: 1},
+		"a negative bound, which means the default":                 {MaxKeysTried: -1},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, _, used, err := Decrypt(context.Background(), token, []model.Decrypter{other, other, right}, opts); err != nil || used != right {
+			if _, _, used, err := Decrypt(context.Background(), token, []model.Decrypter{other, another, right}, opts); err != nil || used != right {
 				t.Errorf("want the dir decrypter to decrypt, got %v and %v", used, err)
 			}
 		})
