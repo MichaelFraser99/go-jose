@@ -58,6 +58,23 @@ func TestGetValidator_AFailedConstructionReturnsNoValidator(t *testing.T) {
 	}
 }
 
+func TestGetSignerFromJwk_AFailedConstructionReturnsNoSigner(t *testing.T) {
+	tooShort := map[string]any{"kty": "oct", "k": "aw"}
+	for _, alg := range constructableAlgorithms {
+		for name, candidate := range map[string]map[string]any{"an unknown kty": {"kty": "nonsense"}, "a one-octet oct key": tooShort, "key_ops without sign": {"kty": "oct", "k": "aw", "key_ops": []any{"verify"}}} {
+			t.Run(alg.String()+" "+name, func(t *testing.T) {
+				signer, err := GetSignerFromJwk(alg, candidate, nil)
+				if err == nil {
+					t.Fatalf("expected a jwk with %s to be refused", name)
+				}
+				if signer != nil {
+					t.Errorf("a refused construction must return a nil Signer, not an interface holding a typed nil: calling a method on it panics. Got %#v", signer)
+				}
+			})
+		}
+	}
+}
+
 func TestGetValidatorFromJwk_AFailedConstructionReturnsNoValidator(t *testing.T) {
 	for _, alg := range constructableAlgorithms {
 		t.Run(alg.String(), func(t *testing.T) {

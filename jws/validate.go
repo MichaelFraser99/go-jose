@@ -114,7 +114,7 @@ func GetValidatorFromJwk(alg jwa.Algorithm, publicJwk map[string]any, opts *mode
 			return nil, fmt.Errorf("%wthe jwk's alg %s does not name %s", joseerror.ErrInvalidPublicKey, named, alg.String())
 		}
 	}
-	if err := internal_jwk.CheckKeyUse(publicJwk, joseerror.ErrInvalidPublicKey, joseerror.ErrInvalidPublicKey, opts != nil && opts.StrictKeyOperations); err != nil {
+	if err := internal_jwk.CheckKeyUse(publicJwk, "verify", joseerror.ErrInvalidPublicKey, joseerror.ErrInvalidPublicKey, opts != nil && opts.StrictKeyOperations); err != nil {
 		return nil, err
 	}
 	publicKey, err := jwk.PublicFromJwk(publicJwk)

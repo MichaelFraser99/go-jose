@@ -50,7 +50,7 @@ Ed25519 is EdDSA with the Ed25519 parameters of RFC 8032 section 5.1, as RFC 986
 `EdDSA` is accepted for verification only, and only with an Ed25519 key. RFC 9864 section 4.1.2 deprecates `EdDSA` in favour of `Ed25519`. Section 4.4 tells new producers to prefer the replacement, but it does not tell verifiers to refuse the old identifier. So:
 
 - A token whose `alg` is `EdDSA` verifies under an Ed25519 key, as RFC 8037 defines it.
-- `GetSigner`, `GetSignerFromPrivateKey` and `jwt.New` refuse `EdDSA` with `ErrUnsupportedAlgorithm`. Sign with `Ed25519`.
+- `GetSigner`, `GetSignerFromPrivateKey`, `GetSignerFromJwk` and `jwt.New` refuse `EdDSA` with `ErrUnsupportedAlgorithm`. Sign with `Ed25519`.
 - `EdDSA` and `Ed25519` are separate values of `jwa.Algorithm`. To refuse `EdDSA` tokens, set `AllowedSigningAlgorithms` to `jwa.Ed25519` without `jwa.EdDSA`.
 
 Also supported are the following HMAC with SHA2 symmetric algorithms:
@@ -58,7 +58,7 @@ Also supported are the following HMAC with SHA2 symmetric algorithms:
 - HS384
 - HS512
 
-`GetSigner` requires a secret key as `*[]byte`, passed in `model.Opts.SecretKey`. With no secret it returns an error: the random-secret path inside each package is not reachable through the public API.
+`GetSigner` requires a secret key as `*[]byte`, passed in `model.Opts.SecretKey`. With no secret it returns an error: the random-secret path inside each package is not reachable through the public API. `GetSignerFromJwk` takes the secret as an `oct` jwk instead.
 
 **This is a breaking change:** a secret must be at least as long as the hash output. That is 32 bytes for HS256, 48 for HS384, and 64 for HS512. RFC 7518 section 3.2 makes the rule a MUST, because a shorter secret caps the cost of a forgery at the entropy of the secret instead of the strength of the MAC. `GetSigner` refuses a shorter secret with `ErrInvalidPrivateKey`. Earlier versions accepted a secret of any length, a one-byte secret included, and a nil secret gave a usable validator.
 
@@ -115,9 +115,16 @@ signer, err := jws.GetSigner(jwa.ES256, nil)
 signer, err := jws.GetSignerFromPrivateKey(jwa.ES256, privateKey)
 ```
 
+`jws.GetSignerFromJwk` builds a signer from a private jwk, decoded as a `map[string]any`. It reads the key by its `kty`, as `jwk.PrivateFromJwk` does. For HS256, HS384 and HS512, the jwk must be an `oct` jwk, and its `k` is the secret. RFC 7518 section 6.4 defines the `oct` jwk. The secret must be as long as `GetSigner` requires. For every other algorithm, the jwk must hold a private key that `GetSignerFromPrivateKey` accepts, and an `oct` jwk is refused. A jwk with no private part, such as an EC jwk without `d`, is refused. A jwk that carries an `alg` member is refused unless that member is the algorithm you asked for. RFC 8725 section 3.1 requires each key to be used with exactly one algorithm. `EdDSA` and `Ed25519` count as the same algorithm here, as they do for `GetValidatorFromJwk`. A jwk whose `use` is present and is not `"sig"` is refused. So is a jwk whose `key_ops` is present and does not include `"sign"`, or lists a value twice. RFC 7517 sections 4.2 and 4.3 set these rules. Each refusal of the jwk carries `ErrInvalidPrivateKey`. To sign with a key whose `use` or `key_ops` is refused, read it with `jwk.PrivateFromJwk`. Then give it to `GetSignerFromPrivateKey`, or give a secret to `GetSigner`. Neither has a key-use rule. The last argument is a `*model.JoseOptions`, and it can be nil. Of its fields, only `StrictKeyOperations` applies here. The example below builds a signer for ES256 and one for HS256:
+```go
+signer, err := jws.GetSignerFromJwk(jwa.ES256, privateKeyMap, nil)
+
+hmacSigner, err := jws.GetSignerFromJwk(jwa.HS256, map[string]any{"kty": "oct", "k": encodedSecret}, nil)
+```
+
 ### Which keys a signer or validator accepts
 
-`GetSigner`, `GetSignerFromPrivateKey`, `GetValidator` and `GetValidatorFromJwk` refuse a key the algorithm cannot use, with `ErrInvalidPrivateKey` or `ErrInvalidPublicKey`:
+`GetSigner`, `GetSignerFromPrivateKey`, `GetSignerFromJwk`, `GetValidator` and `GetValidatorFromJwk` refuse a key the algorithm cannot use, with `ErrInvalidPrivateKey` or `ErrInvalidPublicKey`:
 
 - **RS and PS:** the modulus must be 2048 to 8192 bits. RFC 7518 sections 3.3 and 3.5 make 2048 bits a MUST. The 8192-bit ceiling is this library's: the cost of an RSA verification grows with the square of the modulus, and a token can name its own key, so an unbounded modulus lets a peer hold a core for seconds. 8192 bits is also the default cap `crypto/tls` puts on a peer's RSA key. `Opts.BitSize` takes the same range.
 - **RS and PS exponent:** the public exponent must be odd and between 3 and 2^31 - 1. RFC 8017 section 3.1 puts e between 3 and n - 1 with GCD(e, λ(n)) = 1, and λ(n) is even, so e is odd. With e = 1 a signature is its own encoded message, so anyone could forge one. `crypto/rsa` refuses such a key when it verifies, and this library refuses it earlier, when the signer or validator is built.
@@ -191,7 +198,7 @@ RFC 8725 section 3.1 requires each key to be used with exactly one algorithm. A 
 - With `GetValidator`, pass the algorithm the key was issued for, not the `alg` a token names.
 - With a retriever, set `JoseOptions.AllowedSigningAlgorithms` to the algorithm your keys are for.
 
-A jwk can carry its own `alg`, and `GetValidatorFromJwk` and a token's `jwk` header both enforce it.
+A jwk can carry its own `alg`. `GetSignerFromJwk`, `GetValidatorFromJwk` and a token's `jwk` header enforce it.
 
 ## Verifying a JWS
 
@@ -287,7 +294,7 @@ No RFC makes `use` or `key_ops` a requirement: section 4.3 leaves it to each app
 
 RFC 7517 section 4.3 says that a jwk SHOULD NOT carry both `use` and `key_ops`. It also says that `key_ops` SHOULD NOT name unrelated operations. The only related pairs are `sign` with `verify`, `encrypt` with `decrypt`, and `wrapKey` with `unwrapKey`. Neither rule is a MUST, so this library accepts such a jwk by default.
 
-Set `JoseOptions.StrictKeyOperations` to refuse such a jwk. Then a `key_ops` of more than one value must be one of the three pairs. This also refuses `deriveKey` with `deriveBits`, which WebCrypto gives an ECDH private key. The option applies to a token's `jwk` and `jku` keys and to `jws.GetValidatorFromJwk`. `jwe.GetEncrypterFromJwk` and `jwe.GetDecrypterFromJwk` take the same option in `model.JWEOptions`. `IgnoreKeyUse` turns it off for a token's keys, because no `use` or `key_ops` rule applies to them then.
+Set `JoseOptions.StrictKeyOperations` to refuse such a jwk. Then a `key_ops` of more than one value must be one of the three pairs. This also refuses `deriveKey` with `deriveBits`, which WebCrypto gives an ECDH private key. The option applies to a token's `jwk` and `jku` keys, to `jws.GetSignerFromJwk` and to `jws.GetValidatorFromJwk`. `jwe.GetEncrypterFromJwk` and `jwe.GetDecrypterFromJwk` take the same option in `model.JWEOptions`. `IgnoreKeyUse` turns it off for a token's keys, because no `use` or `key_ops` rule applies to them then.
 
 ### Stating what you expect of a header
 
@@ -411,7 +418,7 @@ func jwk.PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error)
 
 The value returned is a pointer to the respective key, such as `*ecdsa.PublicKey` or `*rsa.PublicKey`.
 
-An `oct` jwk holds a symmetric key in `k`, as RFC 7518 section 6.4.1 defines. `PrivateFromJwk` reads it as a `[]byte`, and refuses a `k` that is absent, not a string, not strict base64url or empty. `PrivateJwk` writes a `[]byte` as an `oct` jwk with no `kid`, because RFC 7638 section 7 says to conceal the thumbprint of a symmetric key. A symmetric key has no public half, so `PublicFromJwk` and `PublicJwk` refuse it with `ErrInvalidPublicKey`.
+An `oct` jwk holds a symmetric key in `k`, as RFC 7518 section 6.4.1 defines. `PrivateFromJwk` reads it as a `[]byte`, and refuses a `k` that is absent, not a string, not strict base64url or empty. `PrivateJwk` writes a `[]byte` as an `oct` jwk with no `kid`, because RFC 7638 section 7 says to conceal the thumbprint of a symmetric key. A symmetric key has no public half, so `PublicFromJwk` and `PublicJwk` refuse it with `ErrInvalidPublicKey`. `jws.GetSignerFromJwk` builds an HS256, HS384 or HS512 signer from an `oct` jwk.
 
 An `OKP` jwk is read when its `crv` is `Ed25519` or `X25519`, the two OKP subtypes this library supports. RFC 8037 section 2 requires `crv`, so a jwk without a string `crv` is refused as an invalid key. Any other subtype, such as `X448`, is refused with `ErrUnsupportedAlgorithm`, because Go has no X448.
 

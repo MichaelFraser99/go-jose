@@ -200,17 +200,18 @@ func checkMember(jwk map[string]any, kid *string, alg string, ignoreKeyUse, stri
 	if ignoreKeyUse {
 		return nil
 	}
-	return CheckKeyUse(jwk, joseerror.ErrNoKeyIdentifierMatch, joseerror.ErrMalformedClaim, strictKeyOperations)
+	return CheckKeyUse(jwk, "verify", joseerror.ErrNoKeyIdentifierMatch, joseerror.ErrMalformedClaim, strictKeyOperations)
 }
 
-// CheckKeyUse refuses a jwk its publisher marked as not for verifying signatures:
-// one whose "use" is present and is not "sig" (RFC 7517 section 4.2), or whose
-// "key_ops" is present and lacks "verify" (RFC 7517 section 4.3). A member of the
-// wrong type, or a "key_ops" that lists a value twice, which section 4.3 says
-// MUST NOT happen, is refused with malformed, and a mark that excludes verifying
-// with refused. When strictKeyOperations, a jwk CheckRecommendedKeyOperations
-// refuses is refused with refused.
-func CheckKeyUse(jwk map[string]any, refused, malformed error, strictKeyOperations bool) error {
+// CheckKeyUse refuses a jwk its publisher marked as not for the signature
+// operation named by operation, "sign" or "verify": one whose "use" is present
+// and is not "sig" (RFC 7517 section 4.2), or whose "key_ops" is present and
+// lacks operation (RFC 7517 section 4.3). A member of the wrong type, or a
+// "key_ops" that lists a value twice, which section 4.3 says MUST NOT happen, is
+// refused with malformed, and a mark that excludes operation with refused. When
+// strictKeyOperations, a jwk CheckRecommendedKeyOperations refuses is refused
+// with refused.
+func CheckKeyUse(jwk map[string]any, operation string, refused, malformed error, strictKeyOperations bool) error {
 	if u, present := jwk["use"]; present {
 		su, ok := u.(string)
 		if !ok {
@@ -226,7 +227,7 @@ func CheckKeyUse(jwk map[string]any, refused, malformed error, strictKeyOperatio
 		if !ok {
 			return fmt.Errorf("%wjwk key_ops must be an array", malformed)
 		}
-		verify := false
+		permitted := false
 		seen := map[string]bool{}
 		for _, op := range ops {
 			sop, ok := op.(string)
@@ -237,12 +238,12 @@ func CheckKeyUse(jwk map[string]any, refused, malformed error, strictKeyOperatio
 				return fmt.Errorf("%wjwk key_ops lists %s more than once", malformed, jsonutils.QuoteBounded(sop))
 			}
 			seen[sop] = true
-			if sop == "verify" {
-				verify = true
+			if sop == operation {
+				permitted = true
 			}
 		}
-		if !verify {
-			return fmt.Errorf("%wjwk key_ops do not include verify", refused)
+		if !permitted {
+			return fmt.Errorf("%wjwk key_ops do not include %s", refused, operation)
 		}
 	}
 

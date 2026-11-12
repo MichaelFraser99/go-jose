@@ -42,7 +42,7 @@ One exception, and only one: an `Example` function in an `example_test.go` file 
 
 ### An exported constructor must return a nil interface when it fails
 
-`GetSigner`, `GetValidator`, `GetSignerFromPrivateKey` and `GetValidatorFromJwk` each assign a concrete pointer into an interface variable. If you return that variable alongside a non-nil error, the interface holds a typed nil: the value is not `nil` and any method call on it panics. Each of the four ends with an explicit `if err != nil { return nil, err }` for this reason. Keep it.
+`GetSigner`, `GetValidator`, `GetSignerFromPrivateKey`, `GetSignerFromJwk` and `GetValidatorFromJwk` each assign a concrete pointer into an interface variable. If you return that variable alongside a non-nil error, the interface holds a typed nil: the value is not `nil` and any method call on it panics. Each of the five ends with an explicit `if err != nil { return nil, err }` for this reason. Keep it.
 
 ### Key material is handled by length, and the length rules differ
 
