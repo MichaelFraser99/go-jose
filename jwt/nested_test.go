@@ -600,6 +600,15 @@ func TestEncrypt_RefusesAnEncrypterThatUndoesTheCtyOfANestedJWT(t *testing.T) {
 	}
 }
 
+func TestEncrypt_NamesTheSegmentCountOfWhatIsNotASignedJWT(t *testing.T) {
+	r := recipientFor(t, jwa.A128KW)
+	for token, want := range map[string]string{"a.b": "got 2", "a.b.c.d": "got 4", "a.b.c.d.e.f.g": "got 7"} {
+		if _, err := Encrypt(r.encrypter, jwa.A128GCM, token, nil); !errors.Is(err, joseerror.ErrMalformedToken) || !strings.Contains(err.Error(), want) {
+			t.Errorf("[RFC 7515 7.1] %q is not three segments, so want ErrMalformedToken naming %q, got %v", token, want, err)
+		}
+	}
+}
+
 func TestValidate_ADecryptOnlyRecipientBlamesTheTokenForASignatureItCannotVerify(t *testing.T) {
 	r := recipientFor(t, jwa.A128KW)
 	decrypters := []model.Decrypter{r.decrypter}

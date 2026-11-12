@@ -259,7 +259,7 @@ func rsaKeyFromPrimesAtTheModulusCap(t *testing.T, bits string) *rsa.PrivateKey 
 	return &rsa.PrivateKey{PublicKey: rsa.PublicKey{N: new(big.Int).Mul(p, q), E: 65537}, D: d, Primes: []*big.Int{p, q}}
 }
 
-func TestJwk_AnRSAKeyWithNoPrimesIsReadUpToTheModulusCapAndRefusedPastIt(t *testing.T) {
+func TestJwk_AnRSAPrivateKeyIsReadUpToTheModulusCapAndRefusedPastIt(t *testing.T) {
 	tests := map[string]struct {
 		bits   string
 		accept bool
@@ -267,29 +267,44 @@ func TestJwk_AnRSAKeyWithNoPrimesIsReadUpToTheModulusCapAndRefusedPastIt(t *test
 		"8192 bits, the cap":     {bits: "8192", accept: true},
 		"8193 bits, one past it": {bits: "8193"},
 	}
+	shapes := map[string]func(*rsa.PrivateKey) (*rsa.PrivateKey, map[string]any){
+		"with no primes": func(full *rsa.PrivateKey) (*rsa.PrivateKey, map[string]any) {
+			key := &rsa.PrivateKey{PublicKey: full.PublicKey, D: full.D}
+			return key, rsaDOnlyJwk(key)
+		},
+		"with its primes": func(full *rsa.PrivateKey) (*rsa.PrivateKey, map[string]any) {
+			full.Precompute()
+			jwk := rsaDOnlyJwk(full)
+			jwk["p"], jwk["q"] = rsaMember(full.Primes[0]), rsaMember(full.Primes[1])
+			jwk["dp"], jwk["dq"], jwk["qi"] = rsaMember(full.Precomputed.Dp), rsaMember(full.Precomputed.Dq), rsaMember(full.Precomputed.Qinv)
+			return full, jwk
+		},
+	}
 
 	for name, test := range tests {
-		t.Run(name, func(t *testing.T) {
-			full := rsaKeyFromPrimesAtTheModulusCap(t, test.bits)
-			if got := strconv.Itoa(full.N.BitLen()); got != test.bits {
-				t.Fatalf("the fixture must be a %s-bit modulus, got %s", test.bits, got)
-			}
-			key := &rsa.PrivateKey{PublicKey: full.PublicKey, D: full.D}
-			read, readErr := PrivateFromJwk(rsaDOnlyJwk(key))
-			produced, produceErr := produce(t, func() (*map[string]any, error) { return PrivateJwk(key) })
-			if test.accept {
-				if readErr != nil || produceErr != nil {
-					t.Errorf("[RFC 7518 6.3.2] a %s-bit two-prime key with no primes listed is within the cap, so it must be read and produced, got %v and %v", test.bits, readErr, produceErr)
+		for shape, build := range shapes {
+			t.Run(name+" "+shape, func(t *testing.T) {
+				full := rsaKeyFromPrimesAtTheModulusCap(t, test.bits)
+				if got := strconv.Itoa(full.N.BitLen()); got != test.bits {
+					t.Fatalf("the fixture must be a %s-bit modulus, got %s", test.bits, got)
 				}
-				return
-			}
-			if !errors.Is(readErr, joseerror.ErrInvalidPrivateKey) {
-				t.Errorf("[RFC 7518 6.3.2] the primes of a key with none listed are recovered only up to the 8192-bit cap, so a valid %s-bit key must be refused with ErrInvalidPrivateKey, got %v and %T", test.bits, readErr, read)
-			}
-			if !errors.Is(produceErr, joseerror.ErrInvalidPrivateKey) {
-				t.Errorf("[RFC 7518 6.3.2] PrivateJwk must refuse a %s-bit key with no primes that PrivateFromJwk refuses, got %v and %v", test.bits, produceErr, produced)
-			}
-		})
+				key, jwk := build(full)
+				read, readErr := PrivateFromJwk(jwk)
+				produced, produceErr := produce(t, func() (*map[string]any, error) { return PrivateJwk(key) })
+				if test.accept {
+					if readErr != nil || produceErr != nil {
+						t.Errorf("[RFC 7518 6.3.2] a %s-bit two-prime key %s is within the cap, so it must be read and produced, got %v and %v", test.bits, shape, readErr, produceErr)
+					}
+					return
+				}
+				if !errors.Is(readErr, joseerror.ErrInvalidPrivateKey) {
+					t.Errorf("[RFC 7518 6.3.2] a private key is checked only up to the 8192-bit cap, so a valid %s-bit key %s must be refused with ErrInvalidPrivateKey, got %v and %T", test.bits, shape, readErr, read)
+				}
+				if !errors.Is(produceErr, joseerror.ErrInvalidPrivateKey) {
+					t.Errorf("[RFC 7518 6.3.2] PrivateJwk must refuse a %s-bit key %s that PrivateFromJwk refuses, got %v and %v", test.bits, shape, produceErr, produced)
+				}
+			})
+		}
 	}
 }
 

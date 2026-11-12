@@ -290,14 +290,15 @@ func TestRecoverRSAPrimes_FollowsSP80056BAppendixC1(t *testing.T) {
 		wantReads int
 		clause    string
 	}{
-		"a g whose y is 1 or n-1 moves to the next g":               {d: 7, random: &chosenRandom{values: []byte{1, 84, 16}}, found: true, clause: "SP 800-56B Rev. 2 C.1 step 3c"},
-		"a g whose square is n-1 moves to the next g":               {d: 7, random: &chosenRandom{values: []byte{13, 16}}, found: true, clause: "SP 800-56B Rev. 2 C.1 step 3d.iii"},
-		"a g whose root of 1 shows only at the last square is used": {d: 7, random: &chosenRandom{values: []byte{3}, then: 1}, found: true, clause: "SP 800-56B Rev. 2 C.1 steps 3e and 3f"},
-		"100 values of g that reveal nothing find no primes":        {d: 7, random: &chosenRandom{then: 1}, wantReads: 100, clause: "SP 800-56B Rev. 2 C.1 steps 3 and 4"},
-		"an odd de-1 finds no primes and draws no g":                {d: 6, random: &chosenRandom{then: 16}, wantReads: 0, clause: "SP 800-56B Rev. 2 C.1 step 1"},
-		"a d that does not invert e is refused after one g":         {d: 3, random: &chosenRandom{then: 2}, wantReads: 1, clause: "SP 800-56B Rev. 2 C.1 step 3d, g^(de-1) = 1 for every g coprime to n"},
-		"a g of 0 is not taken as a factor of n":                    {d: 7, random: &chosenRandom{values: []byte{0, 3}, then: 1}, found: true, clause: "SP 800-56B Rev. 2 C.1 step 3c, gcd(0, n) is n itself"},
-		"a g that shares a factor with n yields that factor":        {d: 7, random: &chosenRandom{values: []byte{5}, then: 2}, found: true, clause: "SP 800-56B Rev. 2 C.1, gcd(g, n) is a prime of n"},
+		"a g whose y is 1 or n-1 moves to the next g":                {d: 7, random: &chosenRandom{values: []byte{1, 84, 16}}, found: true, clause: "SP 800-56B Rev. 2 C.1 step 3c"},
+		"a g whose square is n-1 moves to the next g":                {d: 7, random: &chosenRandom{values: []byte{13, 16}}, found: true, clause: "SP 800-56B Rev. 2 C.1 step 3d.iii"},
+		"a g whose root of 1 shows only at the last square is used":  {d: 7, random: &chosenRandom{values: []byte{3}, then: 1}, found: true, clause: "SP 800-56B Rev. 2 C.1 steps 3e and 3f"},
+		"100 values of g that reveal nothing find no primes":         {d: 7, random: &chosenRandom{then: 1}, wantReads: 100, clause: "SP 800-56B Rev. 2 C.1 steps 3 and 4"},
+		"an odd de-1 finds no primes and draws no g":                 {d: 6, random: &chosenRandom{then: 16}, wantReads: 0, clause: "SP 800-56B Rev. 2 C.1 step 1"},
+		"a d that does not invert e is refused after one g":          {d: 9, random: &chosenRandom{then: 2}, wantReads: 1, clause: "SP 800-56B Rev. 2 C.1 step 3d, g^(de-1) = 1 for every g coprime to n"},
+		"a de-1 that shares a prime with n yields it and draws no g": {d: 3, random: &chosenRandom{then: 2}, found: true, clause: "SP 800-56B Rev. 2 C.1, gcd(de-1, n) is a prime of n"},
+		"a g of 0 is not taken as a factor of n":                     {d: 7, random: &chosenRandom{values: []byte{0, 3}, then: 1}, found: true, clause: "SP 800-56B Rev. 2 C.1 step 3c, gcd(0, n) is n itself"},
+		"a g that shares a factor with n yields that factor":         {d: 7, random: &chosenRandom{values: []byte{5}, then: 2}, found: true, clause: "SP 800-56B Rev. 2 C.1, gcd(g, n) is a prime of n"},
 	}
 
 	for name, test := range tests {
@@ -326,5 +327,63 @@ func TestRecoverRSAPrimes_RefusesWhenNoRandomGCanBeDrawn(t *testing.T) {
 	primes, err := recoverRSAPrimes(iotest.ErrReader(errors.New("no randomness")), big.NewInt(85), 7, big.NewInt(7))
 	if !errors.Is(err, joseerror.ErrInvalidPrivateKey) || primes != nil {
 		t.Errorf("[SP 800-56B Rev. 2 C.1 step 3a] each try generates a random g, so a failed draw must refuse the key with ErrInvalidPrivateKey, got %v and %v", primes, err)
+	}
+}
+
+func TestRecoverRSAPrimes_DrawsNoGForAModulusNoGCanSplit(t *testing.T) {
+	prime, err := rand.Prime(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := big.NewInt(65537)
+	dEveryGPasses := func(n, lambda *big.Int) *big.Int {
+		for k := int64(1); ; k++ {
+			numerator := new(big.Int).Add(new(big.Int).Mul(big.NewInt(k), lambda), big.NewInt(1))
+			if quotient, remainder := new(big.Int).QuoRem(numerator, e, new(big.Int)); remainder.Sign() == 0 {
+				return quotient
+			}
+		}
+	}
+	halfPrime, err := rand.Prime(rand.Reader, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	square := new(big.Int).Mul(halfPrime, halfPrime)
+	halfMinusOne := new(big.Int).Sub(halfPrime, big.NewInt(1))
+
+	tests := map[string]struct {
+		n, d   *big.Int
+		primes []*big.Int
+		clause string
+	}{
+		"a prime n, whose d makes every g^(de-1) one": {
+			n: prime, d: dEveryGPasses(prime, new(big.Int).Sub(prime, big.NewInt(1))),
+			clause: "RFC 8017 3.1, an RSA modulus is the product of at least two primes",
+		},
+		"the square of a prime, whose d makes every g^(de-1) one": {
+			n: square, d: dEveryGPasses(square, new(big.Int).Mul(halfPrime, halfMinusOne)),
+			primes: []*big.Int{halfPrime, halfPrime},
+			clause: "RFC 8017 3.1, the primes of an RSA modulus are distinct",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			random := &chosenRandom{then: 2}
+			primes, err := recoverRSAPrimes(random, test.n, int(e.Int64()), test.d)
+			if random.reads != 0 {
+				t.Errorf("[%s] no g can split %s, so none may be drawn, got %d draws", test.clause, name, random.reads)
+			}
+			if test.primes == nil {
+				if !errors.Is(err, joseerror.ErrInvalidPrivateKey) || primes != nil {
+					t.Errorf("[%s] %s has no primes to find, so want ErrInvalidPrivateKey, got %v and %v", test.clause, name, primes, err)
+				}
+			} else if err != nil || !sameRSAPrimes(primes, test.primes) {
+				t.Errorf("[%s] gcd(de-1, n) is the prime of %s, got %v and %v", test.clause, name, primes, err)
+			}
+			if completed, err := CompleteRSAPrivateKey(&rsa.PrivateKey{PublicKey: rsa.PublicKey{N: test.n, E: int(e.Int64())}, D: test.d}); !errors.Is(err, joseerror.ErrInvalidPrivateKey) || completed != nil {
+				t.Errorf("[%s] %s is not an RSA private key, so it must be refused with ErrInvalidPrivateKey, got %v and %v", test.clause, name, completed, err)
+			}
+		})
 	}
 }

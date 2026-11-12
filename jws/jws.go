@@ -74,7 +74,7 @@ func verify(ctx context.Context, compactSerialization string, outOfBoundsPublicK
 	if err := CheckOptions(opts); err != nil {
 		return nil, nil, nil, err
 	}
-	components := strings.Split(compactSerialization, ".")
+	components := strings.SplitN(compactSerialization, ".", 4)
 	if len(components) != 3 {
 		return nil, nil, nil, fmt.Errorf("%winvalid compact serialization format", joseerror.ErrMalformedToken)
 	}

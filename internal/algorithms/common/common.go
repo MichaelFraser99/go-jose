@@ -495,7 +495,8 @@ func EdDSAPrivateKeyFromJwk(jwk map[string]any) (*ed25519.PrivateKey, error) {
 // are recovered from n, e and d by NIST SP 800-56B Rev. 2 Appendix C.1, and
 // the key must then pass rsa.PrivateKey.Validate. The key returned carries
 // them and its CRT values. A key with no primes whose modulus is not two
-// primes, or whose modulus is over MaximumRSAModulusBits, is refused. A
+// primes is refused, and so is any key whose modulus is over
+// MaximumRSAModulusBits, before its private members are checked. A
 // refusal for "n" or "e" carries ErrInvalidPrivateKey and wraps the public key
 // error.
 func RSAPrivateKeyFromJwk(jwk map[string]any) (*rsa.PrivateKey, error) {

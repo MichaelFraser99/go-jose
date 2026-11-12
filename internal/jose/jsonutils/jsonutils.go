@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"slices"
 	"strconv"
+	"strings"
 	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -36,6 +37,11 @@ func QuoteBounded(value string) string {
 // or other characters. Non-zero pad bits are refused, as RFC 4648 section 3.5
 // permits, so each octet sequence has exactly one accepted encoding.
 func DecodeBase64url(encoded string) ([]byte, error) {
+	if strings.IndexByte(encoded, '\n') < 0 && strings.IndexByte(encoded, '\r') < 0 {
+		if decoded, err := base64.RawURLEncoding.Strict().DecodeString(encoded); err == nil {
+			return decoded, nil
+		}
+	}
 	for i := 0; i < len(encoded); i++ {
 		if !isBase64urlCharacter(encoded[i]) {
 			return nil, fmt.Errorf("the character at offset %d is not in the base64url alphabet", i)

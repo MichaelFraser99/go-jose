@@ -265,9 +265,9 @@ func checkUnsigned(head map[string]any, opts *model.JoseOptions, jweOpts *model.
 // not verified. A "cty" in head that does not name "JWT" is refused with
 // ErrMalformedClaim. head is not modified.
 func Encrypt(encrypter model.Encrypter, enc jwa.Encryption, signedJWT string, head map[string]any) (string, error) {
-	segments := strings.Split(signedJWT, ".")
+	segments := strings.SplitN(signedJWT, ".", 4)
 	if len(segments) != 3 {
-		return "", fmt.Errorf("%wa signed JWT has three segments, got %d", joseerror.ErrMalformedToken, len(segments))
+		return "", fmt.Errorf("%wa signed JWT has three segments, got %d", joseerror.ErrMalformedToken, strings.Count(signedJWT, ".")+1)
 	}
 	signedHead, err := jsonutils.DecodeBase64urlMap(segments[0])
 	if err != nil {
