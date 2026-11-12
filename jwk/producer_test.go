@@ -157,7 +157,7 @@ func TestJwk_AnEd25519KeyIsAcceptedInTheFormTheStandardLibraryReturns(t *testing
 			if err != nil {
 				t.Fatalf("a jwk this library produced must read back, got %v", err)
 			}
-			if !public.Equal(*read.(*ed25519.PublicKey)) {
+			if !public.Equal(read.(ed25519.PublicKey)) {
 				t.Error("[RFC 8037 2] the jwk must encode the key it was given")
 			}
 		})
@@ -177,7 +177,7 @@ func TestJwk_AnEd25519KeyIsAcceptedInTheFormTheStandardLibraryReturns(t *testing
 			if err != nil {
 				t.Fatalf("a jwk this library produced must read back, got %v", err)
 			}
-			if !private.Equal(*read.(*ed25519.PrivateKey)) {
+			if !private.Equal(read.(ed25519.PrivateKey)) {
 				t.Error("[RFC 8037 2] the jwk must encode the key it was given")
 			}
 		})

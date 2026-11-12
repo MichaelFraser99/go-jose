@@ -396,8 +396,8 @@ An RSA private key with no primes is encoded as `n`, `e` and `d`. RFC 7518 secti
 // Direct from a public key
 jwkMap, err := jwk.PublicJwk(publicKey)
 
-// From a Signer. Note Public() is a call, and its result is already a pointer
-// for the EC and RSA algorithms
+// From a Signer. Note Public() is a call. Its result is already a pointer
+// for the EC and RSA algorithms, and a value for Ed25519
 signer, err := jws.GetSigner(jwa.ES256, nil)
 signerJwkMap, err := jwk.PublicJwk(signer.Public())
 ```
@@ -409,13 +409,13 @@ func jwk.PublicFromJwk(jwk map[string]any) (crypto.PublicKey, error)
 func jwk.PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error)
 ```
 
-The value returned is a pointer to the respective key, such as `*ecdsa.PublicKey` or `*rsa.PublicKey`.
+The key is returned in the type that `x509.ParsePKIXPublicKey` or `x509.ParsePKCS8PrivateKey` returns for it. An EC key is an `*ecdsa.PublicKey`, an RSA key an `*rsa.PublicKey`, and an ML-DSA key an `*mldsa.PublicKey`. An Ed25519 key is an `ed25519.PublicKey`, which is a value and not a pointer. See [Ed25519 keys are values](#ed25519-keys-are-values). `PrivateFromJwk` returns the private equivalents.
 
 An `oct` jwk holds a symmetric key in `k`, as RFC 7518 section 6.4.1 defines. `PrivateFromJwk` reads it as a `[]byte`, and refuses a `k` that is absent, not a string, not strict base64url or empty. `PrivateJwk` writes a `[]byte` as an `oct` jwk with no `kid`, because RFC 7638 section 7 says to conceal the thumbprint of a symmetric key. A symmetric key has no public half, so `PublicFromJwk` and `PublicJwk` refuse it with `ErrInvalidPublicKey`.
 
 An `OKP` jwk is read when its `crv` is `Ed25519` or `X25519`, the two OKP subtypes this library supports. RFC 8037 section 2 requires `crv`, so a jwk without a string `crv` is refused as an invalid key. Any other subtype, such as `X448`, is refused with `ErrUnsupportedAlgorithm`, because Go has no X448.
 
-For `Ed25519`, each of `x` and `d` must be 32 octets, the key sizes RFC 8032 section 5.1.5 sets. For a private key, `x` must be the public key of `d`. `x` must be the canonical encoding of a point, so one key has one `x` and one thumbprint.
+For `Ed25519`, `PublicFromJwk` returns an `ed25519.PublicKey` and `PrivateFromJwk` returns an `ed25519.PrivateKey`. Each of `x` and `d` must be 32 octets, the key sizes RFC 8032 section 5.1.5 sets. For a private key, `x` must be the public key of `d`. `x` must be the canonical encoding of a point, so one key has one `x` and one thumbprint. The readers and `PublicJwk` do not refuse a point of small order, but the Ed25519 validator does. See [Which keys a signer or validator accepts](#which-keys-a-signer-or-validator-accepts).
 
 For `X25519`, `PublicFromJwk` returns an `*ecdh.PublicKey` and `PrivateFromJwk` returns an `*ecdh.PrivateKey`. Each of `x` and `d` must be 32 octets. For a private key, `x` must be the public key of `d`. A public `x` that is not canonical is accepted, because RFC 7748 section 5 requires it. `PublicJwk` and `PrivateJwk` write an X25519 `*ecdh` key as an OKP jwk, and an `*ecdh` key on P-256, P-384 or P-521 as an EC jwk, which reads back as an `*ecdsa` key. RFC 8037 section 3.2 forbids signing with an X25519 key, so no signer or validator accepts one: `jws.GetValidatorFromJwk` refuses an X25519 jwk with `ErrInvalidPublicKey`, and verification skips one in a `jku` set or an inline `jwk`.
 
@@ -822,6 +822,15 @@ head, body := validated.SignatureHeader, validated.Claims
 
 One change can break your error handling: a well-formed token that your options refuse, or that names what this library does not implement, no longer matches `ErrMalformedToken`. It matches only the sentinel for the reason, such as `ErrUnsupportedAlgorithm` for an `alg` outside `AllowedSigningAlgorithms`. If you test `errors.Is(err, joseerror.ErrMalformedToken)` to catch these refusals, test the specific sentinel instead. See [Errors](#errors).
 
+<a id="ed25519-keys-are-values"></a>One change compiles and passes `go vet`, but can break your program at run time. `jwk.PublicFromJwk` and `jwk.PrivateFromJwk` return an Ed25519 key as an `ed25519.PublicKey` or `ed25519.PrivateKey` value. v0.11.0 returned an `*ed25519.PublicKey` or `*ed25519.PrivateKey`. The standard library uses the value type: `x509.ParsePKIXPublicKey`, `x509.ParsePKCS8PrivateKey` and `ed25519.GenerateKey` return it, and so does the `Public` method of this library's Ed25519 signer. The value is a byte slice, so code written for the pointer fails in four ways:
+
+- A type assertion to the pointer type panics, or its `ok` is false. Change `key.(*ed25519.PublicKey)` to `key.(ed25519.PublicKey)`, and `key.(*ed25519.PrivateKey)` to `key.(ed25519.PrivateKey)`.
+- A `case *ed25519.PublicKey:` in a type switch no longer matches, so the switch silently takes its `default`. Change the case to `ed25519.PublicKey`, and do the same for a private key.
+- `==` on two such keys panics with `comparing uncomparable type ed25519.PublicKey`. Compare them with the `Equal` method that `ed25519.PublicKey` and `ed25519.PrivateKey` have.
+- A key used as a map key panics with `hash of unhashable type ed25519.PublicKey`. Key the map by the jwk's thumbprint from `jwk.Thumbprint`, or by `string(key)`.
+
+To find the affected code, search it for `*ed25519.`. Also check each `==` and each map key whose type is `crypto.PublicKey`, `crypto.PrivateKey` or `any`. Every function that accepts an Ed25519 key still accepts both forms.
+
 These are new:
 
 - The `jwe` package, with `GetEncrypter`, `GetDecrypter`, `GetEncrypterFromJwk`, `GetDecrypterFromJwk`, `Encrypt`, `Decrypt`, `ParseHeader` and `DirectKey`. See [Encrypting and decrypting](#encrypting-and-decrypting).
@@ -925,7 +934,7 @@ Every change below is a compile error or a silent behaviour change for a consume
 
 - Every `kid` that `PublicJwk` and `PrivateJwk` produce has changed. It is now the key's RFC 7638 thumbprint, which other implementations compute the same way. The old value was a SHA-256 over the encoded public members with no `kty`, so keys of different types could share one. An Ed25519 jwk now carries a `kid` too. Re-derive any `kid` you stored or pinned.
 - `PublicJwk` and `PrivateJwk` refuse a key they cannot encode, rather than panic or produce a malformed jwk.
-- An `OKP` jwk is read only when it is a well-formed Ed25519 key, whose `x` is the canonical encoding of a point.
+- In 0.11.0, an `OKP` jwk is read only when it is a well-formed Ed25519 key, whose `x` is the canonical encoding of a point. Since then, an X25519 jwk is read too. See [Upgrading from 0.11.x](#upgrading-from-011x).
 - A jwk with no `kty` is refused with `ErrInvalidPublicKey` or `ErrInvalidPrivateKey`. v0.10.0 returned an error that matched no sentinel. A jwk whose `kty` is not a string is refused the same way. v0.10.0 panicked.
 - `PublicFromJwk` and `PrivateFromJwk` refuse an EC jwk whose `x` or `y` is not the full coordinate size of its curve, or whose point is not on the curve. A producer that strips leading zero octets breaks RFC 7518 section 6.2.1.2, and its keys are now refused.
 - `PrivateFromJwk` refuses an EC jwk with no `d`. It used to return a key that panicked when used.
