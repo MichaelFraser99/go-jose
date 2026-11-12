@@ -251,12 +251,12 @@ func TestPublicFromJwk_AnEd25519JwkStillReadsAsAnEd25519Key(t *testing.T) {
 	if err != nil {
 		t.Fatalf("[RFC 8037 A.2] the Ed25519 example must read, got %v", err)
 	}
-	key, ok := read.(*ed25519.PublicKey)
+	key, ok := read.(ed25519.PublicKey)
 	if !ok {
-		t.Fatalf("[RFC 8037 3.1] an Ed25519 jwk must read as an *ed25519.PublicKey, got %T", read)
+		t.Fatalf("[RFC 8037 3.1] an Ed25519 jwk must read as an ed25519.PublicKey, got %T", read)
 	}
-	if !bytes.Equal(*key, want) {
-		t.Errorf("[RFC 8037 A.2] got %x, want %x", *key, want)
+	if !bytes.Equal(key, want) {
+		t.Errorf("[RFC 8037 A.2] got %x, want %x", key, want)
 	}
 }
 

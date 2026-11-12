@@ -21,7 +21,6 @@ import (
 
 	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
 	jose_errors "github.com/MichaelFraser99/go-jose/joseerror"
-	"github.com/MichaelFraser99/go-jose/model"
 )
 
 type SecretKey []byte
@@ -271,7 +270,7 @@ func requireOKPSubtype(jwk map[string]any, want string, class error) error {
 }
 
 // OKPPublicKeyFromJwk reads the jwk of an OKP public key. RFC 8037 section 2
-// names the subtype in "crv": Ed25519 is returned as an *ed25519.PublicKey and
+// names the subtype in "crv": Ed25519 is returned as an ed25519.PublicKey and
 // X25519 as an *ecdh.PublicKey. Any other subtype is refused with
 // ErrUnsupportedAlgorithm.
 func OKPPublicKeyFromJwk(jwk map[string]any) (crypto.PublicKey, error) {
@@ -294,7 +293,7 @@ func OKPPublicKeyFromJwk(jwk map[string]any) (crypto.PublicKey, error) {
 }
 
 // OKPPrivateKeyFromJwk reads the jwk of an OKP private key. RFC 8037 section 2
-// names the subtype in "crv": Ed25519 is returned as an *ed25519.PrivateKey and
+// names the subtype in "crv": Ed25519 is returned as an ed25519.PrivateKey and
 // X25519 as an *ecdh.PrivateKey. Any other subtype is refused with
 // ErrUnsupportedAlgorithm.
 func OKPPrivateKeyFromJwk(jwk map[string]any) (crypto.PrivateKey, error) {
@@ -442,7 +441,7 @@ func ellipticCurveOfECDH(curve ecdh.Curve, class error) (elliptic.Curve, error) 
 	}
 }
 
-func EdDSAPublicKeyFromJwk(jwk map[string]any) (*ed25519.PublicKey, error) {
+func EdDSAPublicKeyFromJwk(jwk map[string]any) (ed25519.PublicKey, error) {
 	if err := requireOKPSubtype(jwk, "Ed25519", jose_errors.ErrInvalidPublicKey); err != nil {
 		return nil, err
 	}
@@ -456,10 +455,10 @@ func EdDSAPublicKeyFromJwk(jwk map[string]any) (*ed25519.PublicKey, error) {
 		return nil, err
 	}
 
-	return model.Pointer(ed25519.PublicKey(xBytes)), nil
+	return ed25519.PublicKey(xBytes), nil
 }
 
-func EdDSAPrivateKeyFromJwk(jwk map[string]any) (*ed25519.PrivateKey, error) {
+func EdDSAPrivateKeyFromJwk(jwk map[string]any) (ed25519.PrivateKey, error) {
 	if err := requireOKPSubtype(jwk, "Ed25519", jose_errors.ErrInvalidPrivateKey); err != nil {
 		return nil, err
 	}
@@ -481,7 +480,7 @@ func EdDSAPrivateKeyFromJwk(jwk map[string]any) (*ed25519.PrivateKey, error) {
 	if err := CheckEd25519PrivateKey(private); err != nil {
 		return nil, err
 	}
-	return model.Pointer(private), nil
+	return private, nil
 }
 
 // RSAPrivateKeyFromJwk reads the jwk of an RSA private key with either no

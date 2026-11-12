@@ -117,12 +117,12 @@ func TestPrivateFromJwk_ProducesAKeyTheStandardLibraryWillUse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a jwk this library produced must read back: %v", err)
 	}
-	readKey, ok := read.(*ed25519.PrivateKey)
+	readKey, ok := read.(ed25519.PrivateKey)
 	if !ok {
-		t.Fatalf("expected an *ed25519.PrivateKey, got %T", read)
+		t.Fatalf("[x509.ParsePKCS8PrivateKey godoc] an Ed25519 private key is an ed25519.PrivateKey, got %T", read)
 	}
 
-	signature := ed25519.Sign(*readKey, []byte("the signing input"))
+	signature := ed25519.Sign(readKey, []byte("the signing input"))
 	if !ed25519.Verify(public, []byte("the signing input"), signature) {
 		t.Error("[RFC 8037 2] the key read back must sign so that the original public key verifies it")
 	}

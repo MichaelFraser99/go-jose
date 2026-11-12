@@ -409,13 +409,13 @@ func jwk.PublicFromJwk(jwk map[string]any) (crypto.PublicKey, error)
 func jwk.PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error)
 ```
 
-The value returned is a pointer to the respective key, such as `*ecdsa.PublicKey` or `*rsa.PublicKey`.
+The key is returned in the type that `x509.ParsePKIXPublicKey` or `x509.ParsePKCS8PrivateKey` returns for it. An EC key is an `*ecdsa.PublicKey`, an RSA key an `*rsa.PublicKey`, and an ML-DSA key an `*mldsa.PublicKey`. An Ed25519 key is an `ed25519.PublicKey`, which is a value and not a pointer. `PrivateFromJwk` returns the private equivalents.
 
 An `oct` jwk holds a symmetric key in `k`, as RFC 7518 section 6.4.1 defines. `PrivateFromJwk` reads it as a `[]byte`, and refuses a `k` that is absent, not a string, not strict base64url or empty. `PrivateJwk` writes a `[]byte` as an `oct` jwk with no `kid`, because RFC 7638 section 7 says to conceal the thumbprint of a symmetric key. A symmetric key has no public half, so `PublicFromJwk` and `PublicJwk` refuse it with `ErrInvalidPublicKey`.
 
 An `OKP` jwk is read when its `crv` is `Ed25519` or `X25519`, the two OKP subtypes this library supports. RFC 8037 section 2 requires `crv`, so a jwk without a string `crv` is refused as an invalid key. Any other subtype, such as `X448`, is refused with `ErrUnsupportedAlgorithm`, because Go has no X448.
 
-For `Ed25519`, each of `x` and `d` must be 32 octets, the key sizes RFC 8032 section 5.1.5 sets. For a private key, `x` must be the public key of `d`. `x` must be the canonical encoding of a point, so one key has one `x` and one thumbprint.
+For `Ed25519`, `PublicFromJwk` returns an `ed25519.PublicKey` and `PrivateFromJwk` returns an `ed25519.PrivateKey`. Each of `x` and `d` must be 32 octets, the key sizes RFC 8032 section 5.1.5 sets. For a private key, `x` must be the public key of `d`. `x` must be the canonical encoding of a point, so one key has one `x` and one thumbprint.
 
 For `X25519`, `PublicFromJwk` returns an `*ecdh.PublicKey` and `PrivateFromJwk` returns an `*ecdh.PrivateKey`. Each of `x` and `d` must be 32 octets. For a private key, `x` must be the public key of `d`. A public `x` that is not canonical is accepted, because RFC 7748 section 5 requires it. `PublicJwk` and `PrivateJwk` write an X25519 `*ecdh` key as an OKP jwk, and an `*ecdh` key on P-256, P-384 or P-521 as an EC jwk, which reads back as an `*ecdsa` key. RFC 8037 section 3.2 forbids signing with an X25519 key, so no signer or validator accepts one: `jws.GetValidatorFromJwk` refuses an X25519 jwk with `ErrInvalidPublicKey`, and verification skips one in a `jku` set or an inline `jwk`.
 
@@ -835,6 +835,8 @@ These are new:
 - The error sentinels `ErrEncryptionError` and `ErrOutOfBounds`. `ErrDecryptionFailed` now has a use.
 
 A jwk whose `key_ops` lists a value twice is now refused by `jws.GetValidatorFromJwk`, and skipped in a `jku` key set. RFC 7517 section 4.3 says this MUST NOT happen. If a key set that you rely on does it, have its publisher remove the repeated value.
+
+`jwk.PublicFromJwk` and `jwk.PrivateFromJwk` return an Ed25519 key as an `ed25519.PublicKey` or `ed25519.PrivateKey` value. v0.11.0 returned an `*ed25519.PublicKey` or `*ed25519.PrivateKey`. The standard library uses the value type: `x509.ParsePKIXPublicKey`, `x509.ParsePKCS8PrivateKey` and `ed25519.GenerateKey` return it, and so does the `Public` method of this library's Ed25519 signer. A type assertion to the pointer type now fails: it panics, or its `ok` is false. Change `key.(*ed25519.PublicKey)` to `key.(ed25519.PublicKey)`, and `key.(*ed25519.PrivateKey)` to `key.(ed25519.PrivateKey)`. Change a `case *ed25519.PublicKey:` in a type switch the same way. Every function that accepts an Ed25519 key still accepts both forms.
 
 `jwk.PublicFromJwk` and `jwk.PrivateFromJwk` now read an X25519 jwk as an `*ecdh` key. v0.11.0 refused it with `ErrUnsupportedAlgorithm`. `jws.GetValidatorFromJwk` refuses an X25519 jwk with `ErrInvalidPublicKey`, where v0.11.0 gave `ErrUnsupportedAlgorithm`.
 

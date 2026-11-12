@@ -8,6 +8,7 @@ package rsaoaep
 import (
 	"crypto"
 	"crypto/rsa"
+	_ "crypto/sha1"
 	"errors"
 	"fmt"
 	"io"
