@@ -542,6 +542,24 @@ An empty string names no recipient. If `ExpectedAudience` holds one, `Validate` 
 
 **With `ExpectedAudience` unset, this library does not meet RFC 7519 section 4.1.3.** That section says: "If the principal processing the claim does not identify itself with a value in the "aud" claim when this claim is present, then the JWT MUST be rejected." By default, `Validate` checks only the type of `aud` and accepts a token whatever it names. Set `ExpectedAudience` to meet that MUST. RFC 8725 section 3.9 also requires the check whenever one issuer issues tokens for more than one audience.
 
+To check the issuer, name the issuers that you accept in `JoseOptions.ExpectedIssuer`:
+
+```go
+opts := &model.JoseOptions{ExpectedIssuer: []string{"https://issuer.example"}}
+```
+
+`iss` must then equal one of these. The comparison is exact, with no transformation or canonicalisation, as RFC 7519 section 2 requires for a StringOrURI. So `https://issuer.example/` does not match `https://issuer.example`. A token with no `iss` is refused with `ErrMissingClaim`. A token naming another issuer is refused with `ErrIssuerMismatch`. An `iss` that is not a string is refused with `ErrMalformedClaim` first. If `ExpectedIssuer` holds an empty string, `Validate` refuses every token with `ErrInvalidOptions`.
+
+`ExpectedIssuer` compares the claim only. It does not show that the key that verified the token belongs to that issuer. RFC 8725 section 3.8 requires that check too, and the application must make it. So give `Validate` only the keys of the issuers that you expect. To accept several issuers, use a retriever or key set for each one. Alternatively, read `iss` after verification and choose the keys for that issuer.
+
+To require a claim, name it in `JoseOptions.RequiredClaims`:
+
+```go
+opts := &model.JoseOptions{RequiredClaims: []string{"exp", "iss", "sub"}}
+```
+
+RFC 7519 section 4.1 makes no claim mandatory, and leaves the choice to the application. By default, a token with no `exp` never expires. With `RequiredClaims` set, the claims set must have a member of each name, else `Validate` refuses the token with `ErrMissingClaim`. The error names the missing claim. A member is present whatever its value, `null` included. The type rules in the table above still apply, so an `exp` of `null` is refused with `ErrMalformedClaim`. Names are compared exactly, so `EXP` does not satisfy `exp`. If `RequiredClaims` holds an empty string, `Validate` refuses every token with `ErrInvalidOptions`.
+
 ## Encrypting and decrypting
 
 The `jwe` package encrypts and decrypts the JWE Compact Serialization of RFC 7516. It does not implement the JWE JSON Serialization.
@@ -740,7 +758,7 @@ Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 | `ErrSigningError` | Signing failed |
 | `ErrEncryptionError` | Encryption failed. The random source failed, or a custom `Encrypter` returned a key or header that `jwe.Encrypt` cannot use, such as an encrypted key of a length that `jwe.Decrypt` refuses |
 | `ErrMalformedClaim` | A claim is present but its type or value is wrong. This includes a `b64` that is not a boolean, and an `x5c` or `x5u` chain that is out of order or longer than 16 certificates |
-| `ErrMissingClaim` | A required claim is absent |
+| `ErrMissingClaim` | A required claim is absent. This includes a claim named in `JoseOptions.RequiredClaims`, an `aud` when `ExpectedAudience` is set, and an `iss` when `ExpectedIssuer` is set |
 | `ErrMissingCriticalClaim` | A header named in `crit` is absent, or names an extension this library does not understand, or `b64` is `false` |
 | `ErrNoKeyIdentifierMatch` | No key could be selected. The `kid` matches nothing, a `jku` set holds no usable key that matches the header, a certificate chain does not reach a configured root, or an `x5t` thumbprint does not match the chain. It also covers a token that names no key, when you give no retriever and rely on the keys a token names |
 | `ErrKeystoreError` | A `model.Jwks` lookup or addition failed, or a document decoded into `model.Jwks` is not a JWK Set |
@@ -749,7 +767,8 @@ Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 | `ErrExpired` | The current time is not before the token's `exp`, allowing for `ClockSkewLeeway` |
 | `ErrNotYetValid` | The token's `nbf` or `iat` is after the current time, allowing for `ClockSkewLeeway` |
 | `ErrAudienceMismatch` | `JoseOptions.ExpectedAudience` is set and the token's `aud` names none of its values |
-| `ErrInvalidOptions` | The options passed are themselves wrong. Most of these cases are refused before the token is read. A verifier with no retriever and no token key allowed is refused after the header is checked, so a token with a bad header reports that fault first. The cases are: a nil `ctx`; a `JoseOptions.ExpectedAudience` that holds an empty string; a JWE allow-list that names a value this library does not implement; an `AllowedSigningAlgorithms` entry that is not a signature algorithm this library implements; an `AcceptedTypes` entry that is not a media type name; a nil decrypter, or more decrypters of one `alg` than `JWEOptions.MaxKeysTried` allows; and a nil retriever with neither `UseTokenProvidedKeys` nor `X509Roots` set, when `jwt.Validate` has no decrypters |
+| `ErrIssuerMismatch` | `JoseOptions.ExpectedIssuer` is set and the token's `iss` equals none of its values |
+| `ErrInvalidOptions` | The options passed are themselves wrong. Most of these cases are refused before the token is read. A verifier with no retriever and no token key allowed is refused after the header is checked, so a token with a bad header reports that fault first. The cases are: a nil `ctx`; a `JoseOptions.ExpectedAudience`, `ExpectedIssuer` or `RequiredClaims` that holds an empty string; a JWE allow-list that names a value this library does not implement; an `AllowedSigningAlgorithms` entry that is not a signature algorithm this library implements; an `AcceptedTypes` entry that is not a media type name; a nil decrypter, or more decrypters of one `alg` than `JWEOptions.MaxKeysTried` allows; and a nil retriever with neither `UseTokenProvidedKeys` nor `X509Roots` set, when `jwt.Validate` has no decrypters |
 | `ErrTooManyKeys` | The signature did not verify under as many keys as `JoseOptions.MaxKeysTried` allows, and more keys or key sources remained. |
 | `ErrOutOfBounds` | A JWE asks for more work than your options allow: a `p2c` above `JWEOptions.MaxPBES2Count`, or a plaintext that inflates to more than `MaxDecompressedSize`. It also covers a `p2c` below 1000 when `RequireRecommendedPBES2Count` is set |
 
@@ -767,7 +786,7 @@ Most errors mean that the token is bad, so the response is a 4xx. A few mean tha
 1. Your request's own context has ended: test `ctx.Err() != nil` on the `ctx` that you passed. Send 499 for a client that went away, or 504 for your deadline. Test the context itself, not the error. A `jku` or `x5u` fetch that runs out of time also matches `context.DeadlineExceeded`, and that fault is the peer's, not yours.
 2. `ErrInvalidOptions`. Your options are wrong, and no token can pass. This is a server fault (500).
 3. The errors of your own retriever. `Validate` wraps them and adds no sentinel, so test them with `errors.Is(err, yourErr)`. A failed key store is a server fault (500 or 503).
-4. Every other sentinel. The token was refused (401, or 400 for `ErrMalformedToken` if you separate malformed requests).
+4. Every other sentinel. The token was refused (401, or 400 for `ErrMalformedToken` if you separate malformed requests). This includes `ErrMissingClaim`, `ErrAudienceMismatch` and `ErrIssuerMismatch`: your options name what you require, and the token does not meet it.
 
 Four sentinels can also come from your side. Read these before you map them:
 
@@ -829,10 +848,10 @@ These are new:
 - `model.Encrypter`, `model.Decrypter` and `model.DecrypterOpts`.
 - `jwa.Encryption` with `jwa.GetEncryption`, and the `alg` constants `jwa.RSAOAEP` to `jwa.Dir` and `jwa.ECDHES` to `jwa.ECDHESA256KW`. The integer values of the existing `jwa.Algorithm` constants do not change.
 - `model.JWEOptions`, the options of `jwe.Decrypt`, `jwe.ParseHeader`, `jwe.GetEncrypterFromJwk`, `jwe.GetDecrypterFromJwk` and the JWE layer of `jwt.Validate`.
-- `JoseOptions` fields: `StrictKeyOperations`, `RequireSignedJWT` and `RequireEncryptedJWT`.
+- `JoseOptions` fields: `StrictKeyOperations`, `RequireSignedJWT`, `RequireEncryptedJWT`, `RequiredClaims` and `ExpectedIssuer`. Each is off when unset.
 - `jwt.Encrypt` and `jwt.Token`, for encrypted JWTs. See [Encrypted JWTs](#encrypted-jwts).
 - `jwe.PasswordKey` for PBES2, and the `alg` constants `jwa.A128GCMKW` to `jwa.A256GCMKW` and `jwa.PBES2HS256A128KW` to `jwa.PBES2HS512A256KW`.
-- The error sentinels `ErrEncryptionError` and `ErrOutOfBounds`. `ErrDecryptionFailed` now has a use.
+- The error sentinels `ErrEncryptionError`, `ErrOutOfBounds` and `ErrIssuerMismatch`. `ErrDecryptionFailed` now has a use.
 
 A jwk whose `key_ops` lists a value twice is now refused by `jws.GetValidatorFromJwk`, and skipped in a `jku` key set. RFC 7517 section 4.3 says this MUST NOT happen. If a key set that you rely on does it, have its publisher remove the repeated value.
 

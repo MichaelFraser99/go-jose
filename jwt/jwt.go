@@ -153,8 +153,12 @@ func New(signer crypto.Signer, head, body map[string]any, opts Opts) (*string, e
 // ErrNotYetValid: RFC 7519 section 4.1.6 sets no such rule, but a token issued in the
 // future signals a clock fault or a forged timestamp.
 // When opts.ExpectedAudience is set, aud must name one of its values (section 4.1.3).
-// Options whose ExpectedAudience holds an empty string are refused with
-// ErrInvalidOptions, whatever the token.
+// When opts.ExpectedIssuer is set, iss must equal one of its values (section 2,
+// StringOrURI), else ErrMissingClaim or ErrIssuerMismatch. Each name in
+// opts.RequiredClaims must be a member of the claims set, else ErrMissingClaim
+// (section 4.1). Options whose ExpectedAudience, ExpectedIssuer or
+// RequiredClaims holds an empty string are refused with ErrInvalidOptions,
+// whatever the token.
 //
 // With decrypters and a nil outOfBoundsPublicKey, an encrypt-only JWT can
 // still pass, so the options are not wrong. A JWS, signed alone or nested, is
