@@ -165,8 +165,14 @@ type JoseOptions struct {
 	//
 	// This compares the claim only. It does not show that the key that verified
 	// the token belongs to that issuer, which RFC 8725 section 3.8 also requires.
-	// Give jwt.Validate only that issuer's keys: a retriever per issuer, or read
-	// "iss" after verifying and choose the keys for it.
+	// So give jwt.Validate a retriever of that issuer's keys alone. To accept
+	// several issuers, call jwt.Validate once per issuer, each
+	// with that issuer's retriever and that issuer alone here. If one call names
+	// several issuers, a token signed with one issuer's key can claim another's
+	// "iss" and pass, so name several only for one issuer known by several
+	// values. For a JWT only encrypted under a shared key or password, the
+	// decrypter authenticates the writer, so compare Token.Decrypter with that
+	// issuer's key, or set RequireSignedJWT.
 	ExpectedIssuer []string
 
 	// RequireSignedJWT makes jwt.Validate refuse a JWT that is not signed: one

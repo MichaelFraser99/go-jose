@@ -7,6 +7,7 @@ import (
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -462,6 +463,24 @@ func TestValidateNoDuplicateSliceValuesOnUnhashableValues(t *testing.T) {
 			}
 			if !tt.expectErr && err != nil {
 				t.Errorf("no error should be thrown: %s", err.Error())
+			}
+		})
+	}
+}
+
+func TestDecodeJSONObject_AParseErrorEchoesABoundedPrefixOfTheInput(t *testing.T) {
+	for name, input := range map[string]string{
+		"a number beyond the float64 range": `{"n":` + strings.Repeat("9", 1_000_000) + `}`,
+		"a long string then a stray byte":   `{"s":"` + strings.Repeat("a", 1_000_000) + `"x}`,
+		"a long key then end of input":      `{"` + strings.Repeat("a", 1_000_000),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := DecodeJSONObject([]byte(input))
+			if err == nil {
+				t.Fatalf("[RFC 8259 2, 6] %s must not decode", name)
+			}
+			if len(err.Error()) > 4*MaxEchoedRunes || strings.ContainsAny(err.Error(), "\n\r") {
+				t.Errorf("a decoder error must be quoted and cut to %d runes, got %d bytes", MaxEchoedRunes, len(err.Error()))
 			}
 		})
 	}

@@ -265,10 +265,10 @@ func TestValidate_RequiredClaims(t *testing.T) {
 func TestValidate_AMissingRequiredClaimIsNamedInTheError(t *testing.T) {
 	claimsTestFixClock(t, claimsTestNow)
 	err := claimsTestValidate(t, `{"iss":"https://issuer.example","exp":1800000000}`, &model.JoseOptions{RequiredClaims: []string{"iss", "sub", "exp"}})
-	if !errors.Is(err, joseerror.ErrMissingClaim) || !strings.Contains(err.Error(), `"sub"`) {
-		t.Fatalf(`[RFC 7519 4.1] the error must name the absent claim "sub", got %v`, err)
+	if !errors.Is(err, joseerror.ErrMissingClaim) || !strings.Contains(err.Error(), "the 'sub' claim") {
+		t.Fatalf("[RFC 7519 4.1] the error must name the absent claim 'sub' as every claim error names a claim, got %v", err)
 	}
-	for _, present := range []string{`"iss"`, `"exp"`} {
+	for _, present := range []string{"'iss'", "'exp'"} {
 		if strings.Contains(err.Error(), present) {
 			t.Errorf("[RFC 7519 4.1] the error must not name %s, which is present, got %q", present, err)
 		}
@@ -344,6 +344,45 @@ func TestValidate_AnEmptyRequiredClaimOrExpectedIssuerIsRefusedBeforeTheTokenIsR
 			if validated, err := Validate(context.Background(), token, nil, nil, opts, nil); !errors.Is(err, joseerror.ErrInvalidOptions) || validated != nil {
 				t.Errorf("[RFC 7519 4.1] an empty string in %s names nothing, so the options are refused whatever the token %q: want %q, got %v", name, token, joseerror.ErrInvalidOptions, err)
 			}
+		}
+	}
+}
+
+func TestCheckOptions_RefusesWhatValidateRefusesBeforeReadingTheToken(t *testing.T) {
+	nilDecrypter := []model.Decrypter{nil}
+	for name, tt := range map[string]struct {
+		opts       *model.JoseOptions
+		decrypters []model.Decrypter
+		jweOpts    *model.JWEOptions
+	}{
+		"an empty ExpectedAudience entry":             {opts: &model.JoseOptions{ExpectedAudience: []string{""}}},
+		"an empty ExpectedIssuer entry":               {opts: &model.JoseOptions{ExpectedIssuer: []string{""}}},
+		"an empty RequiredClaims entry":               {opts: &model.JoseOptions{RequiredClaims: []string{"exp", ""}}},
+		"a JWE alg in AllowedSigningAlgorithms":       {opts: &model.JoseOptions{AllowedSigningAlgorithms: []jwa.Algorithm{jwa.A128KW}}},
+		"an AcceptedTypes entry with a space":         {opts: &model.JoseOptions{AcceptedTypes: []string{"JWT "}}},
+		"a nil decrypter":                             {decrypters: nilDecrypter},
+		"a JWS alg in AllowedKeyManagementAlgorithms": {jweOpts: &model.JWEOptions{AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.ES256}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := CheckOptions(tt.opts, tt.decrypters, tt.jweOpts); !errors.Is(err, joseerror.ErrInvalidOptions) {
+				t.Errorf("[RFC 7519 4.1, RFC 8725 3.1] %s can match no token, so CheckOptions must refuse it with ErrInvalidOptions, got %v", name, err)
+			}
+			if _, err := Validate(context.Background(), "a.b.c", nil, tt.decrypters, tt.opts, tt.jweOpts); !errors.Is(err, joseerror.ErrInvalidOptions) {
+				t.Errorf("[RFC 7519 4.1, RFC 8725 3.1] Validate must refuse %s as CheckOptions does, got %v", name, err)
+			}
+		})
+	}
+	for name, opts := range map[string]*model.JoseOptions{
+		"nil options":  nil,
+		"zero options": {},
+		"every new field set": {
+			ExpectedAudience: []string{"https://rp.example"},
+			ExpectedIssuer:   []string{"https://issuer.example"},
+			RequiredClaims:   []string{"exp", "tenant"},
+		},
+	} {
+		if err := CheckOptions(opts, nil, nil); err != nil {
+			t.Errorf("[RFC 7519 4.1] %s can be met by a token, so CheckOptions must accept them, got %v", name, err)
 		}
 	}
 }
