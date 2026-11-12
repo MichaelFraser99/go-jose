@@ -6,6 +6,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jws"
 	"github.com/MichaelFraser99/go-jose/model"
@@ -55,7 +56,18 @@ func validateClaims(body map[string]any, opts *model.JoseOptions) error {
 		return fmt.Errorf("%wthe current time is not before the 'exp' claim", joseerror.ErrExpired)
 	}
 
-	if opts == nil || len(opts.ExpectedAudience) == 0 {
+	if opts == nil {
+		return nil
+	}
+	for _, name := range opts.RequiredClaims {
+		if _, present := body[name]; !present {
+			return fmt.Errorf("%wthe %s claim is required", joseerror.ErrMissingClaim, jsonutils.QuoteBounded(name))
+		}
+	}
+	if err := checkIssuer(body, opts.ExpectedIssuer); err != nil {
+		return err
+	}
+	if len(opts.ExpectedAudience) == 0 {
 		return nil
 	}
 	if !audiencePresent {
@@ -73,7 +85,28 @@ func validateOptions(opts *model.JoseOptions) error {
 	if opts != nil && slices.Contains(opts.ExpectedAudience, "") {
 		return fmt.Errorf("%wExpectedAudience holds an empty string, which names no recipient", joseerror.ErrInvalidOptions)
 	}
+	if opts != nil && slices.Contains(opts.RequiredClaims, "") {
+		return fmt.Errorf("%wRequiredClaims holds an empty string, which names no claim", joseerror.ErrInvalidOptions)
+	}
+	if opts != nil && slices.Contains(opts.ExpectedIssuer, "") {
+		return fmt.Errorf("%wExpectedIssuer holds an empty string, which names no issuer", joseerror.ErrInvalidOptions)
+	}
 	return jws.CheckOptions(opts)
+}
+
+func checkIssuer(body map[string]any, expected []string) error {
+	if len(expected) == 0 {
+		return nil
+	}
+	value, present := body["iss"]
+	if !present {
+		return fmt.Errorf("%wthe 'iss' claim is required when an issuer is expected", joseerror.ErrMissingClaim)
+	}
+	issuer, _ := value.(string)
+	if !slices.Contains(expected, issuer) {
+		return fmt.Errorf("%wthe 'iss' claim %s names none of the expected issuers", joseerror.ErrIssuerMismatch, jsonutils.QuoteBounded(issuer))
+	}
+	return nil
 }
 
 func numericDate(body map[string]any, name string, absent float64) (float64, error) {

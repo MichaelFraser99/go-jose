@@ -176,6 +176,35 @@ type JoseOptions struct {
 	// to meet that MUST.
 	ExpectedAudience []string
 
+	// RequiredClaims names the claims a JWT must carry. jwt.Validate refuses a
+	// token whose claims set lacks a member of any of these names with
+	// ErrMissingClaim, naming the claim. RFC 7519 section 4.1 leaves which
+	// claims are required to the application, and names are compared exactly
+	// (section 7.3). A member is present whatever its value, null included, and
+	// a registered claim's type rule still applies to it. An empty string names
+	// no claim, so jwt.Validate refuses options holding one with
+	// ErrInvalidOptions.
+	RequiredClaims []string
+
+	// ExpectedIssuer names the issuers this recipient accepts. When set,
+	// jwt.Validate requires the "iss" claim to equal one of these, compared
+	// exactly with no canonicalisation (RFC 7519 section 2, StringOrURI). A
+	// token with no "iss" is refused with ErrMissingClaim, and one naming another
+	// issuer with ErrIssuerMismatch. An empty string names no issuer, so
+	// jwt.Validate refuses options holding one with ErrInvalidOptions.
+	//
+	// This compares the claim only. It does not show that the key that verified
+	// the token belongs to that issuer, which RFC 8725 section 3.8 also requires.
+	// So give jwt.Validate a retriever of that issuer's keys alone. To accept
+	// several issuers, call jwt.Validate once per issuer, each
+	// with that issuer's retriever and that issuer alone here. If one call names
+	// several issuers, a token signed with one issuer's key can claim another's
+	// "iss" and pass, so name several only for one issuer known by several
+	// values. For a JWT only encrypted under a shared key or password, the
+	// decrypter authenticates the writer, so compare Token.Decrypter with that
+	// issuer's key, or set RequireSignedJWT.
+	ExpectedIssuer []string
+
 	// RequireSignedJWT makes jwt.Validate refuse a JWT that is not signed: one
 	// that is only encrypted, under any key, with ErrInvalidSignature. Off by
 	// default, including when no options are passed, because RFC 7519 allows a

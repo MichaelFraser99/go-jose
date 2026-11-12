@@ -42,3 +42,24 @@ func TestOKPReaders_RefuseAJwkOfTheOtherSubtype(t *testing.T) {
 		})
 	}
 }
+
+func TestOKPReaders_ARefusedEd25519JwkReturnsAnUntypedNilKey(t *testing.T) {
+	short := base64.RawURLEncoding.EncodeToString(make([]byte, ed25519.PublicKeySize-1))
+	jwk := map[string]any{"kty": "OKP", "crv": "Ed25519", "x": short, "d": short}
+
+	tests := map[string]func() (any, error){
+		"OKPPublicKeyFromJwk":  func() (any, error) { return OKPPublicKeyFromJwk(jwk) },
+		"OKPPrivateKeyFromJwk": func() (any, error) { return OKPPrivateKeyFromJwk(jwk) },
+	}
+	for name, read := range tests {
+		t.Run(name, func(t *testing.T) {
+			key, err := read()
+			if err == nil {
+				t.Fatalf("[RFC 8032 5.1.5] a 31 octet key must be refused, got %T", key)
+			}
+			if key != nil {
+				t.Errorf("a refused read must return a nil interface, not one holding a typed nil key, got %#v", key)
+			}
+		})
+	}
+}
