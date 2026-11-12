@@ -37,6 +37,8 @@ func Verify(ctx context.Context, compactSerialization string, outOfBoundsPublicK
 // and also requires the payload to be a UTF-8 JSON object, as RFC 7519 section
 // 7.2 step 10 requires of a JWT Claims Set. A cty of "JWT" marks a Nested JWT
 // (RFC 7519 section 5.2), which is refused as unsupported before any key is sought.
+// It checks no claim: opts.RequiredClaims, ExpectedIssuer and ExpectedAudience
+// are ignored here and applied by jwt.Validate.
 func VerifyCompactSerialization(ctx context.Context, compactSerialization string, outOfBoundsPublicKey model.Retriever, opts *model.JoseOptions) (protectedHeader, body map[string]any, err error) {
 	protectedHeader, _, body, err = verify(ctx, compactSerialization, outOfBoundsPublicKey, opts, true)
 	return protectedHeader, body, err

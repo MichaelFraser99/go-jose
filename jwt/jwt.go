@@ -140,7 +140,9 @@ func New(signer crypto.Signer, head, body map[string]any, opts Opts) (*string, e
 //
 // With RSA-OAEP or ECDH-ES, Token.Decrypter names the key of yours that
 // decrypted the token, not its sender: anyone holding your public key can
-// encrypt to it. The signature of a Nested JWT is what names its issuer.
+// encrypt to it. The signature of a Nested JWT is what names its issuer. With a
+// shared key or password, the decrypter is what authenticates the writer, so
+// compare Token.Decrypter with the issuer's key, or set opts.RequireSignedJWT.
 //
 // A token of any other number of segments is refused with ErrMalformedToken.
 //
@@ -154,19 +156,27 @@ func New(signer crypto.Signer, head, body map[string]any, opts Opts) (*string, e
 // 4.1.5), else ErrNotYetValid. An iat after the current time is also refused with
 // ErrNotYetValid: RFC 7519 section 4.1.6 sets no such rule, but a token issued in the
 // future signals a clock fault or a forged timestamp.
-// When opts.ExpectedAudience is set, aud must name one of its values (section 4.1.3).
-// Options whose ExpectedAudience holds an empty string are refused with
-// ErrInvalidOptions, whatever the token.
+// Each name in opts.RequiredClaims must be a member of the claims set, else
+// ErrMissingClaim (section 4.1). When opts.ExpectedIssuer is set, iss must equal
+// one of its values (section 2, StringOrURI), and when opts.ExpectedAudience is
+// set, aud must name one of its values (section 4.1.3), else ErrMissingClaim,
+// ErrIssuerMismatch or ErrAudienceMismatch. The claims are checked in this
+// order: types, then times, then RequiredClaims, ExpectedIssuer and
+// ExpectedAudience, and the first failure is returned.
+//
+// Before it reads the token, Validate refuses a nil ctx with ErrInvalidOptions
+// and calls CheckOptions, so options that are wrong whatever the token are
+// refused with ErrInvalidOptions too.
 //
 // With decrypters and a nil outOfBoundsPublicKey, an encrypt-only JWT can
 // still pass, so the options are not wrong. A JWS, signed alone or nested, is
 // then refused as the token's fault: ErrInvalidSignature, matching
 // ErrNoKeyIdentifierMatch, unless a key the token names verifies it.
 func Validate(ctx context.Context, token string, outOfBoundsPublicKey model.Retriever, decrypters []model.Decrypter, opts *model.JoseOptions, jweOpts *model.JWEOptions) (*Token, error) {
-	if err := validateOptions(opts); err != nil {
-		return nil, err
+	if ctx == nil {
+		return nil, fmt.Errorf("%wthe context passed is nil", joseerror.ErrInvalidOptions)
 	}
-	if err := jwe.CheckOptions(decrypters, jweOpts); err != nil {
+	if err := CheckOptions(opts, decrypters, jweOpts); err != nil {
 		return nil, err
 	}
 	if outOfBoundsPublicKey == nil && len(decrypters) > 0 {
@@ -183,6 +193,20 @@ func Validate(ctx context.Context, token string, outOfBoundsPublicKey model.Retr
 	default:
 		return nil, fmt.Errorf("%wa JWT has three segments, or five when encrypted, got %d", joseerror.ErrMalformedToken, segments)
 	}
+}
+
+// CheckOptions refuses, with ErrInvalidOptions, options that are wrong whatever
+// the token: an empty string in opts.ExpectedAudience, ExpectedIssuer or
+// RequiredClaims, what jws.CheckOptions refuses of opts, and what
+// jwe.CheckOptions refuses of decrypters and jweOpts. Validate calls it before
+// reading the token, so a caller can call it once at startup instead. A nil
+// retriever that no token key can stand in for is refused by Validate alone,
+// after the header is checked.
+func CheckOptions(opts *model.JoseOptions, decrypters []model.Decrypter, jweOpts *model.JWEOptions) error {
+	if err := validateOptions(opts); err != nil {
+		return err
+	}
+	return jwe.CheckOptions(decrypters, jweOpts)
 }
 
 func validateSigned(ctx context.Context, token string, outOfBoundsPublicKey model.Retriever, opts *model.JoseOptions, result *Token) (*Token, error) {
