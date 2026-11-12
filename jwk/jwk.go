@@ -15,9 +15,10 @@ import (
 
 // PublicFromJwk reads a public key from its jwk. An "oct" jwk is refused with
 // ErrInvalidPublicKey: a symmetric key (RFC 7518 section 6.4) has no public half.
-// An "OKP" jwk of subtype X25519 is returned as an *ecdh.PublicKey, which RFC
-// 8037 section 3.2 bars from signing, and of any subtype other than Ed25519 and
-// X25519 is refused with ErrUnsupportedAlgorithm.
+// An "OKP" jwk of subtype Ed25519 is returned as an ed25519.PublicKey value, the
+// type x509.ParsePKIXPublicKey returns. One of subtype X25519 is returned as an
+// *ecdh.PublicKey, which RFC 8037 section 3.2 bars from signing. One of any
+// other subtype is refused with ErrUnsupportedAlgorithm.
 func PublicFromJwk(jwk map[string]any) (crypto.PublicKey, error) {
 	return internal_jwk.PublicFromJwk(jwk)
 }
@@ -56,9 +57,10 @@ func PublicJwk(publicKey crypto.PublicKey) (*map[string]any, error) {
 
 // PrivateFromJwk reads a private or symmetric key from its jwk. An "oct" jwk
 // (RFC 7518 section 6.4) is returned as a []byte; its "k" must be present,
-// strict base64url and not empty. An "OKP" jwk of subtype X25519 is returned as
-// an *ecdh.PrivateKey, and its "x" must be the public key of its "d" (RFC 8037
-// section 2).
+// strict base64url and not empty. An "OKP" jwk of subtype Ed25519 is returned
+// as an ed25519.PrivateKey value, the type x509.ParsePKCS8PrivateKey returns.
+// One of subtype X25519 is returned as an *ecdh.PrivateKey. The "x" of either
+// must be the public key of its "d" (RFC 8037 section 2).
 func PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error) {
 	return internal_jwk.PrivateFromJwk(jwk)
 }
