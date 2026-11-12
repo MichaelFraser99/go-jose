@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"testing"
@@ -19,10 +20,10 @@ func TestJwks_Add(t *testing.T) {
 		{
 			name:        "Add valid key",
 			initialJwks: Jwks{},
-			keyToAdd:    map[string]any{"kid": "key1", "alg": "RS256"},
+			keyToAdd:    map[string]any{"kty": "RSA", "kid": "key1", "alg": "RS256"},
 			expectErr:   false,
 			expectedKeys: []map[string]any{
-				{"kid": "key1", "alg": "RS256"},
+				{"kty": "RSA", "kid": "key1", "alg": "RS256"},
 			},
 		},
 		{
@@ -32,10 +33,10 @@ func TestJwks_Add(t *testing.T) {
 					EnforceUniqueKIDs bool
 				}{EnforceUniqueKIDs: true},
 				Keys: []map[string]any{
-					{"kid": "key1", "alg": "RS256"},
+					{"kty": "RSA", "kid": "key1", "alg": "RS256"},
 				},
 			},
-			keyToAdd:    map[string]any{"kid": "key1", "alg": "RS256"},
+			keyToAdd:    map[string]any{"kty": "RSA", "kid": "key1", "alg": "RS256"},
 			expectErr:   true,
 			expectedErr: fmt.Errorf("%wprovided jwk has kid value matching a value already present in the keyset", joseerror.ErrKeystoreError),
 		},
@@ -46,24 +47,49 @@ func TestJwks_Add(t *testing.T) {
 					EnforceUniqueKIDs bool
 				}{EnforceUniqueKIDs: false},
 				Keys: []map[string]any{
-					{"kid": "key1", "alg": "RS256"},
+					{"kty": "RSA", "kid": "key1", "alg": "RS256"},
 				},
 			},
-			keyToAdd:  map[string]any{"kid": "key1", "alg": "RS256"},
+			keyToAdd:  map[string]any{"kty": "RSA", "kid": "key1", "alg": "RS256"},
 			expectErr: false,
 			expectedKeys: []map[string]any{
-				{"kid": "key1", "alg": "RS256"},
-				{"kid": "key1", "alg": "RS256"},
+				{"kty": "RSA", "kid": "key1", "alg": "RS256"},
+				{"kty": "RSA", "kid": "key1", "alg": "RS256"},
 			},
 		},
 		{
-			name:        "Add malformed key",
+			name:        "Add a key with no kty",
 			initialJwks: Jwks{},
 			keyToAdd:    map[string]any{"invalidKey": "value"},
-			expectErr:   false,
-			expectedKeys: []map[string]any{
-				{"invalidKey": "value"},
-			},
+			expectErr:   true,
+			expectedErr: fmt.Errorf("%wa jwk must have a non-empty string \"kty\" member (RFC 7517 section 4.1)", joseerror.ErrKeystoreError),
+		},
+		{
+			name:        "Add an empty key",
+			initialJwks: Jwks{},
+			keyToAdd:    map[string]any{},
+			expectErr:   true,
+			expectedErr: fmt.Errorf("%wa jwk must have a non-empty string \"kty\" member (RFC 7517 section 4.1)", joseerror.ErrKeystoreError),
+		},
+		{
+			name:        "Add a nil key",
+			initialJwks: Jwks{},
+			expectErr:   true,
+			expectedErr: fmt.Errorf("%wa jwk must have a non-empty string \"kty\" member (RFC 7517 section 4.1)", joseerror.ErrKeystoreError),
+		},
+		{
+			name:        "Add a key whose kty is empty",
+			initialJwks: Jwks{},
+			keyToAdd:    map[string]any{"kty": ""},
+			expectErr:   true,
+			expectedErr: fmt.Errorf("%wa jwk must have a non-empty string \"kty\" member (RFC 7517 section 4.1)", joseerror.ErrKeystoreError),
+		},
+		{
+			name:        "Add a key whose kty is not a string",
+			initialJwks: Jwks{},
+			keyToAdd:    map[string]any{"kty": 1},
+			expectErr:   true,
+			expectedErr: fmt.Errorf("%wa jwk must have a non-empty string \"kty\" member (RFC 7517 section 4.1)", joseerror.ErrKeystoreError),
 		},
 		{
 			name: "Add key with non-string kid and unique KIDs enforced",
@@ -72,7 +98,7 @@ func TestJwks_Add(t *testing.T) {
 					EnforceUniqueKIDs bool
 				}{EnforceUniqueKIDs: true},
 			},
-			keyToAdd:    map[string]any{"kid": 12345, "alg": "RS256"},
+			keyToAdd:    map[string]any{"kty": "RSA", "kid": 12345, "alg": "RS256"},
 			expectErr:   true,
 			expectedErr: fmt.Errorf("%wmalformed key ID found for JWK", joseerror.ErrKeystoreError),
 		},
@@ -226,5 +252,15 @@ func TestRetrieveByKeyID(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestJwks_ANilSetHoldsNoKeyAndTakesNone(t *testing.T) {
+	var jwks *Jwks
+	if keys, err := jwks.RetrieveByKeyID("key1"); !errors.Is(err, joseerror.ErrKeystoreError) || keys != nil {
+		t.Errorf("[RFC 7517 5] a nil set holds no key, so want ErrKeystoreError, got %v and %v", keys, err)
+	}
+	if err := jwks.Add(map[string]any{"kty": "RSA"}); !errors.Is(err, joseerror.ErrKeystoreError) {
+		t.Errorf("[RFC 7517 5] a key cannot be added to a nil set, so want ErrKeystoreError, got %v", err)
 	}
 }

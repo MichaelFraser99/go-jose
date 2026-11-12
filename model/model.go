@@ -191,7 +191,8 @@ type JWEOptions struct {
 	// for a PBES2 JWE. A peer chooses "p2c", and each decrypter of the token's alg
 	// runs that many, so a JWE whose "p2c" times the number of those decrypters
 	// is more than this is refused with ErrOutOfBounds before any decrypter runs.
-	// jwe.ParseHeader refuses a "p2c" above it. Zero or less means 1,200,000:
+	// jwe.ParseHeader and jwe.Decrypt refuse a "p2c" above it, whatever the
+	// decrypters. Zero or less means 1,200,000:
 	// draft-ietf-oauth-rfc8725bis section 3.13 recommends refusing more than
 	// twice the 600,000 iterations OWASP gives for HMAC SHA-256, which
 	// jwe.PasswordKey uses by default. So by default one password decrypter takes
@@ -224,9 +225,9 @@ type JWEOptions struct {
 	// refuses such a JWT whatever this says.
 	AllowUnauthenticatedJWT bool
 
-	// MaxKeysTried bounds how many decrypters of the token's alg jwe.Decrypt
-	// tries. More are refused with ErrTooManyKeys before any is tried. Zero or
-	// less means 100.
+	// MaxKeysTried bounds how many decrypters of one alg jwe.Decrypt may be
+	// given. More make every call fail with ErrInvalidOptions, whatever the
+	// token. Zero or less means 100.
 	MaxKeysTried int
 
 	// AcceptedTypes lists the media types the JWE's 'typ' header may name,
@@ -322,9 +323,12 @@ func (j *Jwks) UnmarshalJSON(data []byte) error {
 //
 // RFC 7517 section 4.5 does not require a kid to be unique within a key set, so a
 // set may legitimately carry more than one key under one kid, as an issuer mid key
-// rotation does. An error is returned only when no key carries the kid. Keys with
-// an absent or non-string kid are ignored.
+// rotation does. An error is returned only when no key carries the kid, as it is
+// for a nil set. Keys with an absent or non-string kid are ignored.
 func (j *Jwks) RetrieveByKeyID(kid string) ([]map[string]any, error) {
+	if j == nil {
+		return nil, fmt.Errorf("%wno matching key found for provided key ID, as the key set is nil", joseerror.ErrKeystoreError)
+	}
 	var keys []map[string]any
 	for _, key := range j.Keys {
 		if keyKid, ok := key["kid"]; ok {
@@ -341,7 +345,19 @@ func (j *Jwks) RetrieveByKeyID(kid string) ([]map[string]any, error) {
 	return keys, nil
 }
 
+// Add appends jwk to the set. A nil set, or a jwk whose "kty" is absent, empty
+// or not a string, is refused with ErrKeystoreError: RFC 7517 section 4.1
+// requires a "kty" of every JWK. With Opts.EnforceUniqueKIDs, a jwk whose "kid"
+// is not a string, or names a kid the set already holds, is refused with
+// ErrKeystoreError too. A jwk with no "kid" is always accepted, as RFC 7517
+// section 4.5 makes "kid" optional.
 func (j *Jwks) Add(jwk map[string]any) error {
+	if j == nil {
+		return fmt.Errorf("%wa jwk cannot be added to a nil key set", joseerror.ErrKeystoreError)
+	}
+	if kty, _ := jwk["kty"].(string); kty == "" {
+		return fmt.Errorf("%wa jwk must have a non-empty string \"kty\" member (RFC 7517 section 4.1)", joseerror.ErrKeystoreError)
+	}
 	if kid, ok := jwk["kid"]; ok && j.Opts.EnforceUniqueKIDs {
 		if sKid, ok := kid.(string); !ok {
 			return fmt.Errorf("%wmalformed key ID found for JWK", joseerror.ErrKeystoreError)

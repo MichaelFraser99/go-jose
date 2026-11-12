@@ -2,6 +2,7 @@ package jwe
 
 import (
 	"crypto"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -86,6 +87,9 @@ func GetEncrypterFromJwk(alg jwa.Algorithm, publicJwk map[string]any, opts *mode
 		return nil, err
 	}
 	key, err := read(publicJwk)
+	if errors.Is(err, joseerror.ErrInvalidPublicKey) {
+		return nil, err
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%wthe jwk is not a key for %s: %w", joseerror.ErrInvalidPublicKey, alg.String(), err)
 	}
@@ -117,6 +121,9 @@ func GetDecrypterFromJwk(alg jwa.Algorithm, privateJwk map[string]any, opts *mod
 		return nil, err
 	}
 	key, err := jwk.PrivateFromJwk(privateJwk)
+	if errors.Is(err, joseerror.ErrInvalidPrivateKey) {
+		return nil, err
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%wthe jwk is not a key for %s: %w", joseerror.ErrInvalidPrivateKey, alg.String(), err)
 	}

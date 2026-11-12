@@ -277,6 +277,8 @@ A key from a `jwk` header, or a member of a `jku` set, verifies the token only w
 
 A `jku` set is never used whole because nothing in it matched. When no member qualifies, the set contributes no key and the `jku` retriever's error matches `ErrNoKeyIdentifierMatch`. `VerifyCompactSerialization` then tries the next key source. If no key verifies, it reports `ErrInvalidSignature`, and the error also matches `ErrNoKeyIdentifierMatch`, unless another source failed.
 
+A `jwk` header names a public key (RFC 7515 section 4.1.3). A `jwk` header that holds a private key member, `d`, `p`, `q`, `dp`, `dq`, `qi`, `oth`, `k` or `priv`, makes the header malformed. The token is refused with `ErrMalformedToken` and `ErrMalformedClaim`, whether or not `UseTokenProvidedKeys` is set. The same applies to a JWE's `jwk` and `epk`. The member names are case-sensitive, so `D` is not a private member.
+
 When a key source fails, verification continues with the next source. A source fails when a fetch fails, a body is too large, a body does not decode, or your retriever returns an error. A key the token carries in its header, a `jwk` or an `x5c`, is different. Its bytes are in the signed header, so a fault in it is the same every time. So when verification reaches such a key and it cannot be used, the token is refused at once, and no later source is tried. A carried key that is only not selected, such as a `jwk` whose `kid` differs from the header's or an `x5c` chain that reaches none of your roots, gives way like any other source. Verification stops at the first key that verifies, so a key from your own retriever, which is tried first, can verify the token before a carried key is read. If no key verifies the signature, the error wraps each failure. It matches `ErrApplicationError` for a failed fetch, and `context.DeadlineExceeded` or `context.Canceled` when applicable. It does not match `ErrInvalidSignature`. A `kid`, `alg`, `use` or `key_ops` of the wrong JSON type disqualifies a `jku` member, and refuses an inline `jwk` with `ErrMalformedClaim`, whatever the header holds.
 
 No RFC makes `use` or `key_ops` a requirement: section 4.3 leaves it to each application to say which, if either, it honours. This library honours both by default. Set `JoseOptions.IgnoreKeyUse` to skip that check. It never relaxes the `kid` and `alg` rules.
@@ -381,7 +383,7 @@ A key that cannot be encoded is refused with the same errors:
 - An Ed25519 public key that is not the canonical encoding of a point. RFC 8032 section 5.1.3 refuses a `y` of 2^255-19 or more, and a set sign bit when `x` is 0.
 - An RSA key whose `e` is not an odd integer from 3 to 2^31-1.
 - An RSA private key whose `d` is not between 0 and `n`, or does not undo `e`.
-- An RSA private key with no primes and a modulus over 8192 bits.
+- An RSA private key with a modulus over 8192 bits, with or without its primes. No signer or decrypter of this library accepts one.
 - An RSA private key with one prime, or more than two. RFC 7518 section 6.3.2.7 says a consumer that does not support more than two MUST NOT use such a key, and `PrivateFromJwk` refuses a jwk that carries `oth`.
 - An RSA private key with a prime that is not positive. RFC 8017 section 3.2 makes `p` and `q` positive integers.
 - A two-prime RSA private key that `rsa.PrivateKey.Validate` rejects, such as one whose primes do not multiply to `n`.
@@ -425,7 +427,7 @@ An `EC` jwk is read only when its `crv` is P-256, P-384 or P-521. Any other curv
 
 Each integer member of an `RSA` jwk (`n`, `e`, `d`, `p`, `q`, `dp`, `dq` and `qi`) must use the minimum number of octets, as RFC 7518 section 2 requires of a Base64urlUInt. A member with a leading zero octet is refused with `ErrMalformedClaim`. Zero itself is the one octet `"AA"`. Without this rule one key would have more than one jwk, and so more than one RFC 7638 thumbprint.
 
-An `RSA` jwk's `e` must be an odd integer from 3 to 2^31-1. RFC 8017 section 3.1 sets the lower bound and requires an odd value, and `crypto/rsa` refuses a larger one. A private key's `d` must be a positive integer less than `n`, as RFC 3447 section 3.2 defines it. When `p` and `q` are present, the key must pass `rsa.PrivateKey.Validate`, and `dp`, `dq` and `qi` must be the CRT values of `p`, `q` and `d`. When they are absent, the reader recovers `p` and `q` from `n`, `e` and `d`, as NIST SP 800-56B Rev. 2 Appendix C.1 describes. The key must then pass `rsa.PrivateKey.Validate`. The key that the reader returns carries `p`, `q` and their CRT values, so it signs as fast as a key read with them. If `d` does not undo `e`, the primes are not found or the key fails `Validate`, and the jwk is refused. The method recovers only two primes, so a key with no primes whose modulus has more than two is refused, like a jwk that carries `oth`. An `*rsa.PrivateKey` that lists more than two primes, as `rsa.GenerateMultiPrimeKey` returns, is still accepted by the signers. Recovery usually costs one or two full-size exponentiations. `PrivateFromJwk` refuses a bad `n` or `e` in an RSA private key with `ErrInvalidPrivateKey`, and a refused `e` also matches `ErrInvalidPublicKey`. A Base64urlUInt with no octets is refused with `ErrMalformedClaim`. An `n` of zero is refused. With no primes, a modulus over 8192 bits is refused before the primes are recovered.
+An `RSA` jwk's `e` must be an odd integer from 3 to 2^31-1. RFC 8017 section 3.1 sets the lower bound and requires an odd value, and `crypto/rsa` refuses a larger one. A private key's `d` must be a positive integer less than `n`, as RFC 3447 section 3.2 defines it. When `p` and `q` are present, the key must pass `rsa.PrivateKey.Validate`, and `dp`, `dq` and `qi` must be the CRT values of `p`, `q` and `d`. When they are absent, the reader recovers `p` and `q` from `n`, `e` and `d`, as NIST SP 800-56B Rev. 2 Appendix C.1 describes. The key must then pass `rsa.PrivateKey.Validate`. The key that the reader returns carries `p`, `q` and their CRT values, so it signs as fast as a key read with them. If `d` does not undo `e`, the primes are not found or the key fails `Validate`, and the jwk is refused. The method recovers only two primes, so a key with no primes whose modulus has more than two is refused, like a jwk that carries `oth`. An `*rsa.PrivateKey` that lists more than two primes, as `rsa.GenerateMultiPrimeKey` returns, is still accepted by the signers. Recovery usually costs one or two full-size exponentiations, so a key without its primes reads about ten times slower than one with them: about 0.5 seconds at 8192 bits. A modulus that is prime is refused before recovery starts. `PrivateFromJwk` refuses a bad `n`, `e`, `d`, prime or CRT value in an RSA private key with `ErrInvalidPrivateKey`, and a refused `e` also matches `ErrInvalidPublicKey`. A Base64urlUInt with no octets is refused with `ErrMalformedClaim`. An `n` of zero is refused. A modulus over 8192 bits is refused before any private member is checked, with or without the primes. `PrivateFromJwk` sets no minimum size, so it reads a 1024-bit key. The signers and decrypters refuse a modulus under 2048 bits, as RFC 7518 sections 3.3, 3.5 and 4.3 require.
 
 A jwk with no `kty` is refused with `ErrInvalidPublicKey` or `ErrInvalidPrivateKey`. The error for an unsupported `kty` or `crv` names the values this library supports. It does not repeat the value the jwk carried, so a peer's text does not reach your logs.
 
@@ -433,7 +435,7 @@ A jwk with no `kty` is refused with `ErrInvalidPublicKey` or `ErrInvalidPrivateK
 
 `model.Jwks` holds a JWK Set. Decoding JSON into it follows RFC 7517 section 5: the document must be an object with a `keys` member holding an array of JWKs. Anything else is refused with `ErrKeystoreError`, including a missing `keys`, `"keys": null` and a document that is itself `null`. A field that may hold no set should be a `*model.Jwks`, which `null` leaves nil. The member is found by its exact name, `keys`, as RFC 7515 section 5.3 compares names; `KEYS`, `Keys` and other spellings are ignored like any unknown member. An element of the `keys` array that is `null` or not a JSON object is refused. A document that is not UTF-8, or that holds an unpaired UTF-16 surrogate escape, is refused with `ErrKeystoreError`. RFC 8259 sections 8.1 and 8.2 give these rules.
 
-`Opts.EnforceUniqueKIDs` applies to `Add` only. Decoding keeps every key, including keys with the same `kid`.
+`Add` refuses a jwk whose `kty` is absent, empty or not a string, with `ErrKeystoreError`, as RFC 7517 section 4.1 requires a `kty`. Decoding does not apply this rule, because RFC 7517 section 5 says that a member a reader cannot use is skipped, not that the set is refused. `Opts.EnforceUniqueKIDs` applies to `Add` only. With it, `Add` refuses a `kid` that the set already holds, or one that is not a string, and accepts any number of jwks with no `kid`. Decoding keeps every key, including keys with the same `kid`. A nil `*model.Jwks` holds no key: `RetrieveByKeyID` returns `ErrKeystoreError` and `Add` refuses with it, so neither panics.
 
 `Jwks.RetrieveByKeyID` returns every key that carries the given `kid`, in set order, because RFC 7517 section 4.5 does not make a `kid` unique. It returns an error only when no key carries it.
 
@@ -474,7 +476,7 @@ Any other `crypto.Signer`, such as a KMS signer, is called as Go's `crypto.Signe
 - `New` refuses an `alg` outside `jwa`, such as `jwa.Algorithm(999)`, with `ErrUnsupportedAlgorithm`. RFC 7515 section 4.1.1 says `alg` must be present and understood.
 - `New` checks the header it will sign with the same rules `Validate` applies, and returns the same errors. So it does not sign a header that its own `Validate` refuses for its shape:
   - `jku` and `x5u` must be HTTPS URLs. RFC 7515 sections 4.1.2 and 4.1.5 require TLS.
-  - `jwk` must be a JSON object (section 4.1.3).
+  - `jwk` must be a JSON object, and must not hold a private key member: `d`, `p`, `q`, `dp`, `dq`, `qi`, `oth`, `k` or `priv` (section 4.1.3 names a public key).
   - `kid`, `typ` and `cty` must be strings (sections 4.1.4, 4.1.9 and 4.1.10).
   - `x5c` must be a non-empty array of base64 DER certificates (section 4.1.6).
   - `x5t` and `x5t#S256` must be base64url (sections 4.1.7 and 4.1.8).
@@ -498,7 +500,7 @@ func jwt.Validate(ctx context.Context, token string, outOfBoundsPublicKey model.
 | `EncryptionHeader` | The JWE Protected Header, or nil for a JWT that is only signed |
 | `Decrypter` | The decrypter that decrypted the token, or nil for a JWT that is only signed |
 
-`opts` applies to the JWS and to the claims. `jweOpts` applies to the JWE, and has its own type, `model.JWEOptions`, so the two cannot be swapped. A rule for one layer can be wrong for the other. For example, an `AcceptedTypes` of `JWT` is correct for a signed JWT, but refuses the JWE around it, which usually has no `typ`. A JWT that is only signed needs no decrypters, and `Validate` does not read `jweOpts` for it.
+`opts` applies to the JWS and to the claims. `jweOpts` applies to the JWE, and has its own type, `model.JWEOptions`, so the two cannot be swapped. A rule for one layer can be wrong for the other. For example, an `AcceptedTypes` of `JWT` is correct for a signed JWT, but refuses the JWE around it, which usually has no `typ`. A JWT that is only signed needs no decrypters. If you give decrypters or `jweOpts`, `Validate` checks them as options for every token, as `jwe.CheckOptions` describes, and uses neither for a signed JWT.
 
 RFC 7519 allows a JWT that is signed, encrypted, or both. To accept only the shapes that you expect, set these in `opts`:
 
@@ -507,7 +509,7 @@ RFC 7519 allows a JWT that is signed, encrypted, or both. To accept only the sha
 
 `Validate` returns a nil `*Token` with every error, so check `err` before you read the token.
 
-The retriever supplies key material of your own. Pass nil only when a key the token's header names can verify it: when you have turned on `UseTokenProvidedKeys` for `jwk` and `jku`, or set `X509Roots` for `x5c` and `x5u`. With a nil retriever and neither option, no token can verify, so `Validate` refuses every token with `ErrInvalidOptions`, after it checks the header. If either option is set and the token names no key that it allows, the error is `ErrNoKeyIdentifierMatch`. `model.JoseOptions` carries everything described under [Keys a token carries](#keys-a-token-carries), and may be nil for the defaults.
+The retriever supplies key material of your own. Pass nil only when a key the token's header names can verify it: when you have turned on `UseTokenProvidedKeys` for `jwk` and `jku`, or set `X509Roots` for `x5c` and `x5u`. With a nil retriever and neither option, no token can verify, so `Validate` refuses every token with `ErrInvalidOptions`, after it checks the header. If either option is set and the token names no key that it allows, the error is `ErrNoKeyIdentifierMatch`. If you give `jwt.Validate` decrypters, an encrypt-only JWT can pass without a retriever, so a nil retriever is not an options fault. A signed JWT is then refused with `ErrInvalidSignature`, which also matches `ErrNoKeyIdentifierMatch`, unless a key the token names verifies it. `model.JoseOptions` carries everything described under [Keys a token carries](#keys-a-token-carries), and may be nil for the defaults.
 
 `Validate` checks each registered claim that is present:
 
@@ -601,7 +603,7 @@ decrypter, err := jwe.GetDecrypter(jwa.PBES2HS256A128KW, jwe.PasswordKey{Passwor
 
 CAUTION: Do not set a `Count` below 1000. RFC 7518 section 4.8.1.2 recommends at least 1000, and a lower count makes the password cheap to guess from any captured token. `Encrypt` accepts a lower count, because the section does not require the minimum. A recipient that sets `RequireRecommendedPBES2Count` refuses such a token.
 
-The sender chooses `p2c`, and each PBES2 decrypter that `Decrypt` tries runs that many iterations. So `JWEOptions.MaxPBES2Count` limits the iterations of one call to `Decrypt`. The limit is `p2c` multiplied by the number of decrypters of the token's `alg`. If that is more than `MaxPBES2Count`, `Decrypt` refuses the token with `ErrOutOfBounds` before any decrypter runs. The default is 1,200,000, which is twice the OWASP figure, as draft-ietf-oauth-rfc8725bis section 3.13 recommends. Thus one password decrypter accepts the default `Count` of 600,000, and so do two.
+The sender chooses `p2c`, and each PBES2 decrypter that `Decrypt` tries runs that many iterations. So `JWEOptions.MaxPBES2Count` limits the iterations of one call to `Decrypt`. A `p2c` that is more than `MaxPBES2Count` is refused with `ErrOutOfBounds`, whatever the decrypters. Then the limit is `p2c` multiplied by the number of decrypters of the token's `alg`. If that is more than `MaxPBES2Count`, `Decrypt` refuses the token with `ErrOutOfBounds`. Both refusals come before any decrypter runs. The default is 1,200,000, which is twice the OWASP figure, as draft-ietf-oauth-rfc8725bis section 3.13 recommends. Thus one password decrypter accepts the default `Count` of 600,000, and so do two.
 
 If you give `Decrypt` more passwords, or raise `Count` above 600,000, the recipient must raise `MaxPBES2Count` too. To keep the limit low, select the password with `ParseHeader`, for example by `kid`, and give `Decrypt` only that one.
 
@@ -616,7 +618,7 @@ If you give `Decrypt` more passwords, or raise `Count` above 600,000, the recipi
 `Decrypt` refuses a token with a `zip` header by default, with `ErrUnsupportedAlgorithm`. To decrypt such a token, set `JWEOptions.MaxDecompressedSize` to the largest plaintext that you accept, in octets. draft-ietf-oauth-rfc8725bis section 3.15 recommends a limit, and gives 250 KB as an example. `Decrypt` then inflates a `DEF` plaintext (RFC 1951) after the token is authenticated:
 
 - A plaintext that inflates to more than `MaxDecompressedSize` octets is refused with `ErrOutOfBounds`. `Decrypt` stops when it reaches the limit, so a small token cannot make it allocate more.
-- A plaintext that is not a DEFLATE stream is refused with `ErrMalformedToken`.
+- A plaintext that is not a DEFLATE stream is refused with `ErrMalformedToken`, and so is one that continues after the final block of its stream.
 - A `zip` other than `DEF` is refused with `ErrUnsupportedAlgorithm`, and a `zip` that is not a string with `ErrMalformedToken`.
 
 ### RSA1_5
@@ -666,12 +668,12 @@ decrypter, known := decryptersByKid[kid]
 
 CAUTION: The header is not authenticated until `Decrypt` succeeds. Anyone can write any `kid`. Use it only to select a decrypter, and identify the sender with `used`.
 
-A header can name a key with `jku`, `jwk`, `x5u` or `x5c`. In a JWE, that key is the public key of the recipient, and a public key cannot decrypt. Thus `Decrypt` does not fetch or read these keys. Only the decrypters that you give are used.
+A header can name a key with `jku`, `jwk`, `x5u` or `x5c`. In a JWE, that key is the public key of the recipient, and a public key cannot decrypt. Thus `Decrypt` does not fetch these keys or use them. It checks only their form: for example, a `jwk` that holds a private key member is refused. Only the decrypters that you give are used.
 
 `Decrypt` takes a `*model.JWEOptions`. Its fields:
 
 - `AllowedKeyManagementAlgorithms` and `AllowedContentEncryptionAlgorithms` limit the `alg` and `enc` values that a token can name. If a list is empty, all values that this library implements are permitted. A list that names a value this library does not implement, such as a JWS `alg`, is a configuration fault. `Decrypt` refuses every call with `ErrInvalidOptions` until you correct it.
-- `MaxKeysTried` limits the number of decrypters of the token's `alg`. The default is 100. If you give more, `Decrypt` refuses the token with `ErrTooManyKeys` before it tries any. With many keys, select one with `ParseHeader` and give `Decrypt` only that one.
+- `MaxKeysTried` limits the number of decrypters of each `alg`. The default is 100. If you give more, every call fails with `ErrInvalidOptions`, whatever the token. With many keys, select one with `ParseHeader` and give `Decrypt` only that one.
 - `OnDecrypterError` receives each decrypter that fails, and its error. Use it to see a fault such as a hardware module outage, which `Decrypt` otherwise reports as the same `ErrDecryptionFailed` as a bad token. What it receives can depend on the token, so log it, and do not send it to the sender.
 - `MaxPBES2Count` and `RequireRecommendedPBES2Count` limit the `p2c` of a PBES2 token. See [Passwords (PBES2)](#passwords-pbes2).
 - `MaxDecompressedSize` turns on `zip` and limits the size of the inflated plaintext. See [Compression](#compression).
@@ -747,8 +749,8 @@ Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 | `ErrExpired` | The current time is not before the token's `exp`, allowing for `ClockSkewLeeway` |
 | `ErrNotYetValid` | The token's `nbf` or `iat` is after the current time, allowing for `ClockSkewLeeway` |
 | `ErrAudienceMismatch` | `JoseOptions.ExpectedAudience` is set and the token's `aud` names none of its values |
-| `ErrInvalidOptions` | The options passed are themselves wrong. Most of these cases are refused before the token is read. A verifier with no retriever and no token key allowed is refused after the header is checked, so a token with a bad header reports that fault first. The cases are: a nil `ctx`; a `JoseOptions.ExpectedAudience` that holds an empty string; a JWE allow-list that names a value this library does not implement; an `AllowedSigningAlgorithms` entry that is not a signature algorithm this library implements; an `AcceptedTypes` entry that is not a media type name; and a nil retriever with neither `UseTokenProvidedKeys` nor `X509Roots` set |
-| `ErrTooManyKeys` | The signature did not verify under as many keys as `JoseOptions.MaxKeysTried` allows, and more keys or key sources remained. For a JWE, more decrypters of the token's `alg` were given than `MaxKeysTried` allows |
+| `ErrInvalidOptions` | The options passed are themselves wrong. Most of these cases are refused before the token is read. A verifier with no retriever and no token key allowed is refused after the header is checked, so a token with a bad header reports that fault first. The cases are: a nil `ctx`; a `JoseOptions.ExpectedAudience` that holds an empty string; a JWE allow-list that names a value this library does not implement; an `AllowedSigningAlgorithms` entry that is not a signature algorithm this library implements; an `AcceptedTypes` entry that is not a media type name; a nil decrypter, or more decrypters of one `alg` than `JWEOptions.MaxKeysTried` allows; and a nil retriever with neither `UseTokenProvidedKeys` nor `X509Roots` set, when `jwt.Validate` has no decrypters |
+| `ErrTooManyKeys` | The signature did not verify under as many keys as `JoseOptions.MaxKeysTried` allows, and more keys or key sources remained. |
 | `ErrOutOfBounds` | A JWE asks for more work than your options allow: a `p2c` above `JWEOptions.MaxPBES2Count`, or a plaintext that inflates to more than `MaxDecompressedSize`. It also covers a `p2c` below 1000 when `RequireRecommendedPBES2Count` is set |
 
 An error can match more than one sentinel. A header that breaks the specification matches `ErrMalformedToken` and also the sentinel for the fault, such as `ErrMalformedClaim` for a `kid` that is not a string. A header that is well formed but refused matches only the sentinel for the reason:
@@ -767,10 +769,11 @@ Most errors mean that the token is bad, so the response is a 4xx. A few mean tha
 3. The errors of your own retriever. `Validate` wraps them and adds no sentinel, so test them with `errors.Is(err, yourErr)`. A failed key store is a server fault (500 or 503).
 4. Every other sentinel. The token was refused (401, or 400 for `ErrMalformedToken` if you separate malformed requests).
 
-Three sentinels can also come from your side. Read these before you map them:
+Four sentinels can also come from your side. Read these before you map them:
 
-- `ErrTooManyKeys` for a JWE means that you gave more decrypters of the token's `alg` than `MaxKeysTried` allows. For a JWS, it means that the signature did not verify under as many keys as `MaxKeysTried` allows. Those keys can come from your retriever or from a `jku` set the peer chose. So set `MaxKeysTried` above the number of keys that your own retriever returns. Then the error can only come from a token that names too many keys, which is the peer's fault (401). For a JWE, it is always your fault (500).
-- `ErrDecryptionFailed` is the same for every failure that depends on a key, as RFC 7516 section 11.5 requires. So a hardware module outage looks like a bad token. To tell them apart, record the cause with `OnDecrypterError`, and decide after the call:
+- `ErrTooManyKeys` means that the signature did not verify under as many keys as `JoseOptions.MaxKeysTried` allows. This applies to a signed JWT and to the JWS inside a Nested JWT. The keys can come from your retriever or from a `jku` set the peer chose. So set `MaxKeysTried` above the number of keys that your own retriever returns. Then the error can only come from a token that names too many keys, which is the peer's fault (401). More decrypters of one `alg` than `JWEOptions.MaxKeysTried` allows is `ErrInvalidOptions`, not `ErrTooManyKeys`.
+- `ErrOutOfBounds` for a PBES2 token means that `p2c`, multiplied by the number of your decrypters of the token's `alg`, is more than `MaxPBES2Count`. A peer can cause it with a high `p2c`, which is a 4xx. You can cause it with too many PBES2 decrypters: three decrypters at the default `MaxPBES2Count` refuse a token at the common `p2c` of 600,000. So give at most `MaxPBES2Count` divided by your senders' `p2c` PBES2 decrypters. Then the error can only come from a token with a higher `p2c`, which is the peer's fault. A `zip` that inflates past `MaxDecompressedSize` is also `ErrOutOfBounds`, and is the peer's fault.
+- `ErrDecryptionFailed` is the same for every failure that depends on a key, as RFC 7516 section 11.5 requires. So a hardware module outage looks like a bad token. To tell them apart, record the cause with `OnDecrypterError`, and decide after the call. A wrong key or a forged token also calls `OnDecrypterError`, so test for the errors of your own key store only, as here:
 
 ```go
 var outage error
@@ -837,7 +840,7 @@ A jwk whose `key_ops` lists a value twice is now refused by `jws.GetValidatorFro
 
 `AcceptedTypes` and the `cty` check now ignore the case of ASCII letters only. v0.11.0 used Unicode case folding, so a `typ` with a lookalike letter, such as `ſecevent+jwt` with a long s, matched `secevent+jwt`. Media type names are ASCII (RFC 6838 section 4.2), so no valid `typ` or `cty` is affected, and you need to change nothing.
 
-A verifier given no retriever, and neither `UseTokenProvidedKeys` nor `X509Roots`, refuses every token with `ErrInvalidOptions`. v0.11.0 refused it with `ErrMalformedToken`, which blamed the token for a configuration fault. If token keys are allowed and the token names none, the error is `ErrNoKeyIdentifierMatch`. If you test for `ErrMalformedToken` in this case, test for these instead.
+A verifier given no retriever, and neither `UseTokenProvidedKeys` nor `X509Roots`, refuses every token with `ErrInvalidOptions`. v0.11.0 refused it with `ErrMalformedToken`, which blamed the token for a configuration fault. If token keys are allowed and the token names none, the error is `ErrNoKeyIdentifierMatch`. If you test for `ErrMalformedToken` in this case, test for these instead. If you give `jwt.Validate` decrypters, an encrypt-only JWT can pass, so the options are not wrong: a signed JWT that no key verifies is refused with `ErrInvalidSignature`.
 
 Two option values that no token could meet now fail every call with `ErrInvalidOptions`. One is an `AllowedSigningAlgorithms` entry that is not a signature algorithm this library implements. v0.11.0 refused every token with `ErrUnsupportedAlgorithm` instead. The other is an `AcceptedTypes` entry that is not a media type name, such as one with stray whitespace. v0.11.0 refused every token with `ErrMalformedClaim` or `ErrMissingClaim`. Correct the entry. Valid options are not affected.
 
@@ -930,7 +933,7 @@ Every change below is a compile error or a silent behaviour change for a consume
 - `PublicJwk` and `PrivateJwk` refuse every key that `PublicFromJwk` and `PrivateFromJwk` refuse, such as an EC key whose `d` is not the private key of its point, or an RSA key whose `e` is even.
 - An EC jwk with an unsupported `crv` is now refused with `ErrUnsupportedAlgorithm`. Before, the error matched no sentinel. The error text for an unsupported `kty` or `crv` no longer repeats the value.
 - `PublicFromJwk` and `PrivateFromJwk` refuse an RSA integer member with a leading zero octet, such as `e: "AAEAAQ"`, with `ErrMalformedClaim`. RFC 7518 section 2 requires the minimum number of octets. A producer that copies a DER integer, sign octet included, into `n` makes such a member. Have it strip the leading zero octet.
-- `PublicFromJwk` and `PrivateFromJwk` refuse an RSA `e` that is even, below 3 or above 2^31-1. An `e` of more than 8 octets used to be read as its low 64 bits. They also refuse an RSA integer member with no octets, an `n` of zero, and a private key with no primes whose modulus is over 8192 bits.
+- `PublicFromJwk` and `PrivateFromJwk` refuse an RSA `e` that is even, below 3 or above 2^31-1. An `e` of more than 8 octets used to be read as its low 64 bits. They also refuse an RSA integer member with no octets, an `n` of zero, and a private key whose modulus is over 8192 bits.
 - `PrivateFromJwk` reports a bad `n` or `e` in an RSA private jwk with `ErrInvalidPrivateKey`. The error still matches the class of the inner fault, such as `ErrInvalidPublicKey` for a refused `e`.
 
 ### `jwt.Validate`

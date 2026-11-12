@@ -57,7 +57,7 @@ func CheckOptions(opts *model.JoseOptions) error {
 		if !hasValidator(alg) {
 			name := alg.String()
 			if alg == jwa.Unknown {
-				name = "jwa.Unknown, which a name GetAlgorithm does not recognise gives,"
+				name = "jwa.Unknown (what GetAlgorithm returns for a name it does not recognise)"
 			} else if name == "" {
 				name = fmt.Sprintf("jwa.Algorithm(%d)", int(alg))
 			}
@@ -74,7 +74,7 @@ func verify(ctx context.Context, compactSerialization string, outOfBoundsPublicK
 	if err := CheckOptions(opts); err != nil {
 		return nil, nil, nil, err
 	}
-	components := strings.Split(compactSerialization, ".")
+	components := strings.SplitN(compactSerialization, ".", 4)
 	if len(components) != 3 {
 		return nil, nil, nil, fmt.Errorf("%winvalid compact serialization format", joseerror.ErrMalformedToken)
 	}

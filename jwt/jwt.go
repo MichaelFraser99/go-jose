@@ -110,7 +110,8 @@ func New(signer crypto.Signer, head, body map[string]any, opts Opts) (*string, e
 // different types, so they cannot be swapped.
 //
 // A token of three segments is a JWS (RFC 7515 section 7.1): it is verified with
-// outOfBoundsPublicKey and opts, and decrypters and jweOpts are not read. With
+// outOfBoundsPublicKey and opts. Decrypters and jweOpts are checked by
+// jwe.CheckOptions, as for every token, and not otherwise used. With
 // opts.RequireEncryptedJWT set, it is refused with ErrUnsupportedAlgorithm.
 //
 // A token of five segments is a JWE (RFC 7516 section 9). It is decrypted with
@@ -154,12 +155,20 @@ func New(signer crypto.Signer, head, body map[string]any, opts Opts) (*string, e
 // When opts.ExpectedAudience is set, aud must name one of its values (section 4.1.3).
 // Options whose ExpectedAudience holds an empty string are refused with
 // ErrInvalidOptions, whatever the token.
+//
+// With decrypters and a nil outOfBoundsPublicKey, an encrypt-only JWT can
+// still pass, so the options are not wrong. A JWS, signed alone or nested, is
+// then refused as the token's fault: ErrInvalidSignature, matching
+// ErrNoKeyIdentifierMatch, unless a key the token names verifies it.
 func Validate(ctx context.Context, token string, outOfBoundsPublicKey model.Retriever, decrypters []model.Decrypter, opts *model.JoseOptions, jweOpts *model.JWEOptions) (*Token, error) {
 	if err := validateOptions(opts); err != nil {
 		return nil, err
 	}
-	if err := jwe.CheckOptions(jweOpts); err != nil {
+	if err := jwe.CheckOptions(decrypters, jweOpts); err != nil {
 		return nil, err
+	}
+	if outOfBoundsPublicKey == nil && len(decrypters) > 0 {
+		outOfBoundsPublicKey = noSigningKeys
 	}
 	switch segments := strings.Count(token, ".") + 1; segments {
 	case 3:
@@ -229,6 +238,10 @@ func validateEncrypted(ctx context.Context, token string, outOfBoundsPublicKey m
 	return result, nil
 }
 
+func noSigningKeys() ([]crypto.PublicKey, error) {
+	return nil, fmt.Errorf("%wno retriever was given, so only a key the token names, or an encrypt-only JWT, can pass", joseerror.ErrNoKeyIdentifierMatch)
+}
+
 func checkUnsigned(head map[string]any, opts *model.JoseOptions, jweOpts *model.JWEOptions) error {
 	if opts != nil && opts.RequireSignedJWT {
 		return fmt.Errorf("%wthe JWT is encrypted and not signed, and RequireSignedJWT is set", joseerror.ErrInvalidSignature)
@@ -252,9 +265,9 @@ func checkUnsigned(head map[string]any, opts *model.JoseOptions, jweOpts *model.
 // not verified. A "cty" in head that does not name "JWT" is refused with
 // ErrMalformedClaim. head is not modified.
 func Encrypt(encrypter model.Encrypter, enc jwa.Encryption, signedJWT string, head map[string]any) (string, error) {
-	segments := strings.Split(signedJWT, ".")
+	segments := strings.SplitN(signedJWT, ".", 4)
 	if len(segments) != 3 {
-		return "", fmt.Errorf("%wa signed JWT has three segments, got %d", joseerror.ErrMalformedToken, len(segments))
+		return "", fmt.Errorf("%wa signed JWT has three segments, got %d", joseerror.ErrMalformedToken, strings.Count(signedJWT, ".")+1)
 	}
 	signedHead, err := jsonutils.DecodeBase64urlMap(segments[0])
 	if err != nil {

@@ -38,7 +38,9 @@ const defaultMaxKeysTried = 100
 // alg requires, else the ErrMalformedClaim, ErrMissingClaim,
 // ErrMissingCriticalClaim or ErrUnsupportedAlgorithm naming the fault. A JWE
 // Encrypted Key of a length Decrypt refuses for alg, such as a non-empty one
-// for dir or ECDH-ES, is ErrEncryptionError. The AAD is the base64url-encoded
+// for dir or ECDH-ES, is ErrEncryptionError, as is an encrypter that rewrites
+// or removes a parameter of head, or "alg" or "enc", from the header it is
+// given. The AAD is the base64url-encoded
 // header (section 5.1 step 14), and the Initialization Vector is random.
 func Encrypt(encrypter model.Encrypter, enc jwa.Encryption, plaintext []byte, head map[string]any) (string, error) {
 	return encrypt(rand.Reader, encrypter, enc, plaintext, head)
@@ -71,12 +73,29 @@ func encrypt(random io.Reader, encrypter model.Encrypter, enc jwa.Encryption, pl
 	h["alg"] = alg.String()
 	h["enc"] = enc.String()
 
+	given := map[string][]byte{}
+	for name, value := range h {
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return "", fmt.Errorf("%wthe %s header cannot be encoded as JSON: %s", joseerror.ErrMalformedClaim, jsonutils.QuoteBounded(name), err.Error())
+		}
+		given[name] = encoded
+		decoder := json.NewDecoder(bytes.NewReader(encoded))
+		decoder.UseNumber()
+		var copied any
+		if err := decoder.Decode(&copied); err != nil {
+			return "", fmt.Errorf("%wthe %s header cannot be decoded from its JSON: %s", joseerror.ErrMalformedClaim, jsonutils.QuoteBounded(name), err.Error())
+		}
+		h[name] = copied
+	}
 	cek, encryptedKey, err := encrypter.WrapKey(random, enc, h)
 	if err != nil {
 		return "", err
 	}
-	if h["alg"] != alg.String() || h["enc"] != enc.String() {
-		return "", fmt.Errorf("%wthe encrypter rewrote the 'alg' or 'enc' header", joseerror.ErrEncryptionError)
+	for name, encoded := range given {
+		if rewritten, err := json.Marshal(h[name]); err != nil || !bytes.Equal(rewritten, encoded) {
+			return "", fmt.Errorf("%wthe encrypter rewrote or removed the %s header", joseerror.ErrEncryptionError, jsonutils.QuoteBounded(name))
+		}
 	}
 	if _, found := h["zip"]; found {
 		return "", fmt.Errorf("%wthe encrypter added a 'zip' header to plaintext that was not compressed", joseerror.ErrEncryptionError)
@@ -176,9 +195,7 @@ func checkProducerHeader(headBytes []byte) error {
 //
 // Only the decrypters passed are tried. A "jku", "jwk", "x5u" or "x5c" in the
 // header names the recipient's public key, which cannot decrypt, so none is
-// fetched or read. If more decrypters have the token's alg than
-// JWEOptions.MaxKeysTried allows (100 when unset), Decrypt refuses with
-// ErrTooManyKeys before it tries any. Otherwise it tries each in turn. Each
+// fetched or read. Decrypt tries each decrypter of the token's alg in turn. Each
 // decrypter is given its own copy of the encrypted key, and the decrypters
 // share one copy of the header, separate from the one Decrypt returns.
 //
@@ -189,9 +206,8 @@ func checkProducerHeader(headBytes []byte) error {
 // no decrypter has the token's alg, the message says so; that reveals which
 // algs you hold keys for, as the time taken does, but nothing about a key.
 //
-// A nil ctx or decrypter, an allow-list naming an algorithm this library does
-// not implement, or an AcceptedTypes entry that is not a media type name, is
-// ErrInvalidOptions. ctx is checked before each
+// A nil ctx, and any decrypters or options CheckOptions refuses, are
+// ErrInvalidOptions, whatever the token. ctx is checked before each
 // decrypter and after the last, and its error is returned once it ends. A
 // crypto.Decrypter takes no context, so a call already running cannot be
 // interrupted; to bound one, build its decrypter per request around a
@@ -206,13 +222,7 @@ func Decrypt(ctx context.Context, compactSerialization string, decrypters []mode
 	if ctx == nil {
 		return nil, nil, nil, fmt.Errorf("%wthe context passed is nil", joseerror.ErrInvalidOptions)
 	}
-	for _, candidate := range decrypters {
-		if common.IsNil(candidate) {
-			return nil, nil, nil, fmt.Errorf("%wa decrypter passed is nil", joseerror.ErrInvalidOptions)
-		}
-	}
-
-	if err := CheckOptions(opts); err != nil {
+	if err := CheckOptions(decrypters, opts); err != nil {
 		return nil, nil, nil, err
 	}
 
@@ -253,13 +263,6 @@ func Decrypt(ctx context.Context, compactSerialization string, decrypters []mode
 	}
 	if len(candidates) == 0 {
 		return nil, nil, nil, fmt.Errorf("%wno decrypter given implements %s", joseerror.ErrDecryptionFailed, alg)
-	}
-	maxKeysTried := defaultMaxKeysTried
-	if opts != nil && opts.MaxKeysTried > 0 {
-		maxKeysTried = opts.MaxKeysTried
-	}
-	if len(candidates) > maxKeysTried {
-		return nil, nil, nil, fmt.Errorf("%w%d decrypters implement %s, more than the %d MaxKeysTried allows", joseerror.ErrTooManyKeys, len(candidates), alg, maxKeysTried)
 	}
 	if slices.Contains(header.PasswordAlgorithms, alg) {
 		_, count, _ := pbes2.Parameters(protectedHeader)
@@ -316,7 +319,7 @@ func Decrypt(ctx context.Context, compactSerialization string, decrypters []mode
 // "kid". Never trust a value from it. To know which key a token was encrypted
 // with, use the decrypter Decrypt returns.
 func ParseHeader(compactSerialization string, opts *model.JWEOptions) (map[string]any, error) {
-	if err := CheckOptions(opts); err != nil {
+	if err := CheckOptions(nil, opts); err != nil {
 		return nil, err
 	}
 	_, protectedHeader, _, _, err := parseProtected(compactSerialization, opts)
@@ -342,12 +345,26 @@ func parseProtected(compactSerialization string, opts *model.JWEOptions) ([]stri
 	return components, protectedHeader, alg, enc, nil
 }
 
-// CheckOptions refuses, with ErrInvalidOptions, JWE options that are wrong
-// whatever the token: an allow-list naming an algorithm this library does not
-// implement for that layer, and an AcceptedTypes entry that is not a media type
-// name (RFC 6838 section 4.2). Decrypt and ParseHeader call it before reading
-// the token.
-func CheckOptions(opts *model.JWEOptions) error {
+// CheckOptions refuses, with ErrInvalidOptions, decrypters and JWE options that
+// are wrong whatever the token: a nil decrypter, more decrypters of one alg than
+// MaxKeysTried allows (100 when unset), an allow-list naming an algorithm this
+// library does not implement for that layer, and an AcceptedTypes entry that is
+// not a media type name (RFC 6838 section 4.2). Decrypt calls it before reading
+// the token, and ParseHeader with no decrypters.
+func CheckOptions(decrypters []model.Decrypter, opts *model.JWEOptions) error {
+	maxKeysTried := defaultMaxKeysTried
+	if opts != nil && opts.MaxKeysTried > 0 {
+		maxKeysTried = opts.MaxKeysTried
+	}
+	perAlg := map[jwa.Algorithm]int{}
+	for _, decrypter := range decrypters {
+		if common.IsNil(decrypter) {
+			return fmt.Errorf("%wa decrypter passed is nil", joseerror.ErrInvalidOptions)
+		}
+		if perAlg[decrypter.Alg()]++; perAlg[decrypter.Alg()] > maxKeysTried {
+			return fmt.Errorf("%wmore than the %d decrypters MaxKeysTried allows implement %s", joseerror.ErrInvalidOptions, maxKeysTried, decrypter.Alg())
+		}
+	}
 	if opts == nil {
 		return nil
 	}
@@ -365,7 +382,8 @@ func CheckOptions(opts *model.JWEOptions) error {
 }
 
 func inflate(compressed []byte, limit int) ([]byte, error) {
-	reader := flate.NewReader(bytes.NewReader(compressed))
+	source := bytes.NewReader(compressed)
+	reader := flate.NewReader(source)
 	defer func() { _ = reader.Close() }()
 	read := int64(limit)
 	if read < math.MaxInt64 {
@@ -377,6 +395,9 @@ func inflate(compressed []byte, limit int) ([]byte, error) {
 	}
 	if len(inflated) > limit {
 		return nil, fmt.Errorf("%wthe plaintext inflates to more than the %d octets MaxDecompressedSize allows", joseerror.ErrOutOfBounds, limit)
+	}
+	if source.Len() > 0 {
+		return nil, fmt.Errorf("%wthe 'zip' header names DEF, and the plaintext continues after the final block of the DEFLATE stream (RFC 1951 section 3.2.3)", joseerror.ErrMalformedToken)
 	}
 	return slices.Clip(inflated), nil
 }
