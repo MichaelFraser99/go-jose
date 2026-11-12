@@ -3,6 +3,7 @@ package jws_test
 import (
 	"context"
 	"crypto"
+	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
+	"github.com/MichaelFraser99/go-jose/jwk"
 	"github.com/MichaelFraser99/go-jose/jws"
 	"github.com/MichaelFraser99/go-jose/model"
 )
@@ -33,7 +35,9 @@ func keySetSigner(t *testing.T) *ecdsa.PrivateKey {
 
 func keySetToken(t *testing.T, signer model.Signer, header map[string]any) string {
 	t.Helper()
-	header["alg"] = signer.Alg().String()
+	if _, named := header["alg"]; !named {
+		header["alg"] = signer.Alg().String()
+	}
 	head, err := json.Marshal(header)
 	if err != nil {
 		t.Fatal(err)
@@ -374,6 +378,130 @@ func TestVerify_KeySetDoesNotLoosenTheKidShape(t *testing.T) {
 			_, _, err := jws.Verify(context.Background(), token, nil, opts)
 			if !errors.Is(err, joseerror.ErrMalformedToken) {
 				t.Errorf("[RFC 7515 4.1.4] a kid MUST be a string, so the token is malformed whatever key set is given, got %v", err)
+			}
+		})
+	}
+}
+
+func TestVerify_AKeySetMemberHoldingAPrivateKeyIsReadForItsPublicHalf(t *testing.T) {
+	right := keySetSigner(t)
+	member, err := jwk.PrivateJwk(right)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := keySetToken(t, es256Signer(t, right), map[string]any{"kid": (*member)["kid"]})
+	if _, _, err := jws.Verify(context.Background(), token, nil, &model.JoseOptions{KeySet: &model.Jwks{Keys: []map[string]any{*member}}}); err != nil {
+		t.Errorf("[RFC 7517 5] a JWK Set may hold private keys, and the caller's own set is read for the public half, got %v", err)
+	}
+}
+
+func TestVerify_AMemberWhoseKeyTypeCannotServeTheAlgIsNotSelected(t *testing.T) {
+	publicJwk := func(public crypto.PublicKey, kid string) map[string]any {
+		member, err := jwk.PublicJwk(public)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if kid == "" {
+			delete(*member, "kid")
+		} else {
+			(*member)["kid"] = kid
+		}
+		return *member
+	}
+	edKey := newEd25519Key(t)
+	x25519Key, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		t.Fatal(err)
+	}
+	hmacSigner, err := jws.GetSigner(jwa.HS256, &model.Opts{SecretKey: &secret})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rsaSigner, err := jws.GetSigner(jwa.RS256, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edSigner, err := jws.GetSignerFromPrivateKey(jwa.Ed25519, edKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ecSigner := es256Signer(t, keySetSigner(t))
+
+	tests := map[string]struct {
+		signer  model.Signer
+		alg     string
+		kid     string
+		members []map[string]any
+		clause  string
+	}{
+		"an ES256 token whose kid names an Ed25519 member": {
+			signer: ecSigner, kid: "k3",
+			members: []map[string]any{selectionJwk(&keySetSigner(t).PublicKey, map[string]any{"kid": "k1"}), publicJwk(edKey.Public(), "k3")},
+			clause:  "RFC 7518 3.4",
+		},
+		"an HS256 token and an RSA member with no alg": {
+			signer:  hmacSigner,
+			members: []map[string]any{publicJwk(rsaSigner.Public(), "")},
+			clause:  "RFC 7518 3.2",
+		},
+		"an EdDSA token and an X25519 member": {
+			signer: edSigner, alg: "EdDSA",
+			members: []map[string]any{publicJwk(x25519Key.PublicKey(), "")},
+			clause:  "RFC 8037 3.1",
+		},
+		"an Ed25519 token and an X25519 member": {
+			signer:  edSigner,
+			members: []map[string]any{publicJwk(x25519Key.PublicKey(), "")},
+			clause:  "RFC 9864 2.2",
+		},
+		"an ES256 token and an X25519 member": {
+			signer:  ecSigner,
+			members: []map[string]any{publicJwk(x25519Key.PublicKey(), "")},
+			clause:  "RFC 8037 3.2",
+		},
+	}
+	for name, tc := range tests {
+		header := func() map[string]any {
+			head := map[string]any{}
+			if tc.kid != "" {
+				head["kid"] = tc.kid
+			}
+			if tc.alg != "" {
+				head["alg"] = tc.alg
+			}
+			return head
+		}
+		t.Run(name+" through KeySet", func(t *testing.T) {
+			token := keySetToken(t, tc.signer, header())
+			_, _, err := jws.Verify(context.Background(), token, nil, &model.JoseOptions{KeySet: &model.Jwks{Keys: tc.members}})
+			if !errors.Is(err, joseerror.ErrInvalidSignature) || !errors.Is(err, joseerror.ErrNoKeyIdentifierMatch) {
+				t.Errorf("[%s] no member can serve the token's alg, so none is selected, got %v", tc.clause, err)
+			}
+		})
+		t.Run(name+" through jku", func(t *testing.T) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_ = json.NewEncoder(w).Encode(model.Jwks{Keys: tc.members})
+			}))
+			t.Cleanup(server.Close)
+			head := header()
+			head["jku"] = server.URL
+			token := keySetToken(t, tc.signer, head)
+			_, _, err := jws.Verify(context.Background(), token, nil, &model.JoseOptions{UseTokenProvidedKeys: true, HttpClient: server.Client()})
+			if !errors.Is(err, joseerror.ErrInvalidSignature) || !errors.Is(err, joseerror.ErrNoKeyIdentifierMatch) {
+				t.Errorf("[%s] no jku member can serve the token's alg, so none is selected, got %v", tc.clause, err)
+			}
+		})
+		t.Run(name+" through an inline jwk", func(t *testing.T) {
+			head := header()
+			head["jwk"] = tc.members[len(tc.members)-1]
+			token := keySetToken(t, tc.signer, head)
+			_, _, err := jws.Verify(context.Background(), token, nil, &model.JoseOptions{UseTokenProvidedKeys: true})
+			if !errors.Is(err, joseerror.ErrInvalidSignature) || !errors.Is(err, joseerror.ErrNoKeyIdentifierMatch) {
+				t.Errorf("[%s] an inline jwk that cannot serve the token's alg is not selected, got %v", tc.clause, err)
 			}
 		})
 	}

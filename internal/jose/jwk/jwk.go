@@ -11,6 +11,7 @@ import (
 	"github.com/MichaelFraser99/go-jose/internal/httputils"
 	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
 	"github.com/MichaelFraser99/go-jose/joseerror"
+	"github.com/MichaelFraser99/go-jose/jwa"
 	"github.com/MichaelFraser99/go-jose/model"
 )
 
@@ -171,6 +172,7 @@ func PublicFromJwk(jwk map[string]any) (crypto.PublicKey, error) {
 //   - its "kid" is absent or equals kid, which RFC 7515 section 4.1.4 calls a hint;
 //   - its "alg" is absent or equals alg, since RFC 8725 section 3.1 requires each key
 //     be used with exactly one algorithm;
+//   - its key type can serve alg, as KeyTypeServes reports;
 //   - unless ignoreKeyUse, its "use" is absent or "sig" and its "key_ops" is absent or
 //     includes "verify" (RFC 7517 sections 4.2 and 4.3), and, when
 //     strictKeyOperations, it passes CheckRecommendedKeyOperations.
@@ -210,10 +212,68 @@ func checkMember(jwk map[string]any, kid *string, alg string, ignoreKeyUse, stri
 		}
 	}
 
+	if !KeyTypeServes(jwk, alg) {
+		return fmt.Errorf("%wjwk key type cannot be used with the alg from jose header", joseerror.ErrNoKeyIdentifierMatch)
+	}
+
 	if ignoreKeyUse {
 		return nil
 	}
 	return CheckKeyUse(jwk, joseerror.ErrNoKeyIdentifierMatch, joseerror.ErrMalformedClaim, strictKeyOperations)
+}
+
+type keyType struct {
+	kty, crv string
+}
+
+var signatureKeyTypes = map[jwa.Algorithm]keyType{
+	jwa.ES256:   {"EC", "P-256"},
+	jwa.ES384:   {"EC", "P-384"},
+	jwa.ES512:   {"EC", "P-521"},
+	jwa.RS256:   {kty: "RSA"},
+	jwa.RS384:   {kty: "RSA"},
+	jwa.RS512:   {kty: "RSA"},
+	jwa.PS256:   {kty: "RSA"},
+	jwa.PS384:   {kty: "RSA"},
+	jwa.PS512:   {kty: "RSA"},
+	jwa.HS256:   {kty: "oct"},
+	jwa.HS384:   {kty: "oct"},
+	jwa.HS512:   {kty: "oct"},
+	jwa.EdDSA:   {"OKP", "Ed25519"},
+	jwa.Ed25519: {"OKP", "Ed25519"},
+	jwa.MLDSA44: {kty: "AKP"},
+	jwa.MLDSA65: {kty: "AKP"},
+	jwa.MLDSA87: {kty: "AKP"},
+}
+
+var readableCurves = map[string][]string{
+	"EC":  {"P-256", "P-384", "P-521"},
+	"OKP": {"Ed25519", "X25519"},
+}
+
+// KeyTypeServes reports whether a jwk's "kty", and its "crv" where the key type
+// has one, can serve the JWS alg. RFC 7518 sections 3.2 to 3.5 give oct to HS*,
+// RSA to RS* and PS*, and EC to ES256, ES384 and ES512 on P-256, P-384 and P-521.
+// RFC 8037 section 3.1 and RFC 9864 give OKP Ed25519 to EdDSA and Ed25519, and
+// RFC 9964 gives AKP to ML-DSA. A "kty" or "crv" that is absent, not a string, or
+// not one this library reads is not judged here, so reading the key reports it.
+func KeyTypeServes(jwk map[string]any, alg string) bool {
+	want, known := signatureKeyTypes[jwa.GetAlgorithm(alg)]
+	if !known {
+		return true
+	}
+	kty, ok := jwk["kty"].(string)
+	if !ok || !slices.Contains([]string{"EC", "RSA", "OKP", "AKP", "oct"}, kty) {
+		return true
+	}
+	if kty != want.kty {
+		return false
+	}
+	crv, ok := jwk["crv"].(string)
+	if !ok || want.crv == "" || !slices.Contains(readableCurves[kty], crv) {
+		return true
+	}
+	return crv == want.crv
 }
 
 // CheckKeyUse refuses a jwk its publisher marked as not for verifying signatures:

@@ -17,21 +17,29 @@ type JoseOptions struct {
 	// KeySet is a JWK Set (RFC 7517 section 5) of the caller's own keys, such as an
 	// issuer's jwks_uri document the caller fetched. Its keys are trusted as the
 	// retriever's are, so no other option is needed to use them. A nil KeySet adds no
-	// key.
+	// key. A KeySet that is not nil is a key source even when it holds no keys.
 	//
 	// For each token, a member is selected as a jku member is. Its "kid" must be absent
 	// or equal the token's kid, which RFC 7515 section 4.1.4 calls a hint. Its "alg"
-	// must be absent or equal the token's alg (RFC 8725 section 3.1). Its "use" and
-	// "key_ops" must permit verifying (RFC 7517 sections 4.2 and 4.3), unless
-	// IgnoreKeyUse is set, and StrictKeyOperations applies. A member this library
-	// cannot read as a public key is skipped, as RFC 7517 section 5 says. An "oct"
-	// member is never selected, so an HMAC key must come from a retriever.
+	// must be absent or equal the token's alg (RFC 8725 section 3.1). Its "kty", and
+	// "crv" where it has one, must serve the alg (RFC 7518 section 3, RFC 8037 section
+	// 3.1, RFC 9864, RFC 9964). Its "use" and "key_ops" must permit verifying (RFC
+	// 7517 sections 4.2 and 4.3), unless IgnoreKeyUse is set, and StrictKeyOperations
+	// applies. A member this library cannot read as a public key is skipped, as RFC
+	// 7517 section 5 says, and one holding a private key is read for its public half.
+	// An "oct" member is never selected, so an HMAC key must come from a retriever.
 	//
-	// The members are read on every call, so Keys may change between calls. The
-	// selected keys are tried after the retriever's and before any key the token
+	// The selected keys are tried after the retriever's and before any key the token
 	// names, and each counts towards MaxKeysTried. A token no member is selected for,
 	// and no other key verifies, is refused with ErrInvalidSignature matching
-	// ErrNoKeyIdentifierMatch, unless another key source failed.
+	// ErrNoKeyIdentifierMatch, unless another key source failed. That match is a
+	// sign the set lacks the token's key only when the token and every member carry
+	// a kid: a member with no kid is selected for any kid, and a token with no kid
+	// selects every member its alg can use.
+	//
+	// The members are read on every call. Never change a set a call may be using:
+	// to refresh it, decode a new Jwks and swap the pointer, for example through an
+	// atomic.Pointer.
 	KeySet *Jwks
 
 	// UseTokenProvidedKeys lets a key the token names through its jwk or jku header
