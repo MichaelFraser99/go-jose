@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
+	"strconv"
 	"time"
 
+	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 )
 
@@ -27,10 +30,13 @@ const DefaultFetchTimeout = 10 * time.Second
 // configured.
 type Fetch func(url, alias string) (*http.Response, error)
 
-// Fetcher binds a context, client and timeout into a Fetch.
-func Fetcher(ctx context.Context, client *http.Client, timeout time.Duration) Fetch {
+// Fetcher binds a context, client, timeout and allow-list into a Fetch. With
+// allowed non-empty, every request of a fetch, each redirect hop included, must
+// be the request a listed entry makes, compared without its fragment, else it is
+// refused before it is sent (draft-ietf-oauth-rfc8725bis section 3.10).
+func Fetcher(ctx context.Context, client *http.Client, timeout time.Duration, allowed []string) Fetch {
 	return func(url, alias string) (*http.Response, error) {
-		return RetrieveResource(ctx, client, timeout, url, alias)
+		return retrieve(ctx, client, timeout, allowed, url, alias)
 	}
 }
 
@@ -65,13 +71,19 @@ func timeoutOrDefault(timeout time.Duration) time.Duration {
 
 var errNotTLS = errors.New("refusing a request that does not use TLS")
 
+var errNotAllowed = errors.New("refusing a request to a URL not in AllowedKeyURLs")
+
 type httpsOnly struct {
-	next http.RoundTripper
+	next    http.RoundTripper
+	allowed map[string]bool
 }
 
 func (h httpsOnly) RoundTrip(request *http.Request) (*http.Response, error) {
 	if request.URL.Scheme != "https" {
 		return nil, errNotTLS
+	}
+	if h.allowed != nil && !h.allowed[requestKey(request.URL)] {
+		return nil, errNotAllowed
 	}
 	next := h.next
 	if next == nil {
@@ -87,11 +99,35 @@ func (h httpsOnly) RoundTrip(request *http.Request) (*http.Response, error) {
 // The fetch is bounded by the earlier of timeout and the client's own Timeout, so a
 // body that either limit cuts short is never taken as complete.
 func RetrieveResource(ctx context.Context, client *http.Client, timeout time.Duration, url, alias string) (*http.Response, error) {
+	return retrieve(ctx, client, timeout, nil, url, alias)
+}
+
+func requestKey(target *neturl.URL) string {
+	requested := *target
+	requested.Fragment = ""
+	requested.RawFragment = ""
+	return requested.String()
+}
+
+func requestsOf(allowed []string) map[string]bool {
+	if len(allowed) == 0 {
+		return nil
+	}
+	requests := make(map[string]bool, len(allowed))
+	for _, entry := range allowed {
+		if parsed, err := neturl.Parse(entry); err == nil {
+			requests[requestKey(parsed)] = true
+		}
+	}
+	return requests
+}
+
+func retrieve(ctx context.Context, client *http.Client, timeout time.Duration, allowed []string, url, alias string) (*http.Response, error) {
 	if client == nil {
 		return nil, fmt.Errorf("%w%s is specified but no client exists", joseerror.ErrApplicationError, alias)
 	}
 	tlsOnly := *client
-	tlsOnly.Transport = httpsOnly{next: client.Transport}
+	tlsOnly.Transport = httpsOnly{next: client.Transport, allowed: requestsOf(allowed)}
 	tlsOnly.Jar = nil
 	limit := timeoutOrDefault(timeout)
 	if client.Timeout > 0 && client.Timeout < limit {
@@ -109,6 +145,10 @@ func RetrieveResource(ctx context.Context, client *http.Client, timeout time.Dur
 	response, err := tlsOnly.Do(req)
 	if err != nil {
 		cancel()
+		var requestErr *neturl.Error
+		if errors.As(err, &requestErr) {
+			return nil, fmt.Errorf("%wfailed to retrieve %s: %s %s: %w", joseerror.ErrApplicationError, alias, requestErr.Op, jsonutils.QuoteBounded(requestErr.URL), boundedCause{err: requestErr.Err})
+		}
 		return nil, fmt.Errorf("%wfailed to retrieve %s: %w", joseerror.ErrApplicationError, alias, err)
 	}
 
@@ -130,6 +170,29 @@ func RetrieveResource(ctx context.Context, client *http.Client, timeout time.Dur
 	}
 	return response, nil
 }
+
+// MaxCauseRunes is how many runes of a failed request's cause an error keeps.
+// A cause such as a DNS failure can repeat a host the peer chose, so it is
+// quoted with Go escaping and cut to this many runes.
+const MaxCauseRunes = 256
+
+type boundedCause struct {
+	err error
+}
+
+func (b boundedCause) Error() string {
+	message := b.err.Error()
+	runes := 0
+	for i := range message {
+		if runes == MaxCauseRunes {
+			return strconv.Quote(message[:i]) + "..."
+		}
+		runes++
+	}
+	return strconv.Quote(message)
+}
+
+func (b boundedCause) Unwrap() error { return b.err }
 
 // ReadBody reads a fetched resource up to MaxBodyBytes and closes the body on every
 // path, releasing the connection and the fetch deadline.

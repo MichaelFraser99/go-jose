@@ -315,7 +315,7 @@ func TestRetrieveX5U_HoldsTheCertificateToItsThumbprint(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			keys, err := RetrieveX5U(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0), tc.x5t, tc.x5ts256, poolOf(t, cert), nil)()
+			keys, err := RetrieveX5U(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0, nil), tc.x5t, tc.x5ts256, poolOf(t, cert), nil)()
 			if tc.accept {
 				if err != nil {
 					t.Fatalf("[%s] the certificate this URL serves carries that thumbprint, so it must be accepted, got %v", tc.reference, err)
@@ -529,7 +529,7 @@ func TestRetrieveX5U_ReadsThePemEncodingTheClauseRequires(t *testing.T) {
 			}))
 			defer server.Close()
 
-			keys, err := RetrieveX5U(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0), nil, nil, roots, nil)()
+			keys, err := RetrieveX5U(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0, nil), nil, nil, roots, nil)()
 			if tc.accept {
 				if err != nil {
 					t.Fatalf("[%s] the clause requires the resource be PEM-encoded, so %s must be read, got %v", tc.reference, name, err)

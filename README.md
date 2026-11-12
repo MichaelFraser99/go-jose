@@ -256,7 +256,23 @@ Both URLs come from the header of the token being verified, so this library make
 
 Every request a fetch makes must use `https`, including each redirect hop. RFC 7515 sections 4.1.2 and 4.1.5 say an HTTP GET to retrieve the resource MUST use TLS, so a redirect to plain `http` is refused before the request is sent, whatever transport you supply. Your client's own redirect policy still applies. When it sets no `CheckRedirect`, Go's default stops after 10 redirects.
 
-Each fetch is also bounded in time, provided your client's transport honours the request's context. `JoseOptions.FetchTimeout` covers the whole fetch, from sending the request to reading the last byte of the body. When it is zero, the limit is 10 seconds. A deadline or cancellation on the `ctx` you pass to `jwt.Validate`, `jws.Verify` or `jws.VerifyCompactSerialization` also stops the fetch. The limit applies to each fetch, so a token naming both `jku` and `x5u` can take two of them. Use `ctx` to bound the whole call.
+To fetch only the URLs you expect, list them in `JoseOptions.AllowedKeyURLs`. draft-ietf-oauth-rfc8725bis section 3.10 names this allowlist as a defence against server-side request forgery:
+
+```go
+validated, err := jwt.Validate(ctx, token, nil, nil, &model.JoseOptions{
+    UseTokenProvidedKeys: true,
+    HttpClient:           &http.Client{Transport: yourGuardedTransport},
+    AllowedKeyURLs:       []string{"https://issuer.example/jwks.json"},
+}, nil)
+```
+
+A `jku` or `x5u` must equal an entry exactly, character for character (RFC 3986 section 6.2.1). Nothing is normalised, so `https://issuer.example/jwks.json/` and `https://ISSUER.example/jwks.json` do not match. A URL that matches no entry is not fetched and contributes no key. Another key source can still verify the token. If none does, the error is `ErrInvalidSignature`, and it also matches `ErrNoKeyIdentifierMatch`.
+
+A redirect hop must send the request that a listed entry sends. The hop is compared as the absolute URL the client requests: a relative `Location` is resolved, dot-segments are removed, and the fragment is dropped, because a fragment is never sent. Each entry is parsed the same way, without its fragment. So an entry `https://issuer.example/jwks.json#keys` matches a hop to `https://issuer.example/jwks.json`, and the case of a hop's scheme does not matter. A hop that matches no entry is refused before the request is sent, and the fetch fails with `ErrApplicationError`.
+
+One list serves both `jku` and `x5u`. An empty or nil list puts no restriction on either. The list does not turn a source on. `jku` still needs `UseTokenProvidedKeys`, and `x5u` still needs `X509Roots`. To refuse every fetch, leave `UseTokenProvidedKeys` off and `X509Roots` unset, or give no `HttpClient`. An entry that is not an `https` URL with a host, or that holds a character no URI holds, can match no header, so every call fails with `ErrInvalidOptions`. Call `jws.CheckOptions` at startup to find such an entry before the first token arrives. The list controls which URL a peer can name. It does not control the address that a listed host resolves to, so keep your guarded transport.
+
+Each fetch is also bounded in time, provided your client's transport honours the request's context. `JoseOptions.FetchTimeout` covers the whole fetch, from sending the request to reading the last byte of the body. When it is zero, the limit is 10 seconds. A deadline or cancellation on the `ctx` you pass to `jwt.Validate`, `jws.Verify` or `jws.VerifyCompactSerialization` also stops the fetch. The limit applies to each fetch, so a token naming both `jku` and `x5u` can take two of them. Use `ctx` to bound the whole call. Keep `FetchTimeout` below your own request deadline. Otherwise a slow key server can end your `ctx` first, and the result is the context's error, which [Errors and HTTP responses](#errors-and-http-responses) maps to a 504, not a 401.
 
 A fetch stopped by either limit returns an error that matches `ErrApplicationError` and `context.DeadlineExceeded`. One stopped by cancelling `ctx` matches `context.Canceled`.
 
@@ -329,7 +345,7 @@ roots.AppendCertsFromPEM(issuerRootPEM)
 validated, err := jwt.Validate(ctx, token, nil, nil, &model.JoseOptions{X509Roots: roots}, nil)
 ```
 
-With no `X509Roots` configured, a token's `x5c` and `x5u` headers contribute no key. They are not an error — section 4.1.6 makes use of the header OPTIONAL — so the token still verifies if another key source does, and fails with `ErrMalformedToken` if none does.
+With no `X509Roots` configured, a token's `x5c` and `x5u` headers contribute no key. They are not an error — section 4.1.6 makes use of the header OPTIONAL — so the token still verifies if another key source does. If none does, the error is `ErrInvalidSignature` when your retriever's keys were tried. With no retriever, it is `ErrInvalidOptions` when `UseTokenProvidedKeys` is also off, because no key source can exist, and `ErrNoKeyIdentifierMatch` otherwise.
 
 A malformed `x5c` is refused whether or not roots are configured, because its shape is a property of the claim rather than of your trust configuration. An array that is not an array of strings, an empty array, or an entry that is not exactly one base64-encoded DER certificate is `ErrMalformedClaim`. Section 4.1.6 names the base64 of RFC 4648 section 4, and RFC 4648 section 3.3 says a decoder MUST reject characters outside the alphabet. So an entry holding a line break is refused, as is one whose pad bits are not zero. An `x5u` body is PEM, where line breaks are part of the format, so this does not apply to it.
 
@@ -476,6 +492,8 @@ Any other `crypto.Signer`, such as a KMS signer, is called as Go's `crypto.Signe
 - `New` refuses an `alg` outside `jwa`, such as `jwa.Algorithm(999)`, with `ErrUnsupportedAlgorithm`. RFC 7515 section 4.1.1 says `alg` must be present and understood.
 - `New` checks the header it will sign with the same rules `Validate` applies, and returns the same errors. So it does not sign a header that its own `Validate` refuses for its shape:
   - `jku` and `x5u` must be HTTPS URLs. RFC 7515 sections 4.1.2 and 4.1.5 require TLS.
+  - Each must name a host. RFC 9110 section 4.2.2 says a recipient MUST reject an `https` URI with an empty host, such as `https:///jwks`.
+  - Each must hold only URI characters. RFC 3986 section 2 allows ASCII letters, digits, `-._~:/?#[]@!$&'()*+,;=` and percent-encodings, so a space, a control character or a non-ASCII character is refused. Percent-encode it instead.
   - `jwk` must be a JSON object, and must not hold a private key member: `d`, `p`, `q`, `dp`, `dq`, `qi`, `oth`, `k` or `priv` (section 4.1.3 names a public key).
   - `kid`, `typ` and `cty` must be strings (sections 4.1.4, 4.1.9 and 4.1.10).
   - `x5c` must be a non-empty array of base64 DER certificates (section 4.1.6).
@@ -739,17 +757,17 @@ Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 | `ErrUnsupportedAlgorithm` | The algorithm named is not supported, has no validator in this library, or is not permitted by the options given. It also covers a feature that RFC 7519 allows and this library does not implement, such as a JWT signed inside a JWS or encrypted inside a JWE |
 | `ErrSigningError` | Signing failed |
 | `ErrEncryptionError` | Encryption failed. The random source failed, or a custom `Encrypter` returned a key or header that `jwe.Encrypt` cannot use, such as an encrypted key of a length that `jwe.Decrypt` refuses |
-| `ErrMalformedClaim` | A claim is present but its type or value is wrong. This includes a `b64` that is not a boolean, and an `x5c` or `x5u` chain that is out of order or longer than 16 certificates |
+| `ErrMalformedClaim` | A claim is present but its type or value is wrong. This includes a `b64` that is not a boolean, and an `x5c` or `x5u` chain that is out of order or longer than 16 certificates. An `x5u` body that holds no PEM certificate block, or a block that is not a certificate, matches it as well as `ErrApplicationError` |
 | `ErrMissingClaim` | A required claim is absent |
 | `ErrMissingCriticalClaim` | A header named in `crit` is absent, or names an extension this library does not understand, or `b64` is `false` |
-| `ErrNoKeyIdentifierMatch` | No key could be selected. The `kid` matches nothing, a `jku` set holds no usable key that matches the header, a certificate chain does not reach a configured root, or an `x5t` thumbprint does not match the chain. It also covers a token that names no key, when you give no retriever and rely on the keys a token names |
+| `ErrNoKeyIdentifierMatch` | No key could be selected. The `kid` matches nothing, a `jku` set holds no usable key that matches the header, a certificate chain does not reach a configured root, an `x5t` thumbprint does not match the chain, or a `jku` or `x5u` is not in `AllowedKeyURLs`. It also covers a token that names no key, when you give no retriever and rely on the keys a token names |
 | `ErrKeystoreError` | A `model.Jwks` lookup or addition failed, or a document decoded into `model.Jwks` is not a JWK Set |
-| `ErrApplicationError` | Key material a header named could not be obtained, decoded or used. Covers a failed `jku` or `x5u` fetch, a local decode of what one returned (an empty `x5u` body is a failed decode), and an inline `jwk` of a key type or curve this library does not support. A fetch that ran out of time also matches `context.DeadlineExceeded`, and one cancelled through `ctx` matches `context.Canceled` |
+| `ErrApplicationError` | Key material a header named could not be obtained, decoded or used. Covers a failed `jku` or `x5u` fetch, including a redirect hop that is not `https` or not in `AllowedKeyURLs`, a local decode of what one returned (an empty `x5u` body is a failed decode), and an inline `jwk` of a key type or curve this library does not support. A fetch that ran out of time also matches `context.DeadlineExceeded`, and one cancelled through `ctx` matches `context.Canceled` |
 | `ErrMalformedToken` | The token is not a well formed JOSE object: it breaks RFC 7515 or RFC 7516. A well-formed token that your options refuse, or that names what this library does not implement, does not match it |
 | `ErrExpired` | The current time is not before the token's `exp`, allowing for `ClockSkewLeeway` |
 | `ErrNotYetValid` | The token's `nbf` or `iat` is after the current time, allowing for `ClockSkewLeeway` |
 | `ErrAudienceMismatch` | `JoseOptions.ExpectedAudience` is set and the token's `aud` names none of its values |
-| `ErrInvalidOptions` | The options passed are themselves wrong. Most of these cases are refused before the token is read. A verifier with no retriever and no token key allowed is refused after the header is checked, so a token with a bad header reports that fault first. The cases are: a nil `ctx`; a `JoseOptions.ExpectedAudience` that holds an empty string; a JWE allow-list that names a value this library does not implement; an `AllowedSigningAlgorithms` entry that is not a signature algorithm this library implements; an `AcceptedTypes` entry that is not a media type name; a nil decrypter, or more decrypters of one `alg` than `JWEOptions.MaxKeysTried` allows; and a nil retriever with neither `UseTokenProvidedKeys` nor `X509Roots` set, when `jwt.Validate` has no decrypters |
+| `ErrInvalidOptions` | The options passed are themselves wrong. Most of these cases are refused before the token is read. A verifier with no retriever and no token key allowed is refused after the header is checked, so a token with a bad header reports that fault first. The cases are: a nil `ctx`; a `JoseOptions.ExpectedAudience` that holds an empty string; a JWE allow-list that names a value this library does not implement; an `AllowedSigningAlgorithms` entry that is not a signature algorithm this library implements; an `AcceptedTypes` entry that is not a media type name; an `AllowedKeyURLs` entry that is not an `https` URL with a host, or that holds a character no URI holds; a nil decrypter, or more decrypters of one `alg` than `JWEOptions.MaxKeysTried` allows; and a nil retriever with neither `UseTokenProvidedKeys` nor `X509Roots` set, when `jwt.Validate` has no decrypters |
 | `ErrTooManyKeys` | The signature did not verify under as many keys as `JoseOptions.MaxKeysTried` allows, and more keys or key sources remained. |
 | `ErrOutOfBounds` | A JWE asks for more work than your options allow: a `p2c` above `JWEOptions.MaxPBES2Count`, or a plaintext that inflates to more than `MaxDecompressedSize`. It also covers a `p2c` below 1000 when `RequireRecommendedPBES2Count` is set |
 
@@ -802,7 +820,7 @@ fmt.Errorf("%wshould be an instance of *ecdsa.PrivateKey", joseerror.ErrInvalidP
 
 That reads `invalid private key: should be an instance of *ecdsa.PrivateKey`, and `errors.Is` still matches.
 
-When a header check echoes a value from the token in its error, the value is quoted with Go escaping and cut to its first 64 characters, with `...` marking the cut. A peer cannot put a raw line break or kilobytes of text into your logs this way. This includes the error from parsing an `x5c` or `x5u` certificate.
+When a header check echoes a value from the token in its error, the value is quoted with Go escaping and cut to its first 64 characters, with `...` marking the cut. A peer cannot put a raw line break or kilobytes of text into your logs this way. This includes the error from parsing an `x5c` or `x5u` certificate, and the URL in a failed `jku` or `x5u` fetch, redirect hops included. The cause of a failed fetch, such as a DNS error naming the host, is also quoted with Go escaping, and is cut to its first 256 characters.
 
 ## Upgrading from 0.11.x
 
@@ -829,7 +847,7 @@ These are new:
 - `model.Encrypter`, `model.Decrypter` and `model.DecrypterOpts`.
 - `jwa.Encryption` with `jwa.GetEncryption`, and the `alg` constants `jwa.RSAOAEP` to `jwa.Dir` and `jwa.ECDHES` to `jwa.ECDHESA256KW`. The integer values of the existing `jwa.Algorithm` constants do not change.
 - `model.JWEOptions`, the options of `jwe.Decrypt`, `jwe.ParseHeader`, `jwe.GetEncrypterFromJwk`, `jwe.GetDecrypterFromJwk` and the JWE layer of `jwt.Validate`.
-- `JoseOptions` fields: `StrictKeyOperations`, `RequireSignedJWT` and `RequireEncryptedJWT`.
+- `JoseOptions` fields: `StrictKeyOperations`, `RequireSignedJWT`, `RequireEncryptedJWT` and `AllowedKeyURLs`.
 - `jwt.Encrypt` and `jwt.Token`, for encrypted JWTs. See [Encrypted JWTs](#encrypted-jwts).
 - `jwe.PasswordKey` for PBES2, and the `alg` constants `jwa.A128GCMKW` to `jwa.A256GCMKW` and `jwa.PBES2HS256A128KW` to `jwa.PBES2HS512A256KW`.
 - The error sentinels `ErrEncryptionError` and `ErrOutOfBounds`. `ErrDecryptionFailed` now has a use.
@@ -837,6 +855,8 @@ These are new:
 A jwk whose `key_ops` lists a value twice is now refused by `jws.GetValidatorFromJwk`, and skipped in a `jku` key set. RFC 7517 section 4.3 says this MUST NOT happen. If a key set that you rely on does it, have its publisher remove the repeated value.
 
 `jwk.PublicFromJwk` and `jwk.PrivateFromJwk` now read an X25519 jwk as an `*ecdh` key. v0.11.0 refused it with `ErrUnsupportedAlgorithm`. `jws.GetValidatorFromJwk` refuses an X25519 jwk with `ErrInvalidPublicKey`, where v0.11.0 gave `ErrUnsupportedAlgorithm`.
+
+A `jku` or `x5u` that is an `https` URL with an empty host, such as `https:///jwks` or `https://:443/`, is now refused with `ErrMalformedToken`, even when you do not use that header. RFC 9110 section 4.2.2 says a recipient MUST reject such a URI. v0.11.0 accepted it, and no fetch of it could succeed. The same applies to a `jku` or `x5u` that holds a character outside RFC 3986 section 2, such as a trailing space, a raw non-ASCII letter or a malformed percent-encoding. v0.11.0 accepted some of these. Percent-encode such a character. `jwt.New` refuses both with `ErrMalformedClaim`.
 
 `AcceptedTypes` and the `cty` check now ignore the case of ASCII letters only. v0.11.0 used Unicode case folding, so a `typ` with a lookalike letter, such as `ſecevent+jwt` with a long s, matched `secevent+jwt`. Media type names are ASCII (RFC 6838 section 4.2), so no valid `typ` or `cty` is affected, and you need to change nothing.
 
