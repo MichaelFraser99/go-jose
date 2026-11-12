@@ -256,6 +256,20 @@ Both URLs come from the header of the token being verified, so this library make
 
 Every request a fetch makes must use `https`, including each redirect hop. RFC 7515 sections 4.1.2 and 4.1.5 say an HTTP GET to retrieve the resource MUST use TLS, so a redirect to plain `http` is refused before the request is sent, whatever transport you supply. Your client's own redirect policy still applies. When it sets no `CheckRedirect`, Go's default stops after 10 redirects.
 
+To fetch only the URLs you expect, list them in `JoseOptions.AllowedKeyURLs`. draft-ietf-oauth-rfc8725bis section 3.10 names this allowlist as a defence against server-side request forgery:
+
+```go
+validated, err := jwt.Validate(ctx, token, nil, nil, &model.JoseOptions{
+    UseTokenProvidedKeys: true,
+    HttpClient:           &http.Client{Transport: yourGuardedTransport},
+    AllowedKeyURLs:       []string{"https://issuer.example/jwks.json"},
+}, nil)
+```
+
+A `jku` or `x5u` must equal an entry exactly, character for character (RFC 3986 section 6.2.1). Nothing is normalised, so `https://issuer.example/jwks.json/` and `https://ISSUER.example/jwks.json` do not match. A URL that matches no entry is not fetched and contributes no key. Its error matches `ErrNoKeyIdentifierMatch`, and another key source can still verify the token. Each redirect hop must also go to a listed URL. A redirect to any other URL is refused before the request is sent, and the fetch fails with `ErrApplicationError`.
+
+The list does not turn a source on. `jku` still needs `UseTokenProvidedKeys`, and `x5u` still needs `X509Roots`. An entry that is not an `https` URL can match no header, so every call fails with `ErrInvalidOptions`. The list controls which URL a peer can name. It does not control the address that a listed host resolves to, so keep your guarded transport.
+
 Each fetch is also bounded in time, provided your client's transport honours the request's context. `JoseOptions.FetchTimeout` covers the whole fetch, from sending the request to reading the last byte of the body. When it is zero, the limit is 10 seconds. A deadline or cancellation on the `ctx` you pass to `jwt.Validate`, `jws.Verify` or `jws.VerifyCompactSerialization` also stops the fetch. The limit applies to each fetch, so a token naming both `jku` and `x5u` can take two of them. Use `ctx` to bound the whole call.
 
 A fetch stopped by either limit returns an error that matches `ErrApplicationError` and `context.DeadlineExceeded`. One stopped by cancelling `ctx` matches `context.Canceled`.
@@ -742,14 +756,14 @@ Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 | `ErrMalformedClaim` | A claim is present but its type or value is wrong. This includes a `b64` that is not a boolean, and an `x5c` or `x5u` chain that is out of order or longer than 16 certificates |
 | `ErrMissingClaim` | A required claim is absent |
 | `ErrMissingCriticalClaim` | A header named in `crit` is absent, or names an extension this library does not understand, or `b64` is `false` |
-| `ErrNoKeyIdentifierMatch` | No key could be selected. The `kid` matches nothing, a `jku` set holds no usable key that matches the header, a certificate chain does not reach a configured root, or an `x5t` thumbprint does not match the chain. It also covers a token that names no key, when you give no retriever and rely on the keys a token names |
+| `ErrNoKeyIdentifierMatch` | No key could be selected. The `kid` matches nothing, a `jku` set holds no usable key that matches the header, a certificate chain does not reach a configured root, an `x5t` thumbprint does not match the chain, or a `jku` or `x5u` is not in `AllowedKeyURLs`. It also covers a token that names no key, when you give no retriever and rely on the keys a token names |
 | `ErrKeystoreError` | A `model.Jwks` lookup or addition failed, or a document decoded into `model.Jwks` is not a JWK Set |
-| `ErrApplicationError` | Key material a header named could not be obtained, decoded or used. Covers a failed `jku` or `x5u` fetch, a local decode of what one returned (an empty `x5u` body is a failed decode), and an inline `jwk` of a key type or curve this library does not support. A fetch that ran out of time also matches `context.DeadlineExceeded`, and one cancelled through `ctx` matches `context.Canceled` |
+| `ErrApplicationError` | Key material a header named could not be obtained, decoded or used. Covers a failed `jku` or `x5u` fetch, including a redirect hop that is not `https` or not in `AllowedKeyURLs`, a local decode of what one returned (an empty `x5u` body is a failed decode), and an inline `jwk` of a key type or curve this library does not support. A fetch that ran out of time also matches `context.DeadlineExceeded`, and one cancelled through `ctx` matches `context.Canceled` |
 | `ErrMalformedToken` | The token is not a well formed JOSE object: it breaks RFC 7515 or RFC 7516. A well-formed token that your options refuse, or that names what this library does not implement, does not match it |
 | `ErrExpired` | The current time is not before the token's `exp`, allowing for `ClockSkewLeeway` |
 | `ErrNotYetValid` | The token's `nbf` or `iat` is after the current time, allowing for `ClockSkewLeeway` |
 | `ErrAudienceMismatch` | `JoseOptions.ExpectedAudience` is set and the token's `aud` names none of its values |
-| `ErrInvalidOptions` | The options passed are themselves wrong. Most of these cases are refused before the token is read. A verifier with no retriever and no token key allowed is refused after the header is checked, so a token with a bad header reports that fault first. The cases are: a nil `ctx`; a `JoseOptions.ExpectedAudience` that holds an empty string; a JWE allow-list that names a value this library does not implement; an `AllowedSigningAlgorithms` entry that is not a signature algorithm this library implements; an `AcceptedTypes` entry that is not a media type name; a nil decrypter, or more decrypters of one `alg` than `JWEOptions.MaxKeysTried` allows; and a nil retriever with neither `UseTokenProvidedKeys` nor `X509Roots` set, when `jwt.Validate` has no decrypters |
+| `ErrInvalidOptions` | The options passed are themselves wrong. Most of these cases are refused before the token is read. A verifier with no retriever and no token key allowed is refused after the header is checked, so a token with a bad header reports that fault first. The cases are: a nil `ctx`; a `JoseOptions.ExpectedAudience` that holds an empty string; a JWE allow-list that names a value this library does not implement; an `AllowedSigningAlgorithms` entry that is not a signature algorithm this library implements; an `AcceptedTypes` entry that is not a media type name; an `AllowedKeyURLs` entry that is not an `https` URL; a nil decrypter, or more decrypters of one `alg` than `JWEOptions.MaxKeysTried` allows; and a nil retriever with neither `UseTokenProvidedKeys` nor `X509Roots` set, when `jwt.Validate` has no decrypters |
 | `ErrTooManyKeys` | The signature did not verify under as many keys as `JoseOptions.MaxKeysTried` allows, and more keys or key sources remained. |
 | `ErrOutOfBounds` | A JWE asks for more work than your options allow: a `p2c` above `JWEOptions.MaxPBES2Count`, or a plaintext that inflates to more than `MaxDecompressedSize`. It also covers a `p2c` below 1000 when `RequireRecommendedPBES2Count` is set |
 
@@ -829,7 +843,7 @@ These are new:
 - `model.Encrypter`, `model.Decrypter` and `model.DecrypterOpts`.
 - `jwa.Encryption` with `jwa.GetEncryption`, and the `alg` constants `jwa.RSAOAEP` to `jwa.Dir` and `jwa.ECDHES` to `jwa.ECDHESA256KW`. The integer values of the existing `jwa.Algorithm` constants do not change.
 - `model.JWEOptions`, the options of `jwe.Decrypt`, `jwe.ParseHeader`, `jwe.GetEncrypterFromJwk`, `jwe.GetDecrypterFromJwk` and the JWE layer of `jwt.Validate`.
-- `JoseOptions` fields: `StrictKeyOperations`, `RequireSignedJWT` and `RequireEncryptedJWT`.
+- `JoseOptions` fields: `StrictKeyOperations`, `RequireSignedJWT`, `RequireEncryptedJWT` and `AllowedKeyURLs`.
 - `jwt.Encrypt` and `jwt.Token`, for encrypted JWTs. See [Encrypted JWTs](#encrypted-jwts).
 - `jwe.PasswordKey` for PBES2, and the `alg` constants `jwa.A128GCMKW` to `jwa.A256GCMKW` and `jwa.PBES2HS256A128KW` to `jwa.PBES2HS512A256KW`.
 - The error sentinels `ErrEncryptionError` and `ErrOutOfBounds`. `ErrDecryptionFailed` now has a use.

@@ -96,7 +96,7 @@ func TestRetrieveX5U_AnEmptyBodyIsRefusedNotPanicked(t *testing.T) {
 			}))
 			defer server.Close()
 
-			keys, err := RetrieveX5U(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0), nil, nil, x509.NewCertPool(), nil)()
+			keys, err := RetrieveX5U(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0, nil), nil, nil, x509.NewCertPool(), nil)()
 			if err == nil && len(keys) != 0 {
 				t.Fatalf("[%s] a response carrying no certificate must not yield a key, got %d", tc.reference, len(keys))
 			}

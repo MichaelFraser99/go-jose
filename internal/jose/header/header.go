@@ -71,14 +71,36 @@ func ValidateHeader(ctx context.Context, header map[string]any, client *http.Cli
 	if params.x5c != nil && opts.X509Roots != nil {
 		jwkRetrievers = append(jwkRetrievers, carried(x5.InlineCertificate(*params.x5c, params.x5t, params.x5ts256, opts.X509Roots, opts.X509ExtKeyUsages)))
 	}
+	fetch := httputils.Fetcher(ctx, client, opts.FetchTimeout, opts.AllowedKeyURLs)
 	if params.jku != nil && opts.UseTokenProvidedKeys && client != nil {
-		jwkRetrievers = append(jwkRetrievers, jwk.RetrieveJKU(*params.jku, httputils.Fetcher(ctx, client, opts.FetchTimeout), params.kid, *alg, opts.IgnoreKeyUse, opts.StrictKeyOperations))
+		jwkRetrievers = append(jwkRetrievers, listed("jku", *params.jku, opts.AllowedKeyURLs, jwk.RetrieveJKU(*params.jku, fetch, params.kid, *alg, opts.IgnoreKeyUse, opts.StrictKeyOperations)))
 	}
 	if params.x5u != nil && opts.X509Roots != nil && client != nil {
-		jwkRetrievers = append(jwkRetrievers, x5.RetrieveX5U(*params.x5u, httputils.Fetcher(ctx, client, opts.FetchTimeout), params.x5t, params.x5ts256, opts.X509Roots, opts.X509ExtKeyUsages))
+		jwkRetrievers = append(jwkRetrievers, listed("x5u", *params.x5u, opts.AllowedKeyURLs, x5.RetrieveX5U(*params.x5u, fetch, params.x5t, params.x5ts256, opts.X509Roots, opts.X509ExtKeyUsages)))
 	}
 
 	return jwkRetrievers, nil
+}
+
+func listed(alias, location string, allowed []string, fetch model.Retriever) model.Retriever {
+	if len(allowed) == 0 || slices.Contains(allowed, location) {
+		return fetch
+	}
+	return func() ([]crypto.PublicKey, error) {
+		return nil, fmt.Errorf("%wthe %s %s is not in AllowedKeyURLs, so it contributes no key", joseerror.ErrNoKeyIdentifierMatch, alias, jsonutils.QuoteBounded(location))
+	}
+}
+
+// CheckAllowedKeyURLs refuses, with ErrInvalidOptions, an AllowedKeyURLs entry
+// that no jku or x5u can equal: one that ValidateHttpsUrlClaim refuses, as RFC
+// 7515 sections 4.1.2 and 4.1.5 require both to use TLS.
+func CheckAllowedKeyURLs(allowed []string) error {
+	for _, entry := range allowed {
+		if jsonutils.ValidateHttpsUrlClaim(nil, entry) != nil {
+			return fmt.Errorf("%wAllowedKeyURLs holds %s, which is not an https URL (RFC 7515 sections 4.1.2 and 4.1.5), so no jku or x5u can match it", joseerror.ErrInvalidOptions, jsonutils.QuoteBounded(entry))
+		}
+	}
+	return nil
 }
 
 func checkAlgorithmParameters(header map[string]any) error {

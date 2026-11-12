@@ -124,7 +124,7 @@ func assertUsageCases(t *testing.T, tests map[string]usageCase) {
 				}
 			}))
 			defer server.Close()
-			return RetrieveX5U(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0), nil, nil, roots, extKeyUsages)()
+			return RetrieveX5U(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0, nil), nil, nil, roots, extKeyUsages)()
 		},
 	}
 

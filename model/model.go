@@ -33,9 +33,30 @@ type JoseOptions struct {
 	//
 	// Every request of a fetch, including each redirect hop, must be https, as RFC 7515
 	// sections 4.1.2 and 4.1.5 require. Any other is refused before it is sent.
+	// AllowedKeyURLs limits the URLs a token can make this client fetch.
 	//
 	// With no client, jku and x5u contribute no key.
 	HttpClient *http.Client
+
+	// AllowedKeyURLs lists the only jku and x5u values this library fetches, the
+	// allowlist draft-ietf-oauth-rfc8725bis section 3.10 names as a defence against
+	// server-side request forgery. With none listed, any https URL is fetched.
+	//
+	// A header value matches an entry only when the two strings are equal (RFC 3986
+	// section 6.2.1). Nothing is normalised: case, a trailing slash, a port, a query,
+	// a fragment or percent-encoding all make a difference. A jku or x5u that matches
+	// no entry is not fetched and contributes no key, as a kid that matches nothing
+	// does: another key source can still verify the token, and if none does the
+	// error is ErrInvalidSignature, matching ErrNoKeyIdentifierMatch.
+	// Each redirect hop must also be the request a listed entry makes, else it is
+	// refused before it is sent, and the fetch fails with ErrApplicationError.
+	//
+	// The list only restricts. jku still needs UseTokenProvidedKeys and HttpClient,
+	// and x5u still needs X509Roots and HttpClient. An entry that is not an https URL
+	// can match no header, so it makes every call fail with ErrInvalidOptions. The
+	// list stops a peer choosing the URL, not what a listed host resolves to: keep a
+	// transport that refuses private and loopback addresses.
+	AllowedKeyURLs []string
 
 	// FetchTimeout bounds each jku or x5u fetch, from sending the request to reading the
 	// last byte of the body, provided the HttpClient's transport honours the request's

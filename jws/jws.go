@@ -46,9 +46,10 @@ const defaultMaxKeysTried = 100
 
 // CheckOptions refuses, with ErrInvalidOptions, options that are wrong whatever
 // the token: an AllowedSigningAlgorithms entry this library has no validator
-// for, such as a JWE alg, and an AcceptedTypes entry that is not a media type
-// name (RFC 6838 section 4.2). Verify and VerifyCompactSerialization call it
-// before reading the token.
+// for, such as a JWE alg, an AcceptedTypes entry that is not a media type
+// name (RFC 6838 section 4.2), and an AllowedKeyURLs entry that is not an https
+// URL (RFC 7515 sections 4.1.2 and 4.1.5). Verify and VerifyCompactSerialization
+// call it before reading the token.
 func CheckOptions(opts *model.JoseOptions) error {
 	if opts == nil {
 		return nil
@@ -64,7 +65,10 @@ func CheckOptions(opts *model.JoseOptions) error {
 			return fmt.Errorf("%wAllowedSigningAlgorithms holds %s, which is not a signature algorithm this library implements", joseerror.ErrInvalidOptions, name)
 		}
 	}
-	return header.CheckAcceptedTypes(opts.AcceptedTypes)
+	if err := header.CheckAcceptedTypes(opts.AcceptedTypes); err != nil {
+		return err
+	}
+	return header.CheckAllowedKeyURLs(opts.AllowedKeyURLs)
 }
 
 func verify(ctx context.Context, compactSerialization string, outOfBoundsPublicKey model.Retriever, opts *model.JoseOptions, payloadIsJSONObject bool) (protectedHeader map[string]any, payload []byte, body map[string]any, err error) {
