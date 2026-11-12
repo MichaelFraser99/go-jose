@@ -817,7 +817,7 @@ fmt.Errorf("%wshould be an instance of *ecdsa.PrivateKey", joseerror.ErrInvalidP
 
 That reads `invalid private key: should be an instance of *ecdsa.PrivateKey`, and `errors.Is` still matches.
 
-When a header check echoes a value from the token in its error, the value is quoted with Go escaping and cut to its first 64 characters, with `...` marking the cut. A peer cannot put a raw line break or kilobytes of text into your logs this way. This includes the error from parsing an `x5c` or `x5u` certificate, and the URL in a failed `jku` or `x5u` fetch, redirect hops included. The cause of a failed fetch, such as a DNS error naming the host, is cut to its first 256 characters.
+When a header check echoes a value from the token in its error, the value is quoted with Go escaping and cut to its first 64 characters, with `...` marking the cut. A peer cannot put a raw line break or kilobytes of text into your logs this way. This includes the error from parsing an `x5c` or `x5u` certificate, and the URL in a failed `jku` or `x5u` fetch, redirect hops included. The cause of a failed fetch, such as a DNS error naming the host, is also quoted with Go escaping, and is cut to its first 256 characters.
 
 ## Upgrading from 0.11.x
 

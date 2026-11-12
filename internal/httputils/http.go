@@ -165,7 +165,8 @@ func retrieve(ctx context.Context, client *http.Client, timeout time.Duration, a
 }
 
 // MaxCauseRunes is how many runes of a failed request's cause an error keeps.
-// A cause such as a DNS failure can repeat a host the peer chose.
+// A cause such as a DNS failure can repeat a host the peer chose, so it is
+// quoted with Go escaping and cut to this many runes.
 const MaxCauseRunes = 256
 
 type boundedCause struct {
@@ -181,7 +182,7 @@ func (b boundedCause) Error() string {
 		}
 		runes++
 	}
-	return message
+	return strconv.Quote(message)
 }
 
 func (b boundedCause) Unwrap() error { return b.err }
