@@ -164,11 +164,11 @@ func PublicFromJwk(jwk map[string]any) (crypto.PublicKey, error) {
 func SelectKeys(keySet model.Jwks, kid *string, alg string, ignoreKeyUse, strictKeyOperations bool) []crypto.PublicKey {
 	var selected []crypto.PublicKey
 	for _, member := range keySet.Keys {
-		publicKey, err := PublicFromJwk(member)
-		if err != nil {
+		if checkMember(member, kid, alg, ignoreKeyUse, strictKeyOperations) != nil {
 			continue
 		}
-		if checkMember(member, kid, alg, ignoreKeyUse, strictKeyOperations) != nil {
+		publicKey, err := PublicFromJwk(member)
+		if err != nil {
 			continue
 		}
 		selected = append(selected, publicKey)
