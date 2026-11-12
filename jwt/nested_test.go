@@ -21,6 +21,7 @@ import (
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
 	"github.com/MichaelFraser99/go-jose/jwe"
+	"github.com/MichaelFraser99/go-jose/jwk"
 	"github.com/MichaelFraser99/go-jose/jws"
 	"github.com/MichaelFraser99/go-jose/model"
 )
@@ -579,6 +580,94 @@ func TestEncrypt_NamesTheSegmentCountOfWhatIsNotASignedJWT(t *testing.T) {
 	for token, want := range map[string]string{"a.b": "got 2", "a.b.c.d": "got 4", "a.b.c.d.e.f.g": "got 7"} {
 		if _, err := Encrypt(r.encrypter, jwa.A128GCM, token, nil); !errors.Is(err, joseerror.ErrMalformedToken) || !strings.Contains(err.Error(), want) {
 			t.Errorf("[RFC 7515 7.1] %q is not three segments, so want ErrMalformedToken naming %q, got %v", token, want, err)
+		}
+	}
+}
+
+func TestValidate_ADecryptOnlyRecipientBlamesTheTokenForASignatureItCannotVerify(t *testing.T) {
+	r := recipientFor(t, jwa.A128KW)
+	decrypters := []model.Decrypter{r.decrypter}
+	peerSigned, _ := signedJWT(t, map[string]any{"sub": "admin", "iss": "https://peer.example"})
+	peerNested, err := Encrypt(r.encrypter, jwa.A128GCM, peerSigned, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]struct {
+		token   string
+		jweOpts *model.JWEOptions
+	}{
+		"a nested JWT signed with the peer's own key":         {token: peerNested},
+		"the same with AllowUnauthenticatedJWT":               {token: peerNested, jweOpts: &model.JWEOptions{AllowUnauthenticatedJWT: true}},
+		"a JWS signed with the peer's own key, not encrypted": {token: peerSigned},
+	} {
+		t.Run(name, func(t *testing.T) {
+			validated, err := Validate(context.Background(), c.token, nil, decrypters, nil, c.jweOpts)
+			if errors.Is(err, joseerror.ErrInvalidOptions) {
+				t.Fatalf("[RFC 7519 7.2] an encrypt-only JWT can pass these options, so a peer's token must not be reported as a configuration fault, got %v", err)
+			}
+			if !errors.Is(err, joseerror.ErrInvalidSignature) || !errors.Is(err, joseerror.ErrNoKeyIdentifierMatch) || validated != nil {
+				t.Errorf("[RFC 7515 5.2 step 8] no key of the recipient's verifies the signature, so want ErrInvalidSignature matching ErrNoKeyIdentifierMatch, got %v", err)
+			}
+		})
+	}
+
+	encryptOnlyToken := encryptOnly(t, r, map[string]any{"sub": "alice"})
+	if validated, err := Validate(context.Background(), encryptOnlyToken, nil, decrypters, nil, nil); err != nil || validated.Claims["sub"] != "alice" {
+		t.Errorf("[RFC 7519 7.2 step 10] the encrypt-only JWT these options exist for must still pass, got %+v and %v", validated, err)
+	}
+	if _, err := Validate(context.Background(), peerSigned, nil, nil, nil, nil); !errors.Is(err, joseerror.ErrInvalidOptions) {
+		t.Errorf("with no retriever, no decrypters and no token key allowed, no token can pass, so want ErrInvalidOptions, got %v", err)
+	}
+}
+
+func TestValidate_ADecryptOnlyRecipientStillUsesAKeyTheTokenNames(t *testing.T) {
+	r := recipientFor(t, jwa.A128KW)
+	signer, err := jws.GetSigner(jwa.ES256, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicJwk, err := jwk.PublicJwk(signer.Public())
+	if err != nil {
+		t.Fatal(err)
+	}
+	signed, err := New(signer, map[string]any{"jwk": *publicJwk}, map[string]any{"sub": "alice"}, Opts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := Encrypt(r.encrypter, jwa.A128GCM, *signed, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	validated, err := Validate(context.Background(), token, nil, []model.Decrypter{r.decrypter}, &model.JoseOptions{UseTokenProvidedKeys: true}, nil)
+	if err != nil || validated.Claims["sub"] != "alice" {
+		t.Errorf("[RFC 7515 4.1.3] with UseTokenProvidedKeys, the jwk the token names must verify it, got %+v and %v", validated, err)
+	}
+}
+
+func TestValidate_ErrTooManyKeysComesOnlyFromTheSignatureAndTooManyDecryptersAreAnOptionsFault(t *testing.T) {
+	r := recipientFor(t, jwa.A128KW)
+	signed, _ := signedJWT(t, map[string]any{"sub": "alice"})
+	nested, err := Encrypt(r.encrypter, jwa.A128GCM, signed, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wrongKeys []crypto.PublicKey
+	for range 3 {
+		other, err := jws.GetSigner(jwa.ES256, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wrongKeys = append(wrongKeys, other.Public())
+	}
+	wrong := func() ([]crypto.PublicKey, error) { return wrongKeys, nil }
+
+	if _, err := Validate(context.Background(), nested, wrong, []model.Decrypter{r.decrypter}, &model.JoseOptions{MaxKeysTried: 2}, nil); !errors.Is(err, joseerror.ErrTooManyKeys) || errors.Is(err, joseerror.ErrInvalidOptions) {
+		t.Errorf("[RFC 7519 7.2 step 8] the signature of the Nested JWT did not verify under the 2 keys allowed, so want ErrTooManyKeys alone, got %v", err)
+	}
+	for name, token := range map[string]string{"a nested JWT": nested, "a JWS": signed} {
+		decrypters := []model.Decrypter{r.decrypter, r.decrypter, r.decrypter}
+		if _, err := Validate(context.Background(), token, wrong, decrypters, nil, &model.JWEOptions{MaxKeysTried: 2}); !errors.Is(err, joseerror.ErrInvalidOptions) || errors.Is(err, joseerror.ErrTooManyKeys) {
+			t.Errorf("3 decrypters of one alg are more than the 2 MaxKeysTried allows, so want ErrInvalidOptions for %s, whatever the token, got %v", name, err)
 		}
 	}
 }
