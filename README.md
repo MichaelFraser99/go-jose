@@ -481,7 +481,7 @@ Any other `crypto.Signer`, such as a KMS signer, is called as Go's `crypto.Signe
 - `New` passes an `*ecdsa.PrivateKey`, `*rsa.PrivateKey`, `ed25519.PrivateKey` or `*ed25519.PrivateKey` to `GetSignerFromPrivateKey`, and refuses each key that `GetSignerFromPrivateKey` refuses. So an RS or PS key needs a modulus of 2048 to 8192 bits. For any other `crypto.Signer`, `New` checks the public key that `Public` returns, the same way a validator does.
 - `New` refuses a nil signer, or a nil pointer, with `ErrInvalidPrivateKey`. It does not panic.
 - `New` refuses an `alg` outside `jwa`, such as `jwa.Algorithm(999)`, with `ErrUnsupportedAlgorithm`. RFC 7515 section 4.1.1 says `alg` must be present and understood.
-- `New` checks the header it will sign with the same rules `Validate` applies, and returns the same errors. So it does not sign a header that its own `Validate` refuses for its shape:
+- `New` checks the header it will sign with the same rules `Validate` applies. So it does not sign a header that its own `Validate` refuses for its shape:
   - `jku` and `x5u` must be HTTPS URLs. RFC 7515 sections 4.1.2 and 4.1.5 require TLS.
   - `jwk` must be a JSON object, and must not hold a private key member: `d`, `p`, `q`, `dp`, `dq`, `qi`, `oth`, `k` or `priv` (section 4.1.3 names a public key). Its `kid`, `alg` and `use` must be strings, its `key_ops` an array of distinct strings, and its `use` and `key_ops` consistent (RFC 7517 sections 4.2 to 4.5). `Validate` refuses a `jwk` header that breaks these rules.
   - `kid`, `typ` and `cty` must be strings (sections 4.1.4, 4.1.9 and 4.1.10).
@@ -844,9 +844,16 @@ These are new:
 
 A jwk whose `key_ops` lists a value twice is now refused by `jws.GetValidatorFromJwk`, and skipped in a `jku` key set. RFC 7517 section 4.3 says this MUST NOT happen. If a key set that you rely on does it, have its publisher remove the repeated value.
 
-A jwk whose `use` and `key_ops` are not consistent is now refused by `jws.GetValidatorFromJwk`, and skipped in a `jku` key set. That is a `use` of `"sig"` beside `encrypt`, `decrypt`, `wrapKey`, `unwrapKey`, `deriveKey` or `deriveBits`, or a `use` of `"enc"` beside `sign` or `verify`. RFC 7517 section 4.3 says the two MUST be consistent. If a key set that you rely on does this, have its publisher drop one of the two members.
+A jwk whose `use` is `"sig"` and whose `key_ops` also names `encrypt`, `decrypt`, `wrapKey`, `unwrapKey`, `deriveKey` or `deriveBits` is now refused by `jws.GetValidatorFromJwk`, and skipped in a `jku` key set. RFC 7517 section 4.3 says `use` and `key_ops` MUST be consistent. v0.11.0 used such a key if its `key_ops` included `verify`. If a key set that you rely on does this, have its publisher drop one of the two members. A jwk whose `use` is `"enc"` was already refused and skipped, and only the error message changes.
 
-A `jwk` header that breaks RFC 7517 is now refused with `ErrMalformedToken` as well as `ErrMalformedClaim`. That is a `kid`, `alg`, `use` or `key_ops` of the wrong JSON type, a `key_ops` that lists a value twice, or a `use` and `key_ops` that are not consistent. v0.11.0 matched only `ErrMalformedClaim`, and let an inconsistent `jwk` give way to the next key source. `jwt.New` now refuses to sign such a header with `ErrMalformedClaim`.
+With `UseTokenProvidedKeys` set, a token whose `jwk` header breaks RFC 7517 is now refused at once, with `ErrMalformedToken` and `ErrMalformedClaim`. Some of these tokens verified in v0.11.0, and now they do not:
+
+- A `jwk` whose `use` is `"sig"` and whose `key_ops` names `verify` and also `encrypt`, `decrypt`, `wrapKey`, `unwrapKey`, `deriveKey` or `deriveBits`. v0.11.0 verified the token with it.
+- A `jwk` whose `key_ops` lists a value twice, such as `["verify", "verify"]`. v0.11.0 verified the token with it.
+- A `jwk` whose `use` is `"enc"` and whose `key_ops` names `sign` or `verify`. v0.11.0 passed over the key, and refused the token with `ErrInvalidSignature` and `ErrNoKeyIdentifierMatch` if no other key verified it.
+- A `jwk` whose `kid`, `alg`, `use` or `key_ops` has the wrong JSON type, such as a `kid` of `123`. v0.11.0 refused the token with `ErrMalformedClaim` only.
+
+If you issue such tokens, fix the `jwk`: drop the conflicting or repeated `key_ops` value, or drop `use`. If you cannot change the tokens, give `Validate` a retriever that holds the key. Your retriever is tried before the token's own `jwk`, so its key verifies the token first. `jwt.New` now refuses to sign such a header with `ErrMalformedClaim`.
 
 `jws.GetValidatorFromJwk` now refuses a jwk whose `kid` is not a string with `ErrInvalidPublicKey`. RFC 7517 section 4.5 makes `kid` a string. v0.11.0 accepted it.
 
