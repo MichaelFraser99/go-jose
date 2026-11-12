@@ -148,11 +148,12 @@ type JoseOptions struct {
 
 	// RequiredClaims names the claims a JWT must carry. jwt.Validate refuses a
 	// token whose claims set lacks a member of any of these names with
-	// ErrMissingClaim, naming the claim. RFC 7519 section 4.1 leaves which claims are required to
-	// the application, and names are compared exactly (section 7.3). A member is
-	// present whatever its value, null included, and a registered claim's type
-	// rule still applies to it. An empty string names no claim, so jwt.Validate
-	// refuses options holding one with ErrInvalidOptions.
+	// ErrMissingClaim, naming the claim. RFC 7519 section 4.1 leaves which
+	// claims are required to the application, and names are compared exactly
+	// (section 7.3). A member is present whatever its value, null included, and
+	// a registered claim's type rule still applies to it. An empty string names
+	// no claim, so jwt.Validate refuses options holding one with
+	// ErrInvalidOptions.
 	RequiredClaims []string
 
 	// ExpectedIssuer names the issuers this recipient accepts. When set,
