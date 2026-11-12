@@ -9,6 +9,8 @@ import (
 	"crypto"
 	"crypto/rsa"
 	_ "crypto/sha1"
+	_ "crypto/sha256"
+	_ "crypto/sha512"
 	"errors"
 	"fmt"
 	"io"

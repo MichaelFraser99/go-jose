@@ -9,6 +9,8 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	_ "crypto/sha256"
+	_ "crypto/sha512"
 	"encoding/asn1"
 	"encoding/base64"
 	"encoding/json"
