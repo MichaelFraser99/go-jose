@@ -85,13 +85,15 @@ func hasValidator(alg jwa.Algorithm) bool {
 // publicJwk - jwk format public key. Its "kty" selects the key type, and the key
 // must suit alg as GetValidator requires. RFC 8725 section 3.1 requires each key
 // to be used with exactly one algorithm, so a jwk carrying an "alg" member is
-// refused unless that member is the string alg names. A jwk whose "use" is
-// present and is not "sig", or whose "key_ops" is present and lacks "verify",
-// is refused too, as RFC 7517 sections 4.2 and 4.3 mark it as not for verifying
-// signatures. So is a jwk whose "key_ops" lists a value twice, which section 4.3
-// says MUST NOT happen. Every refusal carries ErrInvalidPublicKey. To verify with such a
-// key anyway, read it with jwk.PublicFromJwk and pass it to GetValidator,
-// which applies no key-use rule.
+// refused unless that member is the string alg names, with "EdDSA" and
+// "Ed25519" naming the same algorithm. A jwk whose "use" is present and is not
+// "sig", or whose "key_ops" is present and lacks "verify", is refused too, as
+// RFC 7517 sections 4.2 and 4.3 mark it as not for verifying signatures. So is a
+// jwk whose "key_ops" lists a value twice, or whose "use" of "sig" is not
+// consistent with its "key_ops", both of which section 4.3 says MUST NOT happen.
+// Every refusal carries ErrInvalidPublicKey. To verify with such a key anyway,
+// read it with jwk.PublicFromJwk and pass it to GetValidator, which applies no
+// key-use rule.
 //
 // opts - may be nil. With StrictKeyOperations on, a jwk that section 4.3 says
 // SHOULD NOT be published is refused too. IgnoreKeyUse does not apply here.

@@ -208,11 +208,15 @@ func checkMember(jwk map[string]any, kid *string, alg string, ignoreKeyUse, stri
 // and is not "sig" (RFC 7517 section 4.2), or whose "key_ops" is present and
 // lacks operation (RFC 7517 section 4.3). A member of the wrong type, or a
 // "key_ops" that lists a value twice, which section 4.3 says MUST NOT happen, is
-// refused with malformed, and a mark that excludes operation with refused. When
+// refused with malformed, and a mark that excludes operation with refused.
+// Section 4.3 also says that "use" and "key_ops", when both are present, MUST
+// be consistent, so a "use" of "sig" beside a "key_ops" naming an encryption,
+// key wrapping or key agreement operation is refused with malformed. When
 // strictKeyOperations, a jwk CheckRecommendedKeyOperations refuses is refused
 // with refused.
 func CheckKeyUse(jwk map[string]any, operation string, refused, malformed error, strictKeyOperations bool) error {
-	if u, present := jwk["use"]; present {
+	u, usePresent := jwk["use"]
+	if usePresent {
 		su, ok := u.(string)
 		if !ok {
 			return fmt.Errorf("%wjwk has malformed use value", malformed)
@@ -228,6 +232,7 @@ func CheckKeyUse(jwk map[string]any, operation string, refused, malformed error,
 			return fmt.Errorf("%wjwk key_ops must be an array", malformed)
 		}
 		permitted := false
+		inconsistent := ""
 		seen := map[string]bool{}
 		for _, op := range ops {
 			sop, ok := op.(string)
@@ -241,9 +246,15 @@ func CheckKeyUse(jwk map[string]any, operation string, refused, malformed error,
 			if sop == operation {
 				permitted = true
 			}
+			if usePresent && inconsistent == "" && nonSignatureOperations[sop] {
+				inconsistent = sop
+			}
 		}
 		if !permitted {
 			return fmt.Errorf("%wjwk key_ops do not include %s", refused, operation)
+		}
+		if inconsistent != "" {
+			return fmt.Errorf("%wjwk use sig and key_ops %s are not consistent, which RFC 7517 section 4.3 says they MUST be", malformed, inconsistent)
 		}
 	}
 
@@ -252,6 +263,8 @@ func CheckKeyUse(jwk map[string]any, operation string, refused, malformed error,
 	}
 	return nil
 }
+
+var nonSignatureOperations = map[string]bool{"encrypt": true, "decrypt": true, "wrapKey": true, "unwrapKey": true, "deriveKey": true, "deriveBits": true}
 
 var relatedOperations = [][]string{{"sign", "verify"}, {"encrypt", "decrypt"}, {"wrapKey", "unwrapKey"}}
 

@@ -347,7 +347,7 @@ func X25519PrivateKeyFromJwk(jwk map[string]any) (*ecdh.PrivateKey, error) {
 	}
 	dBytes, err := jsonutils.ExtractAndDecodeBase64urlString(jwk, "d")
 	if err != nil {
-		return nil, fmt.Errorf("error extracting 'd' parameter from jwk: %w", err)
+		return nil, fmt.Errorf("%wan X25519 private key jwk must carry 'd': %w", jose_errors.ErrInvalidPrivateKey, err)
 	}
 
 	private, err := ecdh.X25519().NewPrivateKey(dBytes)
@@ -471,7 +471,7 @@ func EdDSAPrivateKeyFromJwk(jwk map[string]any) (*ed25519.PrivateKey, error) {
 
 	dBytes, err := jsonutils.ExtractAndDecodeBase64urlString(jwk, "d")
 	if err != nil {
-		return nil, fmt.Errorf("error extracting 'd' parameter from jwk: %w", err)
+		return nil, fmt.Errorf("%wan Ed25519 private key jwk must carry 'd': %w", jose_errors.ErrInvalidPrivateKey, err)
 	}
 
 	if len(dBytes) != ed25519.SeedSize {
@@ -507,7 +507,7 @@ func RSAPrivateKeyFromJwk(jwk map[string]any) (*rsa.PrivateKey, error) {
 
 	dBytes, err := extractBase64urlUInt(jwk, "d")
 	if err != nil {
-		return nil, fmt.Errorf("error extracting 'd' parameter from jwk: %w", err)
+		return nil, fmt.Errorf("%wan RSA private key jwk must carry 'd': %w", jose_errors.ErrInvalidPrivateKey, err)
 	}
 
 	if jsonutils.KeyPresent(jwk, "oth") {

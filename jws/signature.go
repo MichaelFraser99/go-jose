@@ -168,7 +168,8 @@ func GetSignerFromPrivateKey(alg jwa.Algorithm, privateKey crypto.PrivateKey) (m
 // same algorithm. A jwk whose "use" is present and is not "sig", or whose
 // "key_ops" is present and lacks "sign", is refused too, as RFC 7517 sections
 // 4.2 and 4.3 mark it as not for computing signatures. So is a jwk whose
-// "key_ops" lists a value twice, which section 4.3 says MUST NOT happen. Every
+// "key_ops" lists a value twice, or whose "use" of "sig" is not consistent with
+// its "key_ops", both of which section 4.3 says MUST NOT happen. Every
 // refusal of the jwk, including one that holds no private key, carries
 // ErrInvalidPrivateKey. To sign with a key whose "use" or "key_ops" is refused,
 // read it with jwk.PrivateFromJwk and pass it to GetSignerFromPrivateKey, or a
