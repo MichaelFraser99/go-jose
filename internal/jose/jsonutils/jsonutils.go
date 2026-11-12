@@ -32,6 +32,30 @@ func QuoteBounded(value string) string {
 	return strconv.Quote(value)
 }
 
+func checkURICharacters(value string) error {
+	for i := range len(value) {
+		c := value[i]
+		if c == '%' {
+			if i+2 >= len(value) || !isHexDigit(value[i+1]) || !isHexDigit(value[i+2]) {
+				return fmt.Errorf("%w%s holds a %% that does not begin a percent-encoding (RFC 3986 section 2.1)", joseerror.ErrMalformedClaim, QuoteBounded(value))
+			}
+			continue
+		}
+		if !isURICharacter(c) {
+			return fmt.Errorf("%w%s holds a character that is not a URI character (RFC 3986 section 2): percent-encode it", joseerror.ErrMalformedClaim, QuoteBounded(value))
+		}
+	}
+	return nil
+}
+
+func isHexDigit(c byte) bool {
+	return '0' <= c && c <= '9' || 'a' <= c && c <= 'f' || 'A' <= c && c <= 'F'
+}
+
+func isURICharacter(c byte) bool {
+	return 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' || strings.IndexByte("-._~:/?#[]@!$&'()*+,;=", c) >= 0
+}
+
 // DecodeBase64url decodes Base64url Encoding as RFC 7515 section 2 defines it:
 // the RFC 4648 section 5 alphabet with no padding and no line breaks, whitespace
 // or other characters. Non-zero pad bits are refused, as RFC 4648 section 3.5
@@ -190,7 +214,7 @@ var (
 		if parsedUrl.Hostname() == "" {
 			return fmt.Errorf("%w%s is an https URL with an empty host, which RFC 9110 section 4.2.2 requires a recipient to reject", joseerror.ErrMalformedClaim, QuoteBounded(retrievedClaimValue))
 		}
-		return nil
+		return checkURICharacters(retrievedClaimValue)
 	}
 
 	ValidateBase64Url = func(jsonInput map[string]any, retrievedClaimValue string) error {

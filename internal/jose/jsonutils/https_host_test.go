@@ -32,16 +32,16 @@ func TestValidateHttpsUrlClaim_AnHttpsURLWithAnEmptyHostIsRejected(t *testing.T)
 	}
 
 	withHosts := map[string]string{
-		"a registered name":           "https://keys.example/jwks",
-		"a one-letter host":           "https://a",
-		"an IPv4 literal":             "https://192.0.2.1/jwks",
-		"an IPv6 literal":             "https://[2001:db8::1]/jwks",
-		"a host and an explicit port": "https://keys.example:443/jwks",
-		"a host and an empty port":    "https://keys.example:/jwks",
-		"userinfo and a host":         "https://user@keys.example/jwks",
-		"an upper-case scheme":        "HTTPS://keys.example/jwks",
-		"a host with no path at all":  "https://keys.example",
-		"a unicode registered name":   "https://kеys.example/jwks",
+		"a registered name":                         "https://keys.example/jwks",
+		"a one-letter host":                         "https://a",
+		"an IPv4 literal":                           "https://192.0.2.1/jwks",
+		"an IPv6 literal":                           "https://[2001:db8::1]/jwks",
+		"a host and an explicit port":               "https://keys.example:443/jwks",
+		"a host and an empty port":                  "https://keys.example:/jwks",
+		"userinfo and a host":                       "https://user@keys.example/jwks",
+		"an upper-case scheme":                      "HTTPS://keys.example/jwks",
+		"a host with no path at all":                "https://keys.example",
+		"a percent-encoded unicode registered name": "https://k%D0%B5ys.example/jwks",
 	}
 	for name, value := range withHosts {
 		t.Run(name, func(t *testing.T) {

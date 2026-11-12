@@ -93,12 +93,13 @@ func listed(alias, location string, allowed []string, fetch model.Retriever) mod
 
 // CheckAllowedKeyURLs refuses, with ErrInvalidOptions, an AllowedKeyURLs entry
 // that no jku or x5u can equal: one that ValidateHttpsUrlClaim refuses, as RFC
-// 7515 sections 4.1.2 and 4.1.5 require both to use TLS, and RFC 9110 section
-// 4.2.2 requires an https URI to name a host.
+// 7515 sections 4.1.2 and 4.1.5 require both to use TLS, RFC 9110 section 4.2.2
+// requires an https URI to name a host, and RFC 3986 section 2 limits a URI to
+// its character set.
 func CheckAllowedKeyURLs(allowed []string) error {
 	for _, entry := range allowed {
 		if jsonutils.ValidateHttpsUrlClaim(nil, entry) != nil {
-			return fmt.Errorf("%wAllowedKeyURLs holds %s, which is not an https URL with a host (RFC 7515 sections 4.1.2 and 4.1.5, RFC 9110 section 4.2.2), so no jku or x5u can match it", joseerror.ErrInvalidOptions, jsonutils.QuoteBounded(entry))
+			return fmt.Errorf("%wAllowedKeyURLs holds %s, which is not an https URL with a host and only URI characters (RFC 7515 sections 4.1.2 and 4.1.5, RFC 9110 section 4.2.2, RFC 3986 section 2), so no jku or x5u can match it", joseerror.ErrInvalidOptions, jsonutils.QuoteBounded(entry))
 		}
 	}
 	return nil
@@ -327,7 +328,7 @@ type headerShape struct {
 // no key and fetches nothing, so a producer can hold a header it emits to the
 // rules ValidateHeader applies to one it receives.
 //
-// "jku" and "x5u" must be HTTPS URLs (sections 4.1.2 and 4.1.5) with a host (RFC 9110 section 4.2.2), "jwk" an object
+// "jku" and "x5u" must be HTTPS URLs (sections 4.1.2 and 4.1.5) with a host (RFC 9110 section 4.2.2) and only URI characters (RFC 3986 section 2), "jwk" an object
 // with no private key member (section 4.1.3 names a public key), "kid", "typ" and "cty" strings (sections 4.1.4, 4.1.9 and
 // 4.1.10), "x5c" a non-empty array of base64 DER certificates (section 4.1.6),
 // and "x5t" and "x5t#S256" base64url (sections 4.1.7 and 4.1.8). "crit" must be

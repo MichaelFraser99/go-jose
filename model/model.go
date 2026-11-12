@@ -48,20 +48,30 @@ type JoseOptions struct {
 	// no entry is not fetched and contributes no key, as a kid that matches nothing
 	// does: another key source can still verify the token, and if none does the
 	// error is ErrInvalidSignature, matching ErrNoKeyIdentifierMatch.
-	// Each redirect hop must also be the request a listed entry makes, else it is
-	// refused before it is sent, and the fetch fails with ErrApplicationError.
 	//
-	// The list only restricts. jku still needs UseTokenProvidedKeys and HttpClient,
-	// and x5u still needs X509Roots and HttpClient. An entry that is not an https URL
-	// with a host (RFC 9110 section 4.2.2) can match no header, so it makes every call fail with ErrInvalidOptions. The
-	// list stops a peer choosing the URL, not what a listed host resolves to: keep a
-	// transport that refuses private and loopback addresses.
+	// A redirect hop must send the request a listed entry sends. The hop is compared
+	// as the absolute URL the client requests, with a relative Location resolved,
+	// dot-segments removed and no fragment, against each entry parsed the same way.
+	// So an entry with a fragment matches a hop without one, and the case of a hop's
+	// scheme does not matter. Any other hop is refused before it is sent, and the
+	// fetch fails with ErrApplicationError.
+	//
+	// One list serves jku and x5u, and an empty list restricts neither. The list
+	// only restricts: jku still needs UseTokenProvidedKeys and HttpClient, and x5u
+	// still needs X509Roots and HttpClient. An entry that is not an https URL with a
+	// host (RFC 9110 section 4.2.2), or that holds a character outside RFC 3986
+	// section 2, can match no header, so it makes every call fail with
+	// ErrInvalidOptions; jws.CheckOptions finds it at startup. The list stops a peer
+	// choosing the URL, not what a listed host resolves to: keep a transport that
+	// refuses private and loopback addresses.
 	AllowedKeyURLs []string
 
 	// FetchTimeout bounds each jku or x5u fetch, from sending the request to reading the
 	// last byte of the body, provided the HttpClient's transport honours the request's
 	// context. Zero or less means 10 seconds. A deadline or cancellation on the context
-	// passed to jwt.Validate or jws.VerifyCompactSerialization also applies.
+	// passed to jwt.Validate, jws.Verify or jws.VerifyCompactSerialization also
+	// applies. Keep it below the caller's own deadline, so a slow key server fails
+	// the fetch rather than ending the caller's context.
 	FetchTimeout time.Duration
 
 	// MaxKeysTried bounds how many keys a token's signature is checked against,

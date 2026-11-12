@@ -32,8 +32,8 @@ type Fetch func(url, alias string) (*http.Response, error)
 
 // Fetcher binds a context, client, timeout and allow-list into a Fetch. With
 // allowed non-empty, every request of a fetch, each redirect hop included, must
-// be the request a listed entry makes, else it is refused before it is sent
-// (draft-ietf-oauth-rfc8725bis section 3.10).
+// be the request a listed entry makes, compared without its fragment, else it is
+// refused before it is sent (draft-ietf-oauth-rfc8725bis section 3.10).
 func Fetcher(ctx context.Context, client *http.Client, timeout time.Duration, allowed []string) Fetch {
 	return func(url, alias string) (*http.Response, error) {
 		return retrieve(ctx, client, timeout, allowed, url, alias)
@@ -82,7 +82,7 @@ func (h httpsOnly) RoundTrip(request *http.Request) (*http.Response, error) {
 	if request.URL.Scheme != "https" {
 		return nil, errNotTLS
 	}
-	if h.allowed != nil && !h.allowed[request.URL.String()] {
+	if h.allowed != nil && !h.allowed[requestKey(request.URL)] {
 		return nil, errNotAllowed
 	}
 	next := h.next
@@ -102,6 +102,13 @@ func RetrieveResource(ctx context.Context, client *http.Client, timeout time.Dur
 	return retrieve(ctx, client, timeout, nil, url, alias)
 }
 
+func requestKey(target *neturl.URL) string {
+	requested := *target
+	requested.Fragment = ""
+	requested.RawFragment = ""
+	return requested.String()
+}
+
 func requestsOf(allowed []string) map[string]bool {
 	if len(allowed) == 0 {
 		return nil
@@ -109,7 +116,7 @@ func requestsOf(allowed []string) map[string]bool {
 	requests := make(map[string]bool, len(allowed))
 	for _, entry := range allowed {
 		if parsed, err := neturl.Parse(entry); err == nil {
-			requests[parsed.String()] = true
+			requests[requestKey(parsed)] = true
 		}
 	}
 	return requests

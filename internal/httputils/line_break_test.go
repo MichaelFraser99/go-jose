@@ -12,14 +12,14 @@ import (
 )
 
 func TestRetrieveResource_AFailedFetchPutsNoRawLineBreakIntoItsError(t *testing.T) {
-	breaks := []string{" ", " ", "\u0085", "\r"}
+	breaks := []string{"\u2028", "\u2029", "\u0085", "\r"}
 	tests := map[string]struct {
 		fetch          func(t *testing.T) error
 		causeCarriesIt bool
 	}{
 		"a host carrying U+2028, U+2029 and U+0085 that cannot resolve": {
 			fetch: func(t *testing.T) error {
-				_, err := RetrieveResource(context.Background(), &http.Client{}, 0, "https://a b c\u0085d.invalid/jwks", "jku")
+				_, err := RetrieveResource(context.Background(), &http.Client{}, 0, "https://a\u2028b\u2029c\u0085d.invalid/jwks", "jku")
 				return err
 			},
 			causeCarriesIt: true,
@@ -28,7 +28,7 @@ func TestRetrieveResource_AFailedFetchPutsNoRawLineBreakIntoItsError(t *testing.
 			fetch: func(t *testing.T) error {
 				var hits atomic.Int64
 				plain := countingServer(t, false, &hits, serveKeySet)
-				start := countingServer(t, true, &hits, redirectTo(plain.URL+"/  \u0085"))
+				start := countingServer(t, true, &hits, redirectTo(plain.URL+"/\u2028\u2029\u0085"))
 				_, err := RetrieveResource(context.Background(), start.Client(), 0, start.URL, "jku")
 				return err
 			},
@@ -48,7 +48,7 @@ func TestRetrieveResource_AFailedFetchPutsNoRawLineBreakIntoItsError(t *testing.
 			}
 			if tc.causeCarriesIt {
 				var dnsErr *net.DNSError
-				if !errors.As(err, &dnsErr) || !strings.Contains(dnsErr.Name, " ") {
+				if !errors.As(err, &dnsErr) || !strings.Contains(dnsErr.Name, "\u2028") {
 					t.Fatalf("the cause must repeat the host with its line breaks, or this case proves nothing, got %s", strconv.Quote(err.Error()))
 				}
 			}

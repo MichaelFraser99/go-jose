@@ -123,25 +123,25 @@ func TestVerifyCompactSerialization_AllowedKeyURLsMatchesAURLExactly(t *testing.
 	keys := newRemoteKeys(t)
 	const entry = "https://keys.example/jwks"
 	nearMisses := map[string]string{
-		"a trailing slash":              "https://keys.example/jwks/",
-		"a host in another case":        "https://KEYS.example/jwks",
-		"a path in another case":        "https://keys.example/JWKS",
-		"a scheme in another case":      "HTTPS://keys.example/jwks",
-		"an added query":                "https://keys.example/jwks?v=1",
-		"an empty query":                "https://keys.example/jwks?",
-		"an added fragment":             "https://keys.example/jwks#keys",
-		"the default port written":      "https://keys.example:443/jwks",
-		"a percent-encoded path":        "https://keys.example/%6Awks",
-		"the listed host as userinfo":   "https://keys.example@evil.example/jwks",
-		"a listed prefix":               "https://keys.example/jwks/../evil",
-		"a longer host":                 "https://keys.example.evil.example/jwks",
-		"a Cyrillic homoglyph host":     "https://kеys.example/jwks",
-		"a fullwidth homoglyph host":    "https://ｋeys.example/jwks",
-		"an entry followed by a dot":    "https://keys.example./jwks",
-		"an entry that is a substring":  "https://keys.example/jwk",
-		"an entry followed by a NUL":    "https://keys.example/jwks%00",
-		"a path with a doubled slash":   "https://keys.example//jwks",
-		"an IPv6 literal for localhost": "https://[::1]/jwks",
+		"a trailing slash":                           "https://keys.example/jwks/",
+		"a host in another case":                     "https://KEYS.example/jwks",
+		"a path in another case":                     "https://keys.example/JWKS",
+		"a scheme in another case":                   "HTTPS://keys.example/jwks",
+		"an added query":                             "https://keys.example/jwks?v=1",
+		"an empty query":                             "https://keys.example/jwks?",
+		"an added fragment":                          "https://keys.example/jwks#keys",
+		"the default port written":                   "https://keys.example:443/jwks",
+		"a percent-encoded path":                     "https://keys.example/%6Awks",
+		"the listed host as userinfo":                "https://keys.example@evil.example/jwks",
+		"a listed prefix":                            "https://keys.example/jwks/../evil",
+		"a longer host":                              "https://keys.example.evil.example/jwks",
+		"a percent-encoded Cyrillic homoglyph host":  "https://k%D0%B5ys.example/jwks",
+		"a percent-encoded fullwidth homoglyph host": "https://%EF%BD%8Beys.example/jwks",
+		"an entry followed by a dot":                 "https://keys.example./jwks",
+		"an entry that is a substring":               "https://keys.example/jwk",
+		"an entry followed by a NUL":                 "https://keys.example/jwks%00",
+		"a path with a doubled slash":                "https://keys.example//jwks",
+		"an IPv6 literal for localhost":              "https://[::1]/jwks",
 	}
 
 	for sourceName, source := range remoteSources {
@@ -349,13 +349,13 @@ func TestCheckOptions_AllowedKeyURLsEntryThatNoHeaderCanMatch(t *testing.T) {
 	}
 
 	accepted := map[string][]string{
-		"none":                 nil,
-		"an empty list":        {},
-		"an https URL":         {"https://keys.example/jwks"},
-		"a unicode host":       {"https://kеys.example/jwks"},
-		"duplicate entries":    {"https://keys.example/jwks", "https://keys.example/jwks"},
-		"an uppercase scheme":  {"HTTPS://keys.example/jwks"},
-		"a query and fragment": {"https://keys.example/jwks?v=1#keys"},
+		"none":                           nil,
+		"an empty list":                  {},
+		"an https URL":                   {"https://keys.example/jwks"},
+		"a percent-encoded unicode host": {"https://k%D0%B5ys.example/jwks"},
+		"duplicate entries":              {"https://keys.example/jwks", "https://keys.example/jwks"},
+		"an uppercase scheme":            {"HTTPS://keys.example/jwks"},
+		"a query and fragment":           {"https://keys.example/jwks?v=1#keys"},
 	}
 	for name, allowed := range accepted {
 		t.Run(name, func(t *testing.T) {
