@@ -53,7 +53,7 @@ type JoseOptions struct {
 	//
 	// The list only restricts. jku still needs UseTokenProvidedKeys and HttpClient,
 	// and x5u still needs X509Roots and HttpClient. An entry that is not an https URL
-	// can match no header, so it makes every call fail with ErrInvalidOptions. The
+	// with a host (RFC 9110 section 4.2.2) can match no header, so it makes every call fail with ErrInvalidOptions. The
 	// list stops a peer choosing the URL, not what a listed host resolves to: keep a
 	// transport that refuses private and loopback addresses.
 	AllowedKeyURLs []string

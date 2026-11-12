@@ -187,6 +187,9 @@ var (
 		if parsedUrl.Scheme != "https" {
 			return fmt.Errorf("%w%s is not a valid HTTPS URL", joseerror.ErrMalformedClaim, QuoteBounded(retrievedClaimValue))
 		}
+		if parsedUrl.Hostname() == "" {
+			return fmt.Errorf("%w%s is an https URL with an empty host, which RFC 9110 section 4.2.2 requires a recipient to reject", joseerror.ErrMalformedClaim, QuoteBounded(retrievedClaimValue))
+		}
 		return nil
 	}
 

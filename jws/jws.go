@@ -48,7 +48,7 @@ const defaultMaxKeysTried = 100
 // the token: an AllowedSigningAlgorithms entry this library has no validator
 // for, such as a JWE alg, an AcceptedTypes entry that is not a media type
 // name (RFC 6838 section 4.2), and an AllowedKeyURLs entry that is not an https
-// URL (RFC 7515 sections 4.1.2 and 4.1.5). Verify and VerifyCompactSerialization
+// URL with a host (RFC 7515 sections 4.1.2 and 4.1.5, RFC 9110 section 4.2.2). Verify and VerifyCompactSerialization
 // call it before reading the token.
 func CheckOptions(opts *model.JoseOptions) error {
 	if opts == nil {

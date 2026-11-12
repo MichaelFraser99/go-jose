@@ -7,8 +7,10 @@ import (
 	"io"
 	"net/http"
 	neturl "net/url"
+	"strconv"
 	"time"
 
+	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 )
 
@@ -136,6 +138,10 @@ func retrieve(ctx context.Context, client *http.Client, timeout time.Duration, a
 	response, err := tlsOnly.Do(req)
 	if err != nil {
 		cancel()
+		var requestErr *neturl.Error
+		if errors.As(err, &requestErr) {
+			return nil, fmt.Errorf("%wfailed to retrieve %s: %s %s: %w", joseerror.ErrApplicationError, alias, requestErr.Op, jsonutils.QuoteBounded(requestErr.URL), boundedCause{err: requestErr.Err})
+		}
 		return nil, fmt.Errorf("%wfailed to retrieve %s: %w", joseerror.ErrApplicationError, alias, err)
 	}
 
@@ -157,6 +163,28 @@ func retrieve(ctx context.Context, client *http.Client, timeout time.Duration, a
 	}
 	return response, nil
 }
+
+// MaxCauseRunes is how many runes of a failed request's cause an error keeps.
+// A cause such as a DNS failure can repeat a host the peer chose.
+const MaxCauseRunes = 256
+
+type boundedCause struct {
+	err error
+}
+
+func (b boundedCause) Error() string {
+	message := b.err.Error()
+	runes := 0
+	for i := range message {
+		if runes == MaxCauseRunes {
+			return strconv.Quote(message[:i]) + "..."
+		}
+		runes++
+	}
+	return message
+}
+
+func (b boundedCause) Unwrap() error { return b.err }
 
 // ReadBody reads a fetched resource up to MaxBodyBytes and closes the body on every
 // path, releasing the connection and the fetch deadline.

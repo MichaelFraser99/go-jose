@@ -327,6 +327,10 @@ func TestCheckOptions_AllowedKeyURLsEntryThatNoHeaderCanMatch(t *testing.T) {
 		"another scheme":               "file:///etc/passwd",
 		"https after a leading space":  " https://keys.example/jwks",
 		"a bad entry after a good one": "http://after.example/jwks",
+		"https with an empty host":     "https:///jwks",
+		"https with only a port":       "https://:443/jwks",
+		"https with userinfo only":     "https://user@/jwks",
+		"https opaque":                 "https:opaque",
 	}
 	for name, entry := range refused {
 		t.Run(name, func(t *testing.T) {
@@ -380,5 +384,27 @@ func TestVerifyCompactSerialization_AllowedKeyURLsRefusalFetchesNothing(t *testi
 	}
 	if got := hits.Load(); got != 0 {
 		t.Errorf("[README Errors] options refused before the token is read fetch nothing, got %d requests", got)
+	}
+}
+
+func TestVerifyCompactSerialization_AJkuOrX5uWithAnEmptyHostIsMalformed(t *testing.T) {
+	keys := newRemoteKeys(t)
+	emptyHosts := []string{"https://", "https:opaque", "https:///jwks", "https://:443/", "https://user@/"}
+	options := map[string]*model.JoseOptions{
+		"no options":           nil,
+		"every source enabled": {UseTokenProvidedKeys: true, X509Roots: roots(keys.root), HttpClient: &http.Client{Transport: &recordingTransport{}}},
+	}
+	for _, header := range []string{"jku", "x5u"} {
+		for _, value := range emptyHosts {
+			for optsName, opts := range options {
+				t.Run(header+" "+value+" "+optsName, func(t *testing.T) {
+					token := es256Token(t, keys.signingKey, map[string]any{header: value})
+					_, _, err := jws.VerifyCompactSerialization(context.Background(), token, retrieving(&keys.signingKey.PublicKey), opts)
+					if !errors.Is(err, joseerror.ErrMalformedToken) || !errors.Is(err, joseerror.ErrMalformedClaim) {
+						t.Errorf("[RFC 9110 4.2.2] a recipient MUST reject an https URI with an empty host identifier, so a %s of %q must be refused with ErrMalformedToken and ErrMalformedClaim, got %v", header, value, err)
+					}
+				})
+			}
+		}
 	}
 }

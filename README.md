@@ -268,7 +268,7 @@ validated, err := jwt.Validate(ctx, token, nil, nil, &model.JoseOptions{
 
 A `jku` or `x5u` must equal an entry exactly, character for character (RFC 3986 section 6.2.1). Nothing is normalised, so `https://issuer.example/jwks.json/` and `https://ISSUER.example/jwks.json` do not match. A URL that matches no entry is not fetched and contributes no key. Its error matches `ErrNoKeyIdentifierMatch`, and another key source can still verify the token. Each redirect hop must also go to a listed URL. A redirect to any other URL is refused before the request is sent, and the fetch fails with `ErrApplicationError`.
 
-The list does not turn a source on. `jku` still needs `UseTokenProvidedKeys`, and `x5u` still needs `X509Roots`. An entry that is not an `https` URL can match no header, so every call fails with `ErrInvalidOptions`. The list controls which URL a peer can name. It does not control the address that a listed host resolves to, so keep your guarded transport.
+The list does not turn a source on. `jku` still needs `UseTokenProvidedKeys`, and `x5u` still needs `X509Roots`. An entry that is not an `https` URL with a host can match no header, so every call fails with `ErrInvalidOptions`. The list controls which URL a peer can name. It does not control the address that a listed host resolves to, so keep your guarded transport.
 
 Each fetch is also bounded in time, provided your client's transport honours the request's context. `JoseOptions.FetchTimeout` covers the whole fetch, from sending the request to reading the last byte of the body. When it is zero, the limit is 10 seconds. A deadline or cancellation on the `ctx` you pass to `jwt.Validate`, `jws.Verify` or `jws.VerifyCompactSerialization` also stops the fetch. The limit applies to each fetch, so a token naming both `jku` and `x5u` can take two of them. Use `ctx` to bound the whole call.
 
@@ -490,6 +490,7 @@ Any other `crypto.Signer`, such as a KMS signer, is called as Go's `crypto.Signe
 - `New` refuses an `alg` outside `jwa`, such as `jwa.Algorithm(999)`, with `ErrUnsupportedAlgorithm`. RFC 7515 section 4.1.1 says `alg` must be present and understood.
 - `New` checks the header it will sign with the same rules `Validate` applies, and returns the same errors. So it does not sign a header that its own `Validate` refuses for its shape:
   - `jku` and `x5u` must be HTTPS URLs. RFC 7515 sections 4.1.2 and 4.1.5 require TLS.
+  - Each must name a host. RFC 9110 section 4.2.2 says a recipient MUST reject an `https` URI with an empty host, such as `https:///jwks`.
   - `jwk` must be a JSON object, and must not hold a private key member: `d`, `p`, `q`, `dp`, `dq`, `qi`, `oth`, `k` or `priv` (section 4.1.3 names a public key).
   - `kid`, `typ` and `cty` must be strings (sections 4.1.4, 4.1.9 and 4.1.10).
   - `x5c` must be a non-empty array of base64 DER certificates (section 4.1.6).
@@ -763,7 +764,7 @@ Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 | `ErrExpired` | The current time is not before the token's `exp`, allowing for `ClockSkewLeeway` |
 | `ErrNotYetValid` | The token's `nbf` or `iat` is after the current time, allowing for `ClockSkewLeeway` |
 | `ErrAudienceMismatch` | `JoseOptions.ExpectedAudience` is set and the token's `aud` names none of its values |
-| `ErrInvalidOptions` | The options passed are themselves wrong. Most of these cases are refused before the token is read. A verifier with no retriever and no token key allowed is refused after the header is checked, so a token with a bad header reports that fault first. The cases are: a nil `ctx`; a `JoseOptions.ExpectedAudience` that holds an empty string; a JWE allow-list that names a value this library does not implement; an `AllowedSigningAlgorithms` entry that is not a signature algorithm this library implements; an `AcceptedTypes` entry that is not a media type name; an `AllowedKeyURLs` entry that is not an `https` URL; a nil decrypter, or more decrypters of one `alg` than `JWEOptions.MaxKeysTried` allows; and a nil retriever with neither `UseTokenProvidedKeys` nor `X509Roots` set, when `jwt.Validate` has no decrypters |
+| `ErrInvalidOptions` | The options passed are themselves wrong. Most of these cases are refused before the token is read. A verifier with no retriever and no token key allowed is refused after the header is checked, so a token with a bad header reports that fault first. The cases are: a nil `ctx`; a `JoseOptions.ExpectedAudience` that holds an empty string; a JWE allow-list that names a value this library does not implement; an `AllowedSigningAlgorithms` entry that is not a signature algorithm this library implements; an `AcceptedTypes` entry that is not a media type name; an `AllowedKeyURLs` entry that is not an `https` URL with a host; a nil decrypter, or more decrypters of one `alg` than `JWEOptions.MaxKeysTried` allows; and a nil retriever with neither `UseTokenProvidedKeys` nor `X509Roots` set, when `jwt.Validate` has no decrypters |
 | `ErrTooManyKeys` | The signature did not verify under as many keys as `JoseOptions.MaxKeysTried` allows, and more keys or key sources remained. |
 | `ErrOutOfBounds` | A JWE asks for more work than your options allow: a `p2c` above `JWEOptions.MaxPBES2Count`, or a plaintext that inflates to more than `MaxDecompressedSize`. It also covers a `p2c` below 1000 when `RequireRecommendedPBES2Count` is set |
 
@@ -816,7 +817,7 @@ fmt.Errorf("%wshould be an instance of *ecdsa.PrivateKey", joseerror.ErrInvalidP
 
 That reads `invalid private key: should be an instance of *ecdsa.PrivateKey`, and `errors.Is` still matches.
 
-When a header check echoes a value from the token in its error, the value is quoted with Go escaping and cut to its first 64 characters, with `...` marking the cut. A peer cannot put a raw line break or kilobytes of text into your logs this way. This includes the error from parsing an `x5c` or `x5u` certificate.
+When a header check echoes a value from the token in its error, the value is quoted with Go escaping and cut to its first 64 characters, with `...` marking the cut. A peer cannot put a raw line break or kilobytes of text into your logs this way. This includes the error from parsing an `x5c` or `x5u` certificate, and the URL in a failed `jku` or `x5u` fetch, redirect hops included. The cause of a failed fetch, such as a DNS error naming the host, is cut to its first 256 characters.
 
 ## Upgrading from 0.11.x
 
@@ -851,6 +852,8 @@ These are new:
 A jwk whose `key_ops` lists a value twice is now refused by `jws.GetValidatorFromJwk`, and skipped in a `jku` key set. RFC 7517 section 4.3 says this MUST NOT happen. If a key set that you rely on does it, have its publisher remove the repeated value.
 
 `jwk.PublicFromJwk` and `jwk.PrivateFromJwk` now read an X25519 jwk as an `*ecdh` key. v0.11.0 refused it with `ErrUnsupportedAlgorithm`. `jws.GetValidatorFromJwk` refuses an X25519 jwk with `ErrInvalidPublicKey`, where v0.11.0 gave `ErrUnsupportedAlgorithm`.
+
+A `jku` or `x5u` that is an `https` URL with an empty host, such as `https:///jwks` or `https://:443/`, is now refused with `ErrMalformedToken`, even when you do not use that header. RFC 9110 section 4.2.2 says a recipient MUST reject such a URI. v0.11.0 accepted it, and no fetch of it could succeed. `jwt.New` refuses it with `ErrMalformedClaim`.
 
 `AcceptedTypes` and the `cty` check now ignore the case of ASCII letters only. v0.11.0 used Unicode case folding, so a `typ` with a lookalike letter, such as `ſecevent+jwt` with a long s, matched `secevent+jwt`. Media type names are ASCII (RFC 6838 section 4.2), so no valid `typ` or `cty` is affected, and you need to change nothing.
 

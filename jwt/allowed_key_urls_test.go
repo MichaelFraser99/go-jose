@@ -11,10 +11,11 @@ import (
 
 func TestValidate_AnAllowedKeyURLsEntryNoHeaderCanMatchIsRefused(t *testing.T) {
 	entries := map[string]string{
-		"an empty entry":         "",
-		"a relative reference":   "/jwks",
-		"plain http":             "http://keys.example/jwks",
-		"text that is not a URL": "not a url",
+		"an empty entry":           "",
+		"a relative reference":     "/jwks",
+		"plain http":               "http://keys.example/jwks",
+		"text that is not a URL":   "not a url",
+		"https with an empty host": "https:///jwks",
 	}
 	tokens := map[string]string{
 		"a signed JWT shape":     "e30.e30.e30",
