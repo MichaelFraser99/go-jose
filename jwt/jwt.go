@@ -171,7 +171,8 @@ func New(signer crypto.Signer, head, body map[string]any, opts Opts) (*string, e
 // With decrypters and a nil outOfBoundsPublicKey, an encrypt-only JWT can
 // still pass, so the options are not wrong. A JWS, signed alone or nested, is
 // then refused as the token's fault: ErrInvalidSignature, matching
-// ErrNoKeyIdentifierMatch, unless a key the token names verifies it.
+// ErrNoKeyIdentifierMatch, unless a member of opts.KeySet or a key the token
+// names verifies it.
 func Validate(ctx context.Context, token string, outOfBoundsPublicKey model.Retriever, decrypters []model.Decrypter, opts *model.JoseOptions, jweOpts *model.JWEOptions) (*Token, error) {
 	if ctx == nil {
 		return nil, fmt.Errorf("%wthe context passed is nil", joseerror.ErrInvalidOptions)
@@ -179,7 +180,7 @@ func Validate(ctx context.Context, token string, outOfBoundsPublicKey model.Retr
 	if err := CheckOptions(opts, decrypters, jweOpts); err != nil {
 		return nil, err
 	}
-	if outOfBoundsPublicKey == nil && len(decrypters) > 0 {
+	if outOfBoundsPublicKey == nil && len(decrypters) > 0 && (opts == nil || opts.KeySet == nil) {
 		outOfBoundsPublicKey = noSigningKeys
 	}
 	switch segments := strings.Count(token, ".") + 1; segments {
