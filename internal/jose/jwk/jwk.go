@@ -61,6 +61,19 @@ func RetrieveJKU(jku string, fetch httputils.Fetch, kid *string, alg string, ign
 	}
 }
 
+// RetrieveKeySet returns the keys SelectKeys takes from the caller's keySet. The set
+// is read each time the retriever is called. A set from which no key is selected
+// reports ErrNoKeyIdentifierMatch.
+func RetrieveKeySet(keySet *model.Jwks, kid *string, alg string, ignoreKeyUse, strictKeyOperations bool) model.Retriever {
+	return func() ([]crypto.PublicKey, error) {
+		keys := SelectKeys(*keySet, kid, alg, ignoreKeyUse, strictKeyOperations)
+		if len(keys) == 0 {
+			return nil, fmt.Errorf("%wno usable jwk entry in JoseOptions.KeySet matches the identifiers specified in the jose header", joseerror.ErrNoKeyIdentifierMatch)
+		}
+		return keys, nil
+	}
+}
+
 // PrivateFromJwk reads a private or symmetric key from its jwk. An "oct" jwk
 // (RFC 7518 section 6.4) is returned as a []byte.
 func PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error) {

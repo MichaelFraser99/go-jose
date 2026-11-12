@@ -191,7 +191,7 @@ RFC 8725 section 3.1 requires each key to be used with exactly one algorithm. A 
 - With `GetValidator`, pass the algorithm the key was issued for, not the `alg` a token names.
 - With a retriever, set `JoseOptions.AllowedSigningAlgorithms` to the algorithm your keys are for.
 
-A jwk can carry its own `alg`, and `GetValidatorFromJwk` and a token's `jwk` header both enforce it.
+A jwk can carry its own `alg`. `GetValidatorFromJwk`, a member of `JoseOptions.KeySet` and a token's `jwk` header all enforce it. So when you hold your keys as a JWK Set, pass it as `KeySet` rather than through a retriever.
 
 ## Verifying a JWS
 
@@ -216,7 +216,25 @@ One message can still have more than one valid token. ECDSA signatures are malle
 
 `VerifyCompactSerialization` refuses a JWT signed inside another JWS with `ErrUnsupportedAlgorithm`, before any key is sought. RFC 7519 allows this nesting, and this library does not implement it. A JWT signed and then encrypted is supported: see [Encrypted JWTs](#encrypted-jwts). RFC 7519 section 5.2 marks a nested JWT with a `cty` of `JWT`, compared as RFC 7515 section 4.1.10 describes: ignoring the case of ASCII letters, with `application/` treated as prepended. Media-type parameters are ignored, so `application/jwt; charset=utf-8` is a nested JWT too. `Verify` does not look at `cty`, because section 4.1.10 says JWS implementations ignore it. To unwrap a nested JWT yourself, call `Verify` and verify the payload it returns.
 
-Both try the keys from every source until one verifies the signature, up to `JoseOptions.MaxKeysTried`, which is 100 when unset. RFC 7517 section 4.5 does not require a `kid` to be unique, so a key set a peer publishes can hold thousands of keys under one `kid`, and each costs a signature verification. A token that would need more keys than the limit is refused with `ErrTooManyKeys`, not `ErrInvalidSignature`, so you can tell an oversized key set from a forgery. Only a key that a validator can be built from for the token's `alg` counts. The limit covers the keys your retriever returns too. When the limit is reached, no further `jku` or `x5u` is fetched.
+Both try the keys from every source until one verifies the signature, up to `JoseOptions.MaxKeysTried`, which is 100 when unset. RFC 7517 section 4.5 does not require a `kid` to be unique, so a key set a peer publishes can hold thousands of keys under one `kid`, and each costs a signature verification. A token that would need more keys than the limit is refused with `ErrTooManyKeys`, not `ErrInvalidSignature`, so you can tell an oversized key set from a forgery. Only a key that a validator can be built from for the token's `alg` counts. The limit covers the keys your retriever returns and the members of your `KeySet` too. When the limit is reached, no further `jku` or `x5u` is fetched.
+
+### Verifying with your own key set
+
+A `model.Retriever` returns bare keys, so every key it returns is tried, whatever the token's `kid` and `alg`. When you hold your keys as a JWK Set (RFC 7517 section 5), set `JoseOptions.KeySet` instead. An issuer's `jwks_uri` document that you fetched yourself is an example:
+
+```go
+var keySet model.Jwks
+if err := json.Unmarshal(jwksDocument, &keySet); err != nil {
+    return err
+}
+head, payload, err := jws.Verify(ctx, token, nil, &model.JoseOptions{KeySet: &keySet})
+```
+
+The set holds your own keys, so it needs no other option. It does not turn on `UseTokenProvidedKeys`, and a `jwk` or `jku` the token names is still ignored. A member is used for a token only when it passes the rules in [Which jwk and jku keys are used](#which-jwk-and-jku-keys-are-used). So the token's `kid` selects among your keys, and a member published for another `alg`, or marked for another use, is skipped. `IgnoreKeyUse` and `StrictKeyOperations` apply as they do to a `jku` set. A member this library cannot read as a public key is skipped, as RFC 7517 section 5 recommends.
+
+An `oct` member is never used, because a secret key has no public half. To verify an HMAC token, pass a retriever as [Validators](#validators) describes.
+
+The keys of the set are tried after your retriever's keys and before any key the token names. Each counts towards `MaxKeysTried`. The set is read again on every call, so you can change `Keys` between calls to follow a key rotation. Do not change it while a call that uses it is running. If no member is selected and no other key verifies the token, the error is `ErrInvalidSignature`, which also matches `ErrNoKeyIdentifierMatch`, unless another key source failed.
 
 ## Keys a token carries
 
@@ -269,7 +287,7 @@ With no client, `jku` and `x5u` contribute no key. Each member of a `jku` set is
 
 ### Which jwk and jku keys are used
 
-A key from a `jwk` header, or a member of a `jku` set, verifies the token only when all of these hold:
+A key from a `jwk` header, a member of a `jku` set, or a member of your `JoseOptions.KeySet` verifies the token only when all of these hold:
 
 - Its `kid` is absent or equals the header's `kid`. RFC 7515 section 4.1.4 calls the header's `kid` a hint, and RFC 7517 section 4.5 makes a jwk's `kid` optional, so a key that names no `kid` stays a candidate.
 - Its `alg` is absent or equals the header's `alg`. RFC 8725 section 3.1 says "each key MUST be used with exactly one algorithm". `EdDSA` and `Ed25519` count as equal, because with an Ed25519 key they name the same algorithm. A key that names no `alg` stays a candidate, since RFC 7517 section 4.4 makes `alg` optional. Such a key verifies under any algorithm its key type allows, so pin `AllowedSigningAlgorithms` to bind it to one.
@@ -287,7 +305,7 @@ No RFC makes `use` or `key_ops` a requirement: section 4.3 leaves it to each app
 
 RFC 7517 section 4.3 says that a jwk SHOULD NOT carry both `use` and `key_ops`. It also says that `key_ops` SHOULD NOT name unrelated operations. The only related pairs are `sign` with `verify`, `encrypt` with `decrypt`, and `wrapKey` with `unwrapKey`. Neither rule is a MUST, so this library accepts such a jwk by default.
 
-Set `JoseOptions.StrictKeyOperations` to refuse such a jwk. Then a `key_ops` of more than one value must be one of the three pairs. This also refuses `deriveKey` with `deriveBits`, which WebCrypto gives an ECDH private key. The option applies to a token's `jwk` and `jku` keys and to `jws.GetValidatorFromJwk`. `jwe.GetEncrypterFromJwk` and `jwe.GetDecrypterFromJwk` take the same option in `model.JWEOptions`. `IgnoreKeyUse` turns it off for a token's keys, because no `use` or `key_ops` rule applies to them then.
+Set `JoseOptions.StrictKeyOperations` to refuse such a jwk. Then a `key_ops` of more than one value must be one of the three pairs. This also refuses `deriveKey` with `deriveBits`, which WebCrypto gives an ECDH private key. The option applies to a token's `jwk` and `jku` keys, to the members of `KeySet` and to `jws.GetValidatorFromJwk`. `jwe.GetEncrypterFromJwk` and `jwe.GetDecrypterFromJwk` take the same option in `model.JWEOptions`. `IgnoreKeyUse` turns it off for a token's keys and for `KeySet`, because no `use` or `key_ops` rule applies to them then.
 
 ### Stating what you expect of a header
 
@@ -439,6 +457,8 @@ A jwk with no `kty` is refused with `ErrInvalidPublicKey` or `ErrInvalidPrivateK
 
 `Jwks.RetrieveByKeyID` returns every key that carries the given `kid`, in set order, because RFC 7517 section 4.5 does not make a `kid` unique. It returns an error only when no key carries it.
 
+To verify tokens with the keys of a set, pass it as `JoseOptions.KeySet`. [Verifying with your own key set](#verifying-with-your-own-key-set) describes how a member is selected for a token.
+
 ## JWTs
 This library includes two methods for jwt handling
 
@@ -509,7 +529,7 @@ RFC 7519 allows a JWT that is signed, encrypted, or both. To accept only the sha
 
 `Validate` returns a nil `*Token` with every error, so check `err` before you read the token.
 
-The retriever supplies key material of your own. Pass nil only when a key the token's header names can verify it: when you have turned on `UseTokenProvidedKeys` for `jwk` and `jku`, or set `X509Roots` for `x5c` and `x5u`. With a nil retriever and neither option, no token can verify, so `Validate` refuses every token with `ErrInvalidOptions`, after it checks the header. If either option is set and the token names no key that it allows, the error is `ErrNoKeyIdentifierMatch`. If you give `jwt.Validate` decrypters, an encrypt-only JWT can pass without a retriever, so a nil retriever is not an options fault. A signed JWT is then refused with `ErrInvalidSignature`, which also matches `ErrNoKeyIdentifierMatch`, unless a key the token names verifies it. `model.JoseOptions` carries everything described under [Keys a token carries](#keys-a-token-carries), and may be nil for the defaults.
+The retriever supplies key material of your own. Pass nil when you set `KeySet`, or when a key the token's header names can verify it: when you have turned on `UseTokenProvidedKeys` for `jwk` and `jku`, or set `X509Roots` for `x5c` and `x5u`. With a nil retriever and none of these options, no token can verify, so `Validate` refuses every token with `ErrInvalidOptions`, after it checks the header. If `UseTokenProvidedKeys` or `X509Roots` is set and the token names no key that it allows, the error is `ErrNoKeyIdentifierMatch`. If you give `jwt.Validate` decrypters, an encrypt-only JWT can pass without a retriever, so a nil retriever is not an options fault. A signed JWT is then refused with `ErrInvalidSignature`, which also matches `ErrNoKeyIdentifierMatch`, unless a member of `KeySet` or a key the token names verifies it. `model.JoseOptions` carries everything described under [Keys a token carries](#keys-a-token-carries), and may be nil for the defaults.
 
 `Validate` checks each registered claim that is present:
 
@@ -742,14 +762,14 @@ Sentinel errors live in the `joseerror` package. Match one with `errors.Is`:
 | `ErrMalformedClaim` | A claim is present but its type or value is wrong. This includes a `b64` that is not a boolean, and an `x5c` or `x5u` chain that is out of order or longer than 16 certificates |
 | `ErrMissingClaim` | A required claim is absent |
 | `ErrMissingCriticalClaim` | A header named in `crit` is absent, or names an extension this library does not understand, or `b64` is `false` |
-| `ErrNoKeyIdentifierMatch` | No key could be selected. The `kid` matches nothing, a `jku` set holds no usable key that matches the header, a certificate chain does not reach a configured root, or an `x5t` thumbprint does not match the chain. It also covers a token that names no key, when you give no retriever and rely on the keys a token names |
+| `ErrNoKeyIdentifierMatch` | No key could be selected. The `kid` matches nothing, your `KeySet` or a `jku` set holds no usable key that matches the header, a certificate chain does not reach a configured root, or an `x5t` thumbprint does not match the chain. It also covers a token that names no key, when you give no retriever and rely on the keys a token names |
 | `ErrKeystoreError` | A `model.Jwks` lookup or addition failed, or a document decoded into `model.Jwks` is not a JWK Set |
 | `ErrApplicationError` | Key material a header named could not be obtained, decoded or used. Covers a failed `jku` or `x5u` fetch, a local decode of what one returned (an empty `x5u` body is a failed decode), and an inline `jwk` of a key type or curve this library does not support. A fetch that ran out of time also matches `context.DeadlineExceeded`, and one cancelled through `ctx` matches `context.Canceled` |
 | `ErrMalformedToken` | The token is not a well formed JOSE object: it breaks RFC 7515 or RFC 7516. A well-formed token that your options refuse, or that names what this library does not implement, does not match it |
 | `ErrExpired` | The current time is not before the token's `exp`, allowing for `ClockSkewLeeway` |
 | `ErrNotYetValid` | The token's `nbf` or `iat` is after the current time, allowing for `ClockSkewLeeway` |
 | `ErrAudienceMismatch` | `JoseOptions.ExpectedAudience` is set and the token's `aud` names none of its values |
-| `ErrInvalidOptions` | The options passed are themselves wrong. Most of these cases are refused before the token is read. A verifier with no retriever and no token key allowed is refused after the header is checked, so a token with a bad header reports that fault first. The cases are: a nil `ctx`; a `JoseOptions.ExpectedAudience` that holds an empty string; a JWE allow-list that names a value this library does not implement; an `AllowedSigningAlgorithms` entry that is not a signature algorithm this library implements; an `AcceptedTypes` entry that is not a media type name; a nil decrypter, or more decrypters of one `alg` than `JWEOptions.MaxKeysTried` allows; and a nil retriever with neither `UseTokenProvidedKeys` nor `X509Roots` set, when `jwt.Validate` has no decrypters |
+| `ErrInvalidOptions` | The options passed are themselves wrong. Most of these cases are refused before the token is read. A verifier with no retriever and no token key allowed is refused after the header is checked, so a token with a bad header reports that fault first. The cases are: a nil `ctx`; a `JoseOptions.ExpectedAudience` that holds an empty string; a JWE allow-list that names a value this library does not implement; an `AllowedSigningAlgorithms` entry that is not a signature algorithm this library implements; an `AcceptedTypes` entry that is not a media type name; a nil decrypter, or more decrypters of one `alg` than `JWEOptions.MaxKeysTried` allows; and a nil retriever with none of `KeySet`, `UseTokenProvidedKeys` and `X509Roots` set, when `jwt.Validate` has no decrypters |
 | `ErrTooManyKeys` | The signature did not verify under as many keys as `JoseOptions.MaxKeysTried` allows, and more keys or key sources remained. |
 | `ErrOutOfBounds` | A JWE asks for more work than your options allow: a `p2c` above `JWEOptions.MaxPBES2Count`, or a plaintext that inflates to more than `MaxDecompressedSize`. It also covers a `p2c` below 1000 when `RequireRecommendedPBES2Count` is set |
 
@@ -771,7 +791,7 @@ Most errors mean that the token is bad, so the response is a 4xx. A few mean tha
 
 Four sentinels can also come from your side. Read these before you map them:
 
-- `ErrTooManyKeys` means that the signature did not verify under as many keys as `JoseOptions.MaxKeysTried` allows. This applies to a signed JWT and to the JWS inside a Nested JWT. The keys can come from your retriever or from a `jku` set the peer chose. So set `MaxKeysTried` above the number of keys that your own retriever returns. Then the error can only come from a token that names too many keys, which is the peer's fault (401). More decrypters of one `alg` than `JWEOptions.MaxKeysTried` allows is `ErrInvalidOptions`, not `ErrTooManyKeys`.
+- `ErrTooManyKeys` means that the signature did not verify under as many keys as `JoseOptions.MaxKeysTried` allows. This applies to a signed JWT and to the JWS inside a Nested JWT. The keys can come from your retriever, your `KeySet` or a `jku` set the peer chose. So set `MaxKeysTried` above the number of keys that your own retriever returns plus the number of members in your `KeySet`. Then the error can only come from a token that names too many keys, which is the peer's fault (401). More decrypters of one `alg` than `JWEOptions.MaxKeysTried` allows is `ErrInvalidOptions`, not `ErrTooManyKeys`.
 - `ErrOutOfBounds` for a PBES2 token means that `p2c`, multiplied by the number of your decrypters of the token's `alg`, is more than `MaxPBES2Count`. A peer can cause it with a high `p2c`, which is a 4xx. You can cause it with too many PBES2 decrypters: three decrypters at the default `MaxPBES2Count` refuse a token at the common `p2c` of 600,000. So give at most `MaxPBES2Count` divided by your senders' `p2c` PBES2 decrypters. Then the error can only come from a token with a higher `p2c`, which is the peer's fault. A `zip` that inflates past `MaxDecompressedSize` is also `ErrOutOfBounds`, and is the peer's fault.
 - `ErrDecryptionFailed` is the same for every failure that depends on a key, as RFC 7516 section 11.5 requires. So a hardware module outage looks like a bad token. To tell them apart, record the cause with `OnDecrypterError`, and decide after the call. A wrong key or a forged token also calls `OnDecrypterError`, so test for the errors of your own key store only, as here:
 

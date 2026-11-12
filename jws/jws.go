@@ -111,7 +111,7 @@ func verify(ctx context.Context, compactSerialization string, outOfBoundsPublicK
 
 	if len(jwkRetrievers) == 0 {
 		if opts == nil || !opts.UseTokenProvidedKeys && opts.X509Roots == nil {
-			return nil, nil, nil, fmt.Errorf("%wno retriever was given and no key the token names is allowed, so no token can verify; pass a retriever, or set UseTokenProvidedKeys or X509Roots", joseerror.ErrInvalidOptions)
+			return nil, nil, nil, fmt.Errorf("%wno retriever or KeySet was given and no key the token names is allowed, so no token can verify; pass a retriever, or set KeySet, UseTokenProvidedKeys or X509Roots", joseerror.ErrInvalidOptions)
 		}
 		return nil, nil, nil, fmt.Errorf("%wno retriever was given and the token names no key this verifier may use", joseerror.ErrNoKeyIdentifierMatch)
 	}
