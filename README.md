@@ -934,12 +934,12 @@ Build `jweOpts` for each request, as above, because the hook writes to a variabl
 
 CAUTION: Do not send an error message to the sender of a token. A message can hold parser detail, Go type names, your configuration and text from the token. Send a fixed message, and log the error on your side.
 
-Printing a signer, validator, encrypter or decrypter with `fmt`, `log`, `log/slog` or `html/template` shows its algorithm and role, such as `HS256 signer`, and never its key. This holds for every verb `fmt` accepts, `%#v` included. `fmt` prints a value without its methods for a verb it does not accept, such as `%w`, and for a value in an unexported struct field. Each of these types holds its key behind a pointer, so `fmt` then prints an address and not the key. `encoding/json`, `encoding/xml` and `encoding/gob` encode none of these types' key material.
+Printing or logging a signer, validator, encrypter or decrypter never shows its key. `fmt`, `log`, the text handler of `log/slog` and `html/template` show its algorithm and role, such as `HS256 signer`, for every verb `fmt` accepts, `%#v` included. The JSON handler of `log/slog`, and `html/template` inside a script, show `{}`. `fmt` prints a value without its methods for a verb it does not accept, such as `%w`, and for a value in an unexported struct field. Each of these types holds its key behind a pointer, so `fmt` then prints an address and not the key. `encoding/json`, `encoding/xml` and `encoding/gob` encode none of these types' key material.
 
 Three values are the key itself, so these rules have limits for them:
 
-- What `Public()` returns for an HMAC signer or validator, or for an `A128KW` to `A256KW` or `A128GCMKW` to `A256GCMKW` encrypter or decrypter, prints as `secret key` and logs as `secret key`. `encoding/json`, `encoding/xml` and `encoding/gob` refuse to encode it. A verb `fmt` does not accept, or an unexported struct field that holds it, prints its bytes.
-- A `jwe.DirectKey` prints and logs as the `enc` it is bound to, and a `jwe.PasswordKey` as its type name. Their `Key` and `Password` fields are exported, so `encoding/json`, `encoding/xml` and `encoding/gob` encode them, and a verb `fmt` does not accept, or an unexported struct field that holds one, prints them.
+- What `Public()` returns for an HMAC signer or validator, or for an `A128KW` to `A256KW` or `A128GCMKW` to `A256GCMKW` encrypter or decrypter, prints as `secret key` and logs as `secret key`. `encoding/json`, `encoding/xml` and `encoding/gob` refuse to encode it, so encoding a value that holds it fails as a whole. Nested in another value, the JSON handler of `log/slog` logs that refusal in its place. A verb `fmt` does not accept, or an unexported struct field that holds it, prints its bytes.
+- A `jwe.DirectKey` prints and logs as the `enc` it is bound to, and a `jwe.PasswordKey` as its type name. Their `Key` and `Password` fields are exported, so `encoding/json`, `encoding/xml` and `encoding/gob` encode them, and a verb `fmt` does not accept, or an unexported struct field that holds one, prints them. The same holds where those encoders run for you: the JSON handler of `log/slog` encodes one nested in another value, and `html/template` encodes one inside a script.
 
 Each sentinel carries a prefix terminated by `": "`, so wrap one with `%w` immediately followed by the rest of the message and no space:
 
@@ -1033,7 +1033,7 @@ A JWE `alg` cannot sign. `jws.GetSigner`, `jws.GetSignerFromPrivateKey`, `jws.Ge
 
 `jwa.GetAlgorithm` now resolves the JWE names, such as `"RSA-OAEP"` and `"dir"`. If your code reads `jwa.GetAlgorithm(name) != jwa.Unknown` as "a signature algorithm", that test is no longer correct. Ask for a signer or validator instead: both refuse a JWE `alg`.
 
-Printing a signer, validator, encrypter or decrypter now shows its algorithm and role, never its key. In v0.11.0, `%v` on an HMAC signer or validator printed its secret, and `%v` on an Ed25519 signer printed its private key. What `Public()` returns for an HMAC signer or validator now prints as `secret key`, and `encoding/json`, `encoding/xml` and `encoding/gob` refuse to encode it. v0.11.0 encoded it. If you printed or encoded one of these to read its key, use `jwk.PrivateJwk` on a key you hold instead.
+Printing a signer, validator, encrypter or decrypter now shows its algorithm and role, never its key. In v0.11.0, `%v` on an HMAC signer or validator printed its secret, and `%v` on an Ed25519 signer printed its private key. What `Public()` returns for an HMAC signer or validator now prints as `secret key`, and `encoding/json`, `encoding/xml` and `encoding/gob` refuse to encode it. v0.11.0 encoded it. Encoding a struct that holds it now fails as a whole. If you printed or encoded one of these to read its key, use `jwk.PrivateJwk` on a key you hold instead.
 
 ## Upgrading from 0.10.x
 
