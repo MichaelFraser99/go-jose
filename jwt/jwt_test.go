@@ -1185,7 +1185,7 @@ func TestValidate(t *testing.T) {
 				return signer
 			},
 			publicKey: func(t *testing.T, signer model.Signer) crypto.PublicKey {
-				return common.SecretKey(conformingSecret)
+				return common.NewSecretKey(jwa.HS256, conformingSecret)
 			},
 			jwt: func(t *testing.T, signer crypto.Signer) string {
 				t.Helper()

@@ -112,7 +112,9 @@ func (k PasswordKey) LogValue() slog.Value {
 // or P-521, or *ecdh.PublicKey on one of those curves or X25519 (section 4.6,
 // RFC 8037 section 3.2). For A128KW, A192KW and A256KW (section 4.4), and for
 // A128GCMKW, A192GCMKW and A256GCMKW (section 4.7), key is the shared key of 16,
-// 24 or 32 octets, or what Public returns for one. For dir, key is a DirectKey
+// 24 or 32 octets, or what Public returns for one of alg. What Public returns
+// is bound to the algorithm that made it, so one made for another algorithm,
+// such as an HMAC Signer's, is refused (RFC 8725 section 3.1). For dir, key is a DirectKey
 // (section 4.5), and Encrypt refuses any other enc. For PBES2-HS256+A128KW,
 // PBES2-HS384+A192KW and PBES2-HS512+A256KW, key is a PasswordKey (section
 // 4.8). A shared key or password is copied.
@@ -136,15 +138,15 @@ func GetEncrypter(alg jwa.Algorithm, key crypto.PublicKey) (model.Encrypter, err
 	case jwa.ECDHES, jwa.ECDHESA128KW, jwa.ECDHESA192KW, jwa.ECDHESA256KW:
 		e, err = ecdhes.NewEncrypter(alg, key)
 	case jwa.A128KW, jwa.A192KW, jwa.A256KW:
-		secret, ok := secretBytes(key)
-		if !ok {
-			return nil, fmt.Errorf("%w%s takes a shared key as a []byte", joseerror.ErrInvalidPublicKey, alg)
+		secret, keyErr := secretBytes(key, alg, joseerror.ErrInvalidPublicKey)
+		if keyErr != nil {
+			return nil, keyErr
 		}
 		e, err = keywrap.NewEncrypter(alg, secret)
 	case jwa.A128GCMKW, jwa.A192GCMKW, jwa.A256GCMKW:
-		secret, ok := secretBytes(key)
-		if !ok {
-			return nil, fmt.Errorf("%w%s takes a shared key as a []byte", joseerror.ErrInvalidPublicKey, alg)
+		secret, keyErr := secretBytes(key, alg, joseerror.ErrInvalidPublicKey)
+		if keyErr != nil {
+			return nil, keyErr
 		}
 		e, err = gcmkw.NewEncrypter(alg, secret)
 	case jwa.PBES2HS256A128KW, jwa.PBES2HS384A192KW, jwa.PBES2HS512A256KW:
@@ -205,15 +207,15 @@ func GetDecrypter(alg jwa.Algorithm, key crypto.PrivateKey) (model.Decrypter, er
 	case jwa.ECDHES, jwa.ECDHESA128KW, jwa.ECDHESA192KW, jwa.ECDHESA256KW:
 		d, err = ecdhes.NewDecrypter(alg, key)
 	case jwa.A128KW, jwa.A192KW, jwa.A256KW:
-		secret, ok := secretBytes(key)
-		if !ok {
-			return nil, fmt.Errorf("%w%s takes a shared key as a []byte", joseerror.ErrInvalidPrivateKey, alg)
+		secret, keyErr := secretBytes(key, alg, joseerror.ErrInvalidPrivateKey)
+		if keyErr != nil {
+			return nil, keyErr
 		}
 		d, err = keywrap.NewDecrypter(alg, secret)
 	case jwa.A128GCMKW, jwa.A192GCMKW, jwa.A256GCMKW:
-		secret, ok := secretBytes(key)
-		if !ok {
-			return nil, fmt.Errorf("%w%s takes a shared key as a []byte", joseerror.ErrInvalidPrivateKey, alg)
+		secret, keyErr := secretBytes(key, alg, joseerror.ErrInvalidPrivateKey)
+		if keyErr != nil {
+			return nil, keyErr
 		}
 		d, err = gcmkw.NewDecrypter(alg, secret)
 	case jwa.PBES2HS256A128KW, jwa.PBES2HS384A192KW, jwa.PBES2HS512A256KW:
@@ -248,14 +250,14 @@ func GetDecrypter(alg jwa.Algorithm, key crypto.PrivateKey) (model.Decrypter, er
 	return d, nil
 }
 
-func secretBytes(key any) ([]byte, bool) {
+func secretBytes(key any, alg jwa.Algorithm, class error) ([]byte, error) {
 	switch k := key.(type) {
 	case []byte:
-		return k, true
+		return k, nil
 	case common.SecretKey:
-		return k, true
+		return common.SecretFor(k, alg, class)
 	}
-	return nil, false
+	return nil, fmt.Errorf("%w%s takes a shared key as a []byte", class, alg)
 }
 
 func algorithmName(alg jwa.Algorithm) string {

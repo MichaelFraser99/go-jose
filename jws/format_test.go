@@ -125,7 +125,7 @@ func TestFormat_ASignerOrHMACValidatorNeverPrintsItsKey(t *testing.T) {
 		holders = append(holders,
 			holder{alg.String() + " signer", alg.String(), signer, secret, nil},
 			holder{alg.String() + " validator", alg.String(), validator, secret, nil},
-			holder{alg.String() + " signer.Public()", "secret key", signer.Public(), secret, []string{"fmt bad verb", "unexported field"}},
+			holder{alg.String() + " signer.Public()", "secret key", signer.Public(), secret, nil},
 		)
 	}
 	_, edKey, err := ed25519.GenerateKey(rand.Reader)

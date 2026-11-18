@@ -26,10 +26,69 @@ import (
 	"github.com/MichaelFraser99/go-jose/jwa"
 )
 
-type SecretKey []byte
+// SecretKey is a symmetric key bound to the one algorithm it was made for, as
+// RFC 8725 section 3.1 requires. Public returns one for an HMAC signer or
+// validator, and for an AES key wrap or AES GCM key wrap encrypter or
+// decrypter. Its key is behind two pointers, so fmt prints an address, not the
+// key, where it bypasses Format: for a verb it does not recognise, or in an
+// unexported field. For a verb a pointer does not accept, such as %s, fmt
+// prints what the pointer points to, and that is the second pointer.
+type SecretKey struct {
+	alg jwa.Algorithm
+	key **[]byte
+}
 
-// Equal reports, in constant time, whether x holds the same bytes. x may be a
-// SecretKey or a *SecretKey.
+// NewSecretKey returns a copy of key bound to alg.
+func NewSecretKey(alg jwa.Algorithm, key []byte) SecretKey {
+	sealed := slices.Clone(key)
+	inner := &sealed
+	return SecretKey{alg: alg, key: &inner}
+}
+
+// SealSecret returns a copy of key bound to alg, behind a pointer, for a type
+// that holds a key.
+func SealSecret(alg jwa.Algorithm, key []byte) *SecretKey {
+	sealed := NewSecretKey(alg, key)
+	return &sealed
+}
+
+// CloneSecret returns a copy of s, bound to the same algorithm.
+func CloneSecret(s SecretKey) SecretKey {
+	return NewSecretKey(s.alg, SecretBytes(s))
+}
+
+// SecretBytes returns the key s holds.
+func SecretBytes(s SecretKey) []byte {
+	if s.key == nil {
+		return nil
+	}
+	return **s.key
+}
+
+// SecretFor returns the key s holds if s was made for alg. RFC 8725 section 3.1
+// requires each key to be used with exactly one algorithm, so a key made for
+// another is refused with class.
+func SecretFor(s SecretKey, alg jwa.Algorithm, class error) ([]byte, error) {
+	if s.alg != alg {
+		return nil, fmt.Errorf("%wthis secret key was made for %s, and RFC 8725 section 3.1 binds a key to one algorithm, so it cannot be used for %s", class, algorithmLabel(s.alg), algorithmLabel(alg))
+	}
+	return SecretBytes(s), nil
+}
+
+// SecretAlgorithm returns the name of the algorithm s was made for.
+func SecretAlgorithm(s SecretKey) string {
+	return s.alg.String()
+}
+
+func algorithmLabel(alg jwa.Algorithm) string {
+	if name := alg.String(); name != "" {
+		return name
+	}
+	return "no algorithm"
+}
+
+// Equal reports whether x is a SecretKey or *SecretKey bound to the same
+// algorithm and holding the same bytes, comparing the bytes in constant time.
 //
 // It answers on the bytes, not on what HMAC treats as one key: HMAC pads a key
 // shorter than its block size and hashes a longer one, so two distinct byte
@@ -37,12 +96,12 @@ type SecretKey []byte
 func (s SecretKey) Equal(x crypto.PublicKey) bool {
 	switch other := x.(type) {
 	case SecretKey:
-		return subtle.ConstantTimeCompare(s, other) == 1
+		return s.alg == other.alg && subtle.ConstantTimeCompare(SecretBytes(s), SecretBytes(other)) == 1
 	case *SecretKey:
 		if other == nil {
 			return false
 		}
-		return subtle.ConstantTimeCompare(s, *other) == 1
+		return s.alg == other.alg && subtle.ConstantTimeCompare(SecretBytes(s), SecretBytes(*other)) == 1
 	default:
 		return false
 	}
@@ -56,14 +115,6 @@ func (s SecretKey) Format(f fmt.State, _ rune) {
 // LogValue logs "secret key", never the key.
 func (s SecretKey) LogValue() slog.Value {
 	return slog.StringValue("secret key")
-}
-
-// SealSecret returns a copy of key behind a pointer. A type that holds a key
-// this way prints an address, not the key, where fmt bypasses its Format
-// method: for a verb it does not recognise, or in an unexported field.
-func SealSecret(key []byte) *SecretKey {
-	sealed := SecretKey(slices.Clone(key))
-	return &sealed
 }
 
 var errSecretKeyNotEncoded = errors.New("this key is withheld from encoding, so that it never reaches a log or a response by accident; write it with jwk.PrivateJwk")

@@ -11,9 +11,9 @@ import (
 	"errors"
 	"io"
 	"math/big"
-	"reflect"
 	"testing"
 
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
 	"github.com/MichaelFraser99/go-jose/model"
@@ -294,7 +294,7 @@ func keyBytes(public any) []byte {
 	if key, ok := public.(DirectKey); ok {
 		return key.Key
 	}
-	return reflect.ValueOf(public).Bytes()
+	return common.SecretBytes(public.(common.SecretKey))
 }
 
 func TestGetEncrypter_KeepsItsOwnCopyOfAnRSAKey(t *testing.T) {

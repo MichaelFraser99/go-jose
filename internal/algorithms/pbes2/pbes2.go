@@ -94,7 +94,7 @@ func NewEncrypter(alg jwa.Algorithm, password []byte, count int) (*Encrypter, er
 	if count < 0 {
 		return nil, fmt.Errorf("%w%s requires a positive iteration count (RFC 7518 section 4.8.1.2), got %d", joseerror.ErrInvalidPublicKey, alg, count)
 	}
-	return &Encrypter{alg: alg, password: common.SealSecret(password), count: count}, nil
+	return &Encrypter{alg: alg, password: common.SealSecret(alg, password), count: count}, nil
 }
 
 // NewDecrypter returns a Decrypter for alg that derives a key from password
@@ -104,7 +104,7 @@ func NewDecrypter(alg jwa.Algorithm, password []byte) (*Decrypter, error) {
 	if err := checkPassword(alg, password, joseerror.ErrInvalidPrivateKey); err != nil {
 		return nil, err
 	}
-	return &Decrypter{alg: alg, password: common.SealSecret(password)}, nil
+	return &Decrypter{alg: alg, password: common.SealSecret(alg, password)}, nil
 }
 
 func deriveKey(alg jwa.Algorithm, password, saltInput []byte, count int) ([]byte, error) {
@@ -123,7 +123,7 @@ func (encrypter Encrypter) Format(f fmt.State, _ rune) {
 }
 
 func (encrypter *Encrypter) Public() crypto.PublicKey {
-	return []byte(slices.Clone(*encrypter.password))
+	return slices.Clone(common.SecretBytes(*encrypter.password))
 }
 
 // WrapKey generates a random CEK of the length enc requires and a random Salt
@@ -150,7 +150,7 @@ func (encrypter *Encrypter) WrapKey(rand io.Reader, enc jwa.Encryption, header m
 	if _, err := io.ReadFull(rand, cek); err != nil {
 		return nil, nil, fmt.Errorf("%wgenerating a content encryption key: %s", joseerror.ErrEncryptionError, err.Error())
 	}
-	kek, err := deriveKey(encrypter.alg, *encrypter.password, saltInput, encrypter.count)
+	kek, err := deriveKey(encrypter.alg, common.SecretBytes(*encrypter.password), saltInput, encrypter.count)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%wderiving the key encryption key: %s", joseerror.ErrEncryptionError, err.Error())
 	}
@@ -173,7 +173,7 @@ func (decrypter Decrypter) Format(f fmt.State, _ rune) {
 }
 
 func (decrypter *Decrypter) Public() crypto.PublicKey {
-	return []byte(slices.Clone(*decrypter.password))
+	return slices.Clone(common.SecretBytes(*decrypter.password))
 }
 
 // Decrypt derives the key encryption key from the password and the "p2s" and
@@ -189,7 +189,7 @@ func (decrypter *Decrypter) Decrypt(_ io.Reader, msg []byte, opts crypto.Decrypt
 	if err != nil {
 		return nil, ErrUnwrap
 	}
-	kek, err := deriveKey(decrypter.alg, *decrypter.password, saltInput, count)
+	kek, err := deriveKey(decrypter.alg, common.SecretBytes(*decrypter.password), saltInput, count)
 	if err != nil {
 		return nil, ErrUnwrap
 	}

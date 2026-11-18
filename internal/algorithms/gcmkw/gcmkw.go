@@ -67,7 +67,7 @@ func NewEncrypter(alg jwa.Algorithm, kek []byte) (*Encrypter, error) {
 	if err := checkKey(alg, kek, joseerror.ErrInvalidPublicKey); err != nil {
 		return nil, err
 	}
-	return &Encrypter{alg: alg, kek: common.SealSecret(kek)}, nil
+	return &Encrypter{alg: alg, kek: common.SealSecret(alg, kek)}, nil
 }
 
 // NewDecrypter returns a Decrypter for alg that decrypts a CEK with kek, which
@@ -77,7 +77,7 @@ func NewDecrypter(alg jwa.Algorithm, kek []byte) (*Decrypter, error) {
 	if err := checkKey(alg, kek, joseerror.ErrInvalidPrivateKey); err != nil {
 		return nil, err
 	}
-	return &Decrypter{alg: alg, kek: common.SealSecret(kek)}, nil
+	return &Decrypter{alg: alg, kek: common.SealSecret(alg, kek)}, nil
 }
 
 func newGCM(kek []byte) (cipher.AEAD, error) {
@@ -98,7 +98,7 @@ func (encrypter Encrypter) Format(f fmt.State, _ rune) {
 }
 
 func (encrypter *Encrypter) Public() crypto.PublicKey {
-	return common.SecretKey(slices.Clone(*encrypter.kek))
+	return common.CloneSecret(*encrypter.kek)
 }
 
 // WrapKey generates a random CEK of the length enc requires and a random 96-bit
@@ -116,7 +116,7 @@ func (encrypter *Encrypter) WrapKey(rand io.Reader, enc jwa.Encryption, header m
 	if size == 0 {
 		return nil, nil, fmt.Errorf("%w%s is not a content encryption algorithm this library implements", joseerror.ErrUnsupportedAlgorithm, contentenc.Name(enc))
 	}
-	aead, err := newGCM(*encrypter.kek)
+	aead, err := newGCM(common.SecretBytes(*encrypter.kek))
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w%s", joseerror.ErrEncryptionError, err.Error())
 	}
@@ -144,7 +144,7 @@ func (decrypter Decrypter) Format(f fmt.State, _ rune) {
 }
 
 func (decrypter *Decrypter) Public() crypto.PublicKey {
-	return common.SecretKey(slices.Clone(*decrypter.kek))
+	return common.CloneSecret(*decrypter.kek)
 }
 
 // Decrypt decrypts msg, the JWE Encrypted Key, with AES GCM under the "iv" and
@@ -159,7 +159,7 @@ func (decrypter *Decrypter) Decrypt(_ io.Reader, msg []byte, opts crypto.Decrypt
 	if err != nil {
 		return nil, ErrUnwrap
 	}
-	aead, err := newGCM(*decrypter.kek)
+	aead, err := newGCM(common.SecretBytes(*decrypter.kek))
 	if err != nil {
 		return nil, ErrUnwrap
 	}

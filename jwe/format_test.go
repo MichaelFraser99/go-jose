@@ -118,7 +118,6 @@ func TestFormat_ADecrypterOrSharedKeyEncrypterNeverPrintsItsKey(t *testing.T) {
 		}
 		holders = append(holders, holder{name, names, value, key, exposed})
 	}
-	secretKeyExposed := []string{"fmt bad verb", "unexported field"}
 	fieldsExposed := []string{"fmt bad verb", "unexported field", "encoding/"}
 	for alg, size := range map[jwa.Algorithm]int{jwa.A128KW: 16, jwa.A192KW: 24, jwa.A256KW: 32, jwa.A128GCMKW: 16, jwa.A192GCMKW: 24, jwa.A256GCMKW: 32} {
 		key := randomKey(t, size)
@@ -126,7 +125,7 @@ func TestFormat_ADecrypterOrSharedKeyEncrypterNeverPrintsItsKey(t *testing.T) {
 		add(alg.String()+" encrypter", alg.String(), encrypter, err, key)
 		decrypter, err := GetDecrypter(alg, key)
 		add(alg.String()+" decrypter", alg.String(), decrypter, err, key)
-		add(alg.String()+" decrypter.Public()", "secret key", decrypter.Public(), nil, key, secretKeyExposed...)
+		add(alg.String()+" decrypter.Public()", "secret key", decrypter.Public(), nil, key)
 	}
 	direct := DirectKey{Key: randomKey(t, 32), Enc: jwa.A256GCM}
 	directEncrypter, err := GetEncrypter(jwa.Dir, direct)

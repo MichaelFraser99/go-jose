@@ -11,7 +11,6 @@ import (
 	"github.com/MichaelFraser99/go-jose/jwa"
 	"github.com/MichaelFraser99/go-jose/model"
 	"io"
-	"slices"
 )
 
 var (
@@ -30,12 +29,12 @@ type Validator struct {
 }
 
 func (v Validator) ValidateSignature(digest, signature []byte) (bool, error) {
-	mac := common.ProduceMac(hmac.New(sha512.New, *v.secret), digest)
+	mac := common.ProduceMac(hmac.New(sha512.New, common.SecretBytes(*v.secret)), digest)
 	return hmac.Equal(signature, mac), nil
 }
 
 func (v Validator) Public() crypto.PublicKey {
-	return slices.Clone(*v.secret)
+	return common.CloneSecret(*v.secret)
 }
 
 // Format prints the algorithm of the validator, never its key, for every verb.
@@ -65,24 +64,29 @@ func NewSigner(secretKey *[]byte) (*Signer, error) {
 
 	return &Signer{
 		alg:    jwa.HS512,
-		secret: common.SealSecret(secret),
+		secret: common.SealSecret(jwa.HS512, secret),
 	}, nil
 }
 
 func NewValidator(publicKey crypto.PublicKey) (*Validator, error) {
 	if publicKey == nil {
 		return nil, fmt.Errorf("%wnil public key provided", joseerror.ErrInvalidPublicKey)
-	} else if _, ok := publicKey.(common.SecretKey); !ok {
+	}
+	key, ok := publicKey.(common.SecretKey)
+	if !ok {
 		return nil, fmt.Errorf("%wthe key for an hmac algorithm is the value returned by Signer.Public, got %T", joseerror.ErrInvalidPublicKey, publicKey)
 	}
-	secret := []byte(publicKey.(common.SecretKey))
+	secret, err := common.SecretFor(key, jwa.HS512, joseerror.ErrInvalidPublicKey)
+	if err != nil {
+		return nil, err
+	}
 	if len(secret) < MinimumSecretBytes {
 		return nil, fmt.Errorf("%wa secret of at least %d bytes is required for HS512, got %d", joseerror.ErrInvalidPublicKey, MinimumSecretBytes, len(secret))
 	}
 
 	return &Validator{
 		alg:    jwa.HS512,
-		secret: common.SealSecret(secret),
+		secret: common.SealSecret(jwa.HS512, secret),
 	}, nil
 }
 
@@ -96,7 +100,7 @@ func (signer Signer) Format(f fmt.State, _ rune) {
 }
 
 func (signer *Signer) Public() crypto.PublicKey {
-	return slices.Clone(*signer.secret)
+	return common.CloneSecret(*signer.secret)
 }
 
 // Sign macs the signing input whole. An hmac algorithm has no pre-hashed mode,
@@ -105,5 +109,5 @@ func (signer *Signer) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts
 	if opts != nil && opts.HashFunc() != 0 {
 		return nil, fmt.Errorf("%wan hmac algorithm has no pre-hashed mode, so the signing input must be passed whole", joseerror.ErrSigningError)
 	}
-	return common.ProduceMac(hmac.New(sha512.New, *signer.secret), digest), nil
+	return common.ProduceMac(hmac.New(sha512.New, common.SecretBytes(*signer.secret)), digest), nil
 }

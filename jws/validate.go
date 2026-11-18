@@ -38,7 +38,9 @@ import (
 // of RS256 to PS512. RFC 8725 section 3.1 requires each key to be used with
 // exactly one algorithm. Binding the key to it is the caller's job: pass an alg
 // the caller chose, not one read from the token, or restrict verification with
-// JoseOptions.AllowedSigningAlgorithms.
+// JoseOptions.AllowedSigningAlgorithms. For HS256, HS384 and HS512 the key is
+// what the signer's Public returns, which is bound to the signer's algorithm,
+// so one made for another algorithm is refused with ErrInvalidPublicKey.
 func GetValidator(alg jwa.Algorithm, publicKey crypto.PublicKey) (model.Validator, error) {
 	construct, ok := validatorConstructors[alg]
 	if !ok {
