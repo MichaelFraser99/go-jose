@@ -101,8 +101,8 @@ func completeRSAPrivateKey(privateKey *rsa.PrivateKey) (*rsa.PrivateKey, error) 
 		primes = recovered
 	}
 	for _, prime := range primes {
-		if prime == nil || prime.Sign() <= 0 {
-			return nil, fmt.Errorf("%wthe primes of an RSA private key must be positive", jose_errors.ErrInvalidPrivateKey)
+		if prime == nil || prime.Sign() <= 0 || prime.Cmp(privateKey.N) >= 0 {
+			return nil, fmt.Errorf("%weach prime of an RSA private key is a positive integer less than n, as RFC 8017 section 3.2 makes n their product", jose_errors.ErrInvalidPrivateKey)
 		}
 	}
 	candidate := keycopy.RSAPrivateKey(&rsa.PrivateKey{PublicKey: privateKey.PublicKey, D: privateKey.D, Primes: primes})
