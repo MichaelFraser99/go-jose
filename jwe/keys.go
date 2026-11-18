@@ -3,6 +3,8 @@ package jwe
 import (
 	"crypto"
 	"fmt"
+	"io"
+	"log/slog"
 	"slices"
 
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
@@ -29,7 +31,7 @@ type DirectKey struct {
 
 type directEncrypter struct {
 	*direct.Encrypter
-	key DirectKey
+	key *DirectKey
 }
 
 func (d *directEncrypter) Public() crypto.PublicKey {
@@ -38,11 +40,21 @@ func (d *directEncrypter) Public() crypto.PublicKey {
 
 type directDecrypter struct {
 	*direct.Decrypter
-	key DirectKey
+	key *DirectKey
 }
 
 func (d *directDecrypter) Public() crypto.PublicKey {
 	return DirectKey{Key: slices.Clone(d.key.Key), Enc: d.key.Enc}
+}
+
+// Format prints the enc a DirectKey is bound to, never its key, for every verb.
+func (k DirectKey) Format(f fmt.State, _ rune) {
+	_, _ = fmt.Fprintf(f, "jwe.DirectKey for %s", k.Enc)
+}
+
+// LogValue logs the enc a DirectKey is bound to, never its key.
+func (k DirectKey) LogValue() slog.Value {
+	return slog.StringValue("jwe.DirectKey for " + k.Enc.String())
 }
 
 // PasswordKey is the key for PBES2-HS256+A128KW, PBES2-HS384+A192KW and
@@ -65,7 +77,7 @@ type PasswordKey struct {
 
 type passwordEncrypter struct {
 	*pbes2.Encrypter
-	key PasswordKey
+	key *PasswordKey
 }
 
 func (p *passwordEncrypter) Public() crypto.PublicKey {
@@ -74,11 +86,21 @@ func (p *passwordEncrypter) Public() crypto.PublicKey {
 
 type passwordDecrypter struct {
 	*pbes2.Decrypter
-	key PasswordKey
+	key *PasswordKey
 }
 
 func (p *passwordDecrypter) Public() crypto.PublicKey {
 	return PasswordKey{Password: slices.Clone(p.key.Password), Count: p.key.Count}
+}
+
+// Format prints "jwe.PasswordKey" for every verb, never the password.
+func (k PasswordKey) Format(f fmt.State, _ rune) {
+	_, _ = io.WriteString(f, "jwe.PasswordKey")
+}
+
+// LogValue logs "jwe.PasswordKey", never the password.
+func (k PasswordKey) LogValue() slog.Value {
+	return slog.StringValue("jwe.PasswordKey")
 }
 
 // GetEncrypter returns an Encrypter for the key management algorithm alg.
@@ -90,7 +112,9 @@ func (p *passwordDecrypter) Public() crypto.PublicKey {
 // or P-521, or *ecdh.PublicKey on one of those curves or X25519 (section 4.6,
 // RFC 8037 section 3.2). For A128KW, A192KW and A256KW (section 4.4), and for
 // A128GCMKW, A192GCMKW and A256GCMKW (section 4.7), key is the shared key of 16,
-// 24 or 32 octets, or what Public returns for one. For dir, key is a DirectKey
+// 24 or 32 octets, or what Public returns for one of alg. What Public returns
+// is bound to the algorithm that made it, so one made for another algorithm,
+// such as an HMAC Signer's, is refused (RFC 8725 section 3.1). For dir, key is a DirectKey
 // (section 4.5), and Encrypt refuses any other enc. For PBES2-HS256+A128KW,
 // PBES2-HS384+A192KW and PBES2-HS512+A256KW, key is a PasswordKey (section
 // 4.8). A shared key or password is copied.
@@ -114,15 +138,15 @@ func GetEncrypter(alg jwa.Algorithm, key crypto.PublicKey) (model.Encrypter, err
 	case jwa.ECDHES, jwa.ECDHESA128KW, jwa.ECDHESA192KW, jwa.ECDHESA256KW:
 		e, err = ecdhes.NewEncrypter(alg, key)
 	case jwa.A128KW, jwa.A192KW, jwa.A256KW:
-		secret, ok := secretBytes(key)
-		if !ok {
-			return nil, fmt.Errorf("%w%s takes a shared key as a []byte", joseerror.ErrInvalidPublicKey, alg)
+		secret, keyErr := secretBytes(key, alg, joseerror.ErrInvalidPublicKey)
+		if keyErr != nil {
+			return nil, keyErr
 		}
 		e, err = keywrap.NewEncrypter(alg, secret)
 	case jwa.A128GCMKW, jwa.A192GCMKW, jwa.A256GCMKW:
-		secret, ok := secretBytes(key)
-		if !ok {
-			return nil, fmt.Errorf("%w%s takes a shared key as a []byte", joseerror.ErrInvalidPublicKey, alg)
+		secret, keyErr := secretBytes(key, alg, joseerror.ErrInvalidPublicKey)
+		if keyErr != nil {
+			return nil, keyErr
 		}
 		e, err = gcmkw.NewEncrypter(alg, secret)
 	case jwa.PBES2HS256A128KW, jwa.PBES2HS384A192KW, jwa.PBES2HS512A256KW:
@@ -134,7 +158,7 @@ func GetEncrypter(alg jwa.Algorithm, key crypto.PublicKey) (model.Encrypter, err
 		if err != nil {
 			return nil, err
 		}
-		return &passwordEncrypter{Encrypter: inner, key: PasswordKey{Password: slices.Clone(passwordKey.Password), Count: passwordKey.Count}}, nil
+		return &passwordEncrypter{Encrypter: inner, key: &PasswordKey{Password: slices.Clone(passwordKey.Password), Count: passwordKey.Count}}, nil
 	case jwa.Dir:
 		directKey, ok := key.(DirectKey)
 		if !ok {
@@ -144,7 +168,7 @@ func GetEncrypter(alg jwa.Algorithm, key crypto.PublicKey) (model.Encrypter, err
 		if err != nil {
 			return nil, err
 		}
-		return &directEncrypter{Encrypter: inner, key: DirectKey{Key: slices.Clone(directKey.Key), Enc: directKey.Enc}}, nil
+		return &directEncrypter{Encrypter: inner, key: &DirectKey{Key: slices.Clone(directKey.Key), Enc: directKey.Enc}}, nil
 	case jwa.ES256, jwa.ES384, jwa.ES512, jwa.RS256, jwa.RS384, jwa.RS512, jwa.PS256, jwa.PS384, jwa.PS512, jwa.HS256, jwa.HS384, jwa.HS512, jwa.EdDSA, jwa.Ed25519, jwa.MLDSA44, jwa.MLDSA65, jwa.MLDSA87, jwa.Unknown:
 		return nil, fmt.Errorf("%w%s is not a key management algorithm this library implements", joseerror.ErrUnsupportedAlgorithm, algorithmName(alg))
 	default:
@@ -166,9 +190,10 @@ func GetEncrypter(alg jwa.Algorithm, key crypto.PublicKey) (model.Encrypter, err
 // *ecdsa.PrivateKey on P-256, P-384 or P-521, or an *ecdh.PrivateKey on one of
 // those curves or X25519, and a JWE whose "epk" is on another curve fails as
 // ErrDecryptionFailed (RFC 8725 section 3.4). For A128KW, A192KW, A256KW, the
-// AES GCM key wraps and dir, key is the shared key as GetEncrypter takes it. A
-// dir Decrypter decrypts only a JWE whose "enc" is the DirectKey's; any other
-// fails as ErrDecryptionFailed. For the PBES2 algorithms, key is a PasswordKey,
+// AES GCM key wraps and dir, key is the shared key as GetEncrypter takes it,
+// and a Public value made for another algorithm is refused with
+// ErrInvalidPrivateKey. A dir Decrypter decrypts only a JWE whose "enc" is the
+// DirectKey's; any other fails as ErrDecryptionFailed. For the PBES2 algorithms, key is a PasswordKey,
 // whose Count is ignored: each JWE names its own "p2c", which Decrypt bounds
 // with JWEOptions.MaxPBES2Count. The Decrypter's own Decrypt method runs as
 // many iterations as the header it is given names, so pass a PBES2 Decrypter
@@ -183,15 +208,15 @@ func GetDecrypter(alg jwa.Algorithm, key crypto.PrivateKey) (model.Decrypter, er
 	case jwa.ECDHES, jwa.ECDHESA128KW, jwa.ECDHESA192KW, jwa.ECDHESA256KW:
 		d, err = ecdhes.NewDecrypter(alg, key)
 	case jwa.A128KW, jwa.A192KW, jwa.A256KW:
-		secret, ok := secretBytes(key)
-		if !ok {
-			return nil, fmt.Errorf("%w%s takes a shared key as a []byte", joseerror.ErrInvalidPrivateKey, alg)
+		secret, keyErr := secretBytes(key, alg, joseerror.ErrInvalidPrivateKey)
+		if keyErr != nil {
+			return nil, keyErr
 		}
 		d, err = keywrap.NewDecrypter(alg, secret)
 	case jwa.A128GCMKW, jwa.A192GCMKW, jwa.A256GCMKW:
-		secret, ok := secretBytes(key)
-		if !ok {
-			return nil, fmt.Errorf("%w%s takes a shared key as a []byte", joseerror.ErrInvalidPrivateKey, alg)
+		secret, keyErr := secretBytes(key, alg, joseerror.ErrInvalidPrivateKey)
+		if keyErr != nil {
+			return nil, keyErr
 		}
 		d, err = gcmkw.NewDecrypter(alg, secret)
 	case jwa.PBES2HS256A128KW, jwa.PBES2HS384A192KW, jwa.PBES2HS512A256KW:
@@ -203,7 +228,7 @@ func GetDecrypter(alg jwa.Algorithm, key crypto.PrivateKey) (model.Decrypter, er
 		if err != nil {
 			return nil, err
 		}
-		return &passwordDecrypter{Decrypter: inner, key: PasswordKey{Password: slices.Clone(passwordKey.Password), Count: passwordKey.Count}}, nil
+		return &passwordDecrypter{Decrypter: inner, key: &PasswordKey{Password: slices.Clone(passwordKey.Password), Count: passwordKey.Count}}, nil
 	case jwa.Dir:
 		directKey, ok := key.(DirectKey)
 		if !ok {
@@ -213,7 +238,7 @@ func GetDecrypter(alg jwa.Algorithm, key crypto.PrivateKey) (model.Decrypter, er
 		if err != nil {
 			return nil, err
 		}
-		return &directDecrypter{Decrypter: inner, key: DirectKey{Key: slices.Clone(directKey.Key), Enc: directKey.Enc}}, nil
+		return &directDecrypter{Decrypter: inner, key: &DirectKey{Key: slices.Clone(directKey.Key), Enc: directKey.Enc}}, nil
 	case jwa.ES256, jwa.ES384, jwa.ES512, jwa.RS256, jwa.RS384, jwa.RS512, jwa.PS256, jwa.PS384, jwa.PS512, jwa.HS256, jwa.HS384, jwa.HS512, jwa.EdDSA, jwa.Ed25519, jwa.MLDSA44, jwa.MLDSA65, jwa.MLDSA87, jwa.Unknown:
 		return nil, fmt.Errorf("%w%s is not a key management algorithm this library implements", joseerror.ErrUnsupportedAlgorithm, algorithmName(alg))
 	default:
@@ -226,14 +251,14 @@ func GetDecrypter(alg jwa.Algorithm, key crypto.PrivateKey) (model.Decrypter, er
 	return d, nil
 }
 
-func secretBytes(key any) ([]byte, bool) {
+func secretBytes(key any, alg jwa.Algorithm, class error) ([]byte, error) {
 	switch k := key.(type) {
 	case []byte:
-		return k, true
+		return k, nil
 	case common.SecretKey:
-		return k, true
+		return common.SecretFor(k, alg, class)
 	}
-	return nil, false
+	return nil, fmt.Errorf("%w%s takes a shared key as a []byte", class, alg)
 }
 
 func algorithmName(alg jwa.Algorithm) string {

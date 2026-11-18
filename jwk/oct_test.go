@@ -10,6 +10,7 @@ import (
 
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
 	"github.com/MichaelFraser99/go-jose/joseerror"
+	"github.com/MichaelFraser99/go-jose/jwa"
 )
 
 const rfc7517A3K = "GawgguFyGrWKav7AX4VKUg"
@@ -67,9 +68,15 @@ func TestPrivateFromJwk_RefusesAMalformedOctJwk(t *testing.T) {
 
 func TestPrivateJwk_ASymmetricKeyIsAnOctJwkWithNoKid(t *testing.T) {
 	secret := []byte{0x19, 0xac, 0x20, 0x82, 0xe1, 0x72, 0x1a, 0xb5, 0x8a, 0x6a, 0xfe, 0xc0, 0x5f, 0x85, 0x4a, 0x52}
-	want := map[string]any{"kty": "oct", "k": rfc7517A3K}
-	for name, key := range map[string]any{"a []byte": secret, "a common.SecretKey": common.SecretKey(secret)} {
+	for name, tt := range map[string]struct {
+		key  any
+		want map[string]any
+	}{
+		"a []byte":           {key: secret, want: map[string]any{"kty": "oct", "k": rfc7517A3K}},
+		"a common.SecretKey": {key: common.NewSecretKey(jwa.A128KW, secret), want: map[string]any{"kty": "oct", "k": rfc7517A3K, "alg": "A128KW"}},
+	} {
 		t.Run(name, func(t *testing.T) {
+			key, want := tt.key, tt.want
 			got, err := PrivateJwk(key)
 			if err != nil {
 				t.Fatalf("[RFC 7518 6.4] a symmetric key must produce an oct jwk, got %v", err)
@@ -106,7 +113,7 @@ func TestPublicFromJwkAndPublicJwk_RefuseASymmetricKey(t *testing.T) {
 	}
 
 	secret := []byte(strings.Repeat("s", 32))
-	for name, k := range map[string]any{"a []byte": secret, "a common.SecretKey": common.SecretKey(secret)} {
+	for name, k := range map[string]any{"a []byte": secret, "a common.SecretKey": common.NewSecretKey(jwa.HS256, secret)} {
 		t.Run(name, func(t *testing.T) {
 			got, err := PublicJwk(k)
 			if !errors.Is(err, joseerror.ErrInvalidPublicKey) || got != nil {

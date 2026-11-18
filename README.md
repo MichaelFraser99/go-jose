@@ -73,7 +73,7 @@ validator, err := jws.GetValidator(signer.Alg(), signer.Public())
 
 `GetValidator` applies the same length rule and refuses with `ErrInvalidPublicKey`, but a secret that reached it through a signer has already passed the rule, so the refusal is not one you can trigger from outside this library.
 
-`Public` returns a `SecretKey`, which is a `[]byte` defined in an internal package. A consumer cannot name the type, so reach its `Equal` method through an interface:
+`Public` returns a `SecretKey`, a type defined in an internal package. It holds the secret and the algorithm that it was made for. A consumer cannot name the type, so reach its `Equal` method through an interface:
 
 ```go
 if comparer, ok := validator.Public().(interface{ Equal(crypto.PublicKey) bool }); ok {
@@ -83,9 +83,9 @@ if comparer, ok := validator.Public().(interface{ Equal(crypto.PublicKey) bool }
 }
 ```
 
-`SecretKey.Equal` reports whether two keys hold the same bytes. It compares in constant time, because an early-exit comparison tells a caller who submits guesses how many leading bytes were correct.
+`SecretKey.Equal` reports whether two keys were made for the same algorithm and hold the same bytes. A `[]byte` is never equal to it, even when it holds the same bytes. It compares the bytes in constant time, because an early-exit comparison tells a caller who submits guesses how many leading bytes were correct.
 
-Note what `Equal` does not answer. HMAC pads a key shorter than its block size and hashes a longer one, so two different byte strings can key identically. `Equal` compares the bytes and reports such a pair as unequal. `SecretKey` carries no algorithm, and the block size differs between HS256 and the other two, so there is no one canonical form it could compare instead.
+Note what `Equal` does not answer. HMAC pads a key shorter than its block size and hashes a longer one, so two different byte strings can key identically. `Equal` compares the bytes as given, and reports such a pair as unequal.
 
 Algorithms are identified by the `jwa` package:
 ```go
@@ -199,6 +199,8 @@ RFC 8725 section 3.1 requires each key to be used with exactly one algorithm. A 
 - With a retriever, set `JoseOptions.AllowedSigningAlgorithms` to the algorithm your keys are for.
 
 A jwk can carry its own `alg`. `GetSignerFromJwk`, `GetValidatorFromJwk`, a member of `JoseOptions.KeySet` and a token's `jwk` header all enforce it. So when you hold your keys as a JWK Set, pass it as `KeySet` rather than through a retriever.
+
+A secret key is bound for you. What `Public()` returns for an HMAC signer or validator, or for an AES key wrap or AES GCM key wrap encrypter or decrypter, is a `SecretKey` bound to that algorithm. `GetValidator`, `jwe.GetEncrypter` and `jwe.GetDecrypter` refuse a `SecretKey` made for another algorithm. `GetValidator` and `jwe.GetEncrypter` refuse it with `ErrInvalidPublicKey`, and `jwe.GetDecrypter` with `ErrInvalidPrivateKey`. A retriever key of this kind is skipped, so if no other key verifies the token, the error is `ErrInvalidSignature`. So the `Public()` of an HS256 signer cannot build an HS512 validator or an `A256KW` encrypter. A `[]byte` carries no algorithm, so `jwe.GetEncrypter` and `jwe.GetDecrypter` accept the same bytes for any algorithm whose key size they fit. Use each secret for one algorithm only.
 
 ## Verifying a JWS
 
@@ -476,7 +478,7 @@ func jwk.PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error)
 
 The key is returned in the type that `x509.ParsePKIXPublicKey` or `x509.ParsePKCS8PrivateKey` returns for it. An EC key is an `*ecdsa.PublicKey`, an RSA key an `*rsa.PublicKey`, and an ML-DSA key an `*mldsa.PublicKey`. An Ed25519 key is an `ed25519.PublicKey`, which is a value and not a pointer. See [Ed25519 keys are values](#ed25519-keys-are-values). `PrivateFromJwk` returns the private equivalents.
 
-An `oct` jwk holds a symmetric key in `k`, as RFC 7518 section 6.4.1 defines. `PrivateFromJwk` reads it as a `[]byte`, and refuses a `k` that is absent, not a string, not strict base64url or empty. `PrivateJwk` writes a `[]byte` as an `oct` jwk with no `kid`, because RFC 7638 section 7 says to conceal the thumbprint of a symmetric key. A symmetric key has no public half, so `PublicFromJwk` and `PublicJwk` refuse it with `ErrInvalidPublicKey`. `jws.GetSignerFromJwk` builds an HS256, HS384 or HS512 signer from an `oct` jwk.
+An `oct` jwk holds a symmetric key in `k`, as RFC 7518 section 6.4.1 defines. `PrivateFromJwk` reads it as a `[]byte`, and refuses a `k` that is absent, not a string, not strict base64url or empty. `PrivateJwk` writes a `[]byte` as an `oct` jwk with no `kid`, because RFC 7638 section 7 says to conceal the thumbprint of a symmetric key. It writes what `Public()` returns for a secret key the same way, with an `alg` that names the algorithm the key was made for. `GetSignerFromJwk` and the `jwe` jwk constructors hold the jwk to that `alg`. `PrivateFromJwk` reads the jwk as a `[]byte`, which carries no algorithm, so the binding ends there, as it does if the `alg` is removed. A symmetric key has no public half, so `PublicFromJwk` and `PublicJwk` refuse it with `ErrInvalidPublicKey`. `jws.GetSignerFromJwk` builds an HS256, HS384 or HS512 signer from an `oct` jwk.
 
 An `OKP` jwk is read when its `crv` is `Ed25519` or `X25519`, the two OKP subtypes this library supports. RFC 8037 section 2 requires `crv`, so a jwk without a string `crv` is refused as an invalid key. Any other subtype, such as `X448`, is refused with `ErrUnsupportedAlgorithm`, because Go has no X448.
 
@@ -717,7 +719,7 @@ Both functions take a `*model.JWEOptions` as the last argument, and it can be ni
 
 A refused JWK gives `ErrInvalidPublicKey` from `GetEncrypterFromJwk` and `ErrInvalidPrivateKey` from `GetDecrypterFromJwk`. A JWK cannot hold a `dir` key, because no JWK member names the `enc` that the key is bound to. For `dir`, build a `jwe.DirectKey`.
 
-CAUTION: Do not log or publish what `Public()` returns for an `A128KW` to `A256KW`, `A128GCMKW` to `A256GCMKW`, PBES2 or `dir` encrypter or decrypter. A shared key or password has no public half, so `Public()` returns the secret itself, as it does for an HMAC signer.
+CAUTION: Do not log or publish what `Public()` returns for an `A128KW` to `A256KW`, `A128GCMKW` to `A256GCMKW`, PBES2 or `dir` encrypter or decrypter. A shared key or password has no public half, so `Public()` returns the secret itself, as it does for an HMAC signer. Printing or logging that value does not show the secret, but [Errors and HTTP responses](#errors-and-http-responses) lists the routes that still can.
 
 With `ECDH-ES`, the key that the two parties agree is the content encryption key, and the encrypted key is empty. With `ECDH-ES+A128KW` to `ECDH-ES+A256KW`, the agreed key wraps a random content encryption key. `Encrypt` makes a new ephemeral key for each token, as RFC 7518 section 4.6 requires, and writes its public half to the `epk` header. Do not set `epk` yourself: `Encrypt` refuses it with `ErrMalformedClaim`.
 
@@ -934,6 +936,15 @@ Build `jweOpts` for each request, as above, because the hook writes to a variabl
 
 CAUTION: Do not send an error message to the sender of a token. A message can hold parser detail, Go type names, your configuration and text from the token. Send a fixed message, and log the error on your side.
 
+Printing or logging a signer, validator, encrypter or decrypter never shows its key. `fmt`, `log`, the text handler of `log/slog` and `html/template` show its algorithm and role, such as `HS256 signer`, for every verb `fmt` accepts, `%#v` included. The JSON handler of `log/slog`, and `html/template` inside a script, show `{}`. `fmt` prints a value without its methods for a verb it does not accept, such as `%w`, and for a value in an unexported struct field. Each of these types holds its key behind a pointer, so `fmt` then prints an address and not the key. `encoding/json`, `encoding/xml` and `encoding/gob` encode none of these types' key material.
+
+A tool that prints a value by reflection, and does not call its methods, follows the pointer and prints the key. So does code that reads the value with `reflect`, including what `Public()` returns. The failure output of `assert.Equal` in `github.com/stretchr/testify` is one such tool. In a test, do not compare two signers, validators, encrypters or decrypters as whole values. Compare what the test needs, such as `Alg()`.
+
+Three values are the key itself: what `Public()` returns for a secret key, a `jwe.DirectKey` and a `jwe.PasswordKey`.
+
+- What `Public()` returns for an HMAC signer or validator, or for an `A128KW` to `A256KW` or `A128GCMKW` to `A256GCMKW` encrypter or decrypter, prints as `secret key` and logs as `secret key`. `encoding/json`, `encoding/xml` and `encoding/gob` refuse to encode it, so encoding a value that holds it fails as a whole. Nested in another value, the JSON handler of `log/slog` logs that refusal in its place. It holds the secret behind two pointers, so a verb `fmt` does not accept, or an unexported struct field that holds it, prints an address.
+- A `jwe.DirectKey` prints and logs as the `enc` it is bound to, and a `jwe.PasswordKey` as its type name. Their `Key` and `Password` fields are exported, so `encoding/json`, `encoding/xml` and `encoding/gob` encode them, and a verb `fmt` does not accept, or an unexported struct field that holds one, prints them. The same holds where those encoders run for you: the JSON handler of `log/slog` encodes one nested in another value, and `html/template` encodes one inside a script.
+
 Each sentinel carries a prefix terminated by `": "`, so wrap one with `%w` immediately followed by the rest of the message and no space:
 
 ```go
@@ -974,7 +985,7 @@ To find the affected code, search it for `*ed25519.`. Also check each `==` and e
 These are new:
 
 - The `jwe` package, with `GetEncrypter`, `GetDecrypter`, `GetEncrypterFromJwk`, `GetDecrypterFromJwk`, `Encrypt`, `Decrypt`, `ParseHeader` and `DirectKey`. See [Encrypting and decrypting](#encrypting-and-decrypting).
-- `oct` keys in the `jwk` package: `PrivateFromJwk` reads one as a `[]byte`, and `PrivateJwk` writes one.
+- `oct` keys in the `jwk` package: `PrivateFromJwk` reads one as a `[]byte`, and `PrivateJwk` writes one. `PrivateJwk` also writes what `Public()` returns for a secret key, with an `alg` that names the algorithm the key was made for. v0.11.0 refused it.
 - `model.Encrypter`, `model.Decrypter` and `model.DecrypterOpts`.
 - `jwa.Encryption` with `jwa.GetEncryption`, and the `alg` constants `jwa.RSAOAEP` to `jwa.Dir` and `jwa.ECDHES` to `jwa.ECDHESA256KW`. The integer values of the existing `jwa.Algorithm` constants do not change.
 - `model.JWEOptions`, the options of `jwe.Decrypt`, `jwe.ParseHeader`, `jwe.GetEncrypterFromJwk`, `jwe.GetDecrypterFromJwk` and the JWE layer of `jwt.Validate`.
@@ -1025,6 +1036,10 @@ A JWS whose `cty` is `JWT`, that is a JWT signed inside another JWS, is refused 
 A JWE `alg` cannot sign. `jws.GetSigner`, `jws.GetSignerFromPrivateKey`, `jws.GetSignerFromJwk`, `jws.GetValidator`, `jws.GetValidatorFromJwk` and `jwt.New` refuse one with `ErrUnsupportedAlgorithm`.
 
 `jwa.GetAlgorithm` now resolves the JWE names, such as `"RSA-OAEP"` and `"dir"`. If your code reads `jwa.GetAlgorithm(name) != jwa.Unknown` as "a signature algorithm", that test is no longer correct. Ask for a signer or validator instead: both refuse a JWE `alg`.
+
+Printing a signer, validator, encrypter or decrypter now shows its algorithm and role, never its key. In v0.11.0, `%v` on an HMAC signer or validator printed its secret, and `%v` on an Ed25519 signer printed its private key. What `Public()` returns for an HMAC signer or validator now prints as `secret key`, and `encoding/json`, `encoding/xml` and `encoding/gob` refuse to encode it. v0.11.0 encoded it. Encoding a struct that holds it now fails as a whole. If you printed or encoded one of these to read its key, use `jwk.PrivateJwk` on a key you hold instead.
+
+What `Public()` returns for an HMAC signer or validator is now bound to its algorithm, as RFC 8725 section 3.1 requires. `jws.GetValidator` refuses one made for another HMAC algorithm with `ErrInvalidPublicKey`. v0.11.0 accepted the `Public()` of an HS256 signer for an HS384 or HS512 validator when the secret was long enough. Build each validator from the signer of its own algorithm. A retriever is held to the same rule: an HS384 token checked against a retriever that returns only the `Public()` of an HS256 signer now fails with `ErrInvalidSignature`, where v0.11.0 verified it. Return the `Public()` of a signer of the token's algorithm. `SecretKey.Equal` now also compares the algorithm, so two keys of the same bytes made for different algorithms are not equal.
 
 ## Upgrading from 0.10.x
 

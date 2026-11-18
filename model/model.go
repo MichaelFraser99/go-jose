@@ -349,12 +349,14 @@ type JWEOptions struct {
 // Retriever supplies the keys a token may be verified with. A bare
 // crypto.PublicKey carries no algorithm. An EC key is bound to one algorithm by
 // its curve, as RFC 7518 section 3.4 defines each ES algorithm over one curve.
-// An RSA key verifies a token under any of RS256 to PS512 that the token names,
-// and an HMAC secret under any HS algorithm whose minimum length it meets.
-// RFC 8725 section 3.1 requires each key to be used with exactly one algorithm,
-// so bind such a key to its algorithm with JoseOptions.AllowedSigningAlgorithms.
-// That list applies to every key the retriever returns, so keys bound to
-// different algorithms of one family need separate retrievers.
+// An HMAC secret must be the value an HMAC Signer's Public method returns, which
+// is bound to the signer's algorithm, so it verifies only a token under that
+// algorithm. An RSA key verifies a token under any of RS256 to PS512 that the
+// token names. RFC 8725 section 3.1 requires each key to be used with exactly
+// one algorithm, so bind an RSA key to its algorithm with
+// JoseOptions.AllowedSigningAlgorithms. That list applies to every key the
+// retriever returns, so RSA keys bound to different algorithms need separate
+// retrievers.
 type Retriever func() ([]crypto.PublicKey, error)
 
 type Jwks struct {
