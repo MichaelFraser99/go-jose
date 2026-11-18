@@ -717,7 +717,7 @@ Both functions take a `*model.JWEOptions` as the last argument, and it can be ni
 
 A refused JWK gives `ErrInvalidPublicKey` from `GetEncrypterFromJwk` and `ErrInvalidPrivateKey` from `GetDecrypterFromJwk`. A JWK cannot hold a `dir` key, because no JWK member names the `enc` that the key is bound to. For `dir`, build a `jwe.DirectKey`.
 
-CAUTION: Do not log or publish what `Public()` returns for an `A128KW` to `A256KW`, `A128GCMKW` to `A256GCMKW`, PBES2 or `dir` encrypter or decrypter. A shared key or password has no public half, so `Public()` returns the secret itself, as it does for an HMAC signer. Printing that value with `fmt` does not show the secret, but its `Key` or `Password` field holds it.
+CAUTION: Do not log or publish what `Public()` returns for an `A128KW` to `A256KW`, `A128GCMKW` to `A256GCMKW`, PBES2 or `dir` encrypter or decrypter. A shared key or password has no public half, so `Public()` returns the secret itself, as it does for an HMAC signer. Printing or logging that value does not show the secret, but [Errors and HTTP responses](#errors-and-http-responses) lists the routes that still can.
 
 With `ECDH-ES`, the key that the two parties agree is the content encryption key, and the encrypted key is empty. With `ECDH-ES+A128KW` to `ECDH-ES+A256KW`, the agreed key wraps a random content encryption key. `Encrypt` makes a new ephemeral key for each token, as RFC 7518 section 4.6 requires, and writes its public half to the `epk` header. Do not set `epk` yourself: `Encrypt` refuses it with `ErrMalformedClaim`.
 
@@ -934,7 +934,12 @@ Build `jweOpts` for each request, as above, because the hook writes to a variabl
 
 CAUTION: Do not send an error message to the sender of a token. A message can hold parser detail, Go type names, your configuration and text from the token. Send a fixed message, and log the error on your side.
 
-Printing a signer, validator, encrypter or decrypter with `fmt` shows its algorithm and role, such as `HS256 signer`, and never its key. This holds for every verb, `%#v` included, so a log line that prints one does not leak its key. Printing what `Public()` returns for an HMAC signer shows `HMAC secret`. Printing a `jwe.DirectKey` shows the `enc` it is bound to, and printing a `jwe.PasswordKey` shows its type name only.
+Printing a signer, validator, encrypter or decrypter with `fmt`, `log`, `log/slog` or `html/template` shows its algorithm and role, such as `HS256 signer`, and never its key. This holds for every verb `fmt` accepts, `%#v` included. `fmt` prints a value without its methods for a verb it does not accept, such as `%w`, and for a value in an unexported struct field. Each of these types holds its key behind a pointer, so `fmt` then prints an address and not the key. `encoding/json`, `encoding/xml` and `encoding/gob` encode none of these types' key material.
+
+Three values are the key itself, so these rules have limits for them:
+
+- What `Public()` returns for an HMAC signer or validator, or for an `A128KW` to `A256KW` or `A128GCMKW` to `A256GCMKW` encrypter or decrypter, prints as `secret key` and logs as `secret key`. `encoding/json`, `encoding/xml` and `encoding/gob` refuse to encode it. A verb `fmt` does not accept, or an unexported struct field that holds it, prints its bytes.
+- A `jwe.DirectKey` prints and logs as the `enc` it is bound to, and a `jwe.PasswordKey` as its type name. Their `Key` and `Password` fields are exported, so `encoding/json`, `encoding/xml` and `encoding/gob` encode them, and a verb `fmt` does not accept, or an unexported struct field that holds one, prints them.
 
 Each sentinel carries a prefix terminated by `": "`, so wrap one with `%w` immediately followed by the rest of the message and no space:
 
@@ -1028,7 +1033,7 @@ A JWE `alg` cannot sign. `jws.GetSigner`, `jws.GetSignerFromPrivateKey`, `jws.Ge
 
 `jwa.GetAlgorithm` now resolves the JWE names, such as `"RSA-OAEP"` and `"dir"`. If your code reads `jwa.GetAlgorithm(name) != jwa.Unknown` as "a signature algorithm", that test is no longer correct. Ask for a signer or validator instead: both refuse a JWE `alg`.
 
-Printing a signer, validator, encrypter or decrypter with `fmt` now shows its algorithm and role, never its key. In v0.11.0, `%v` on an HMAC signer or validator printed its secret, and `%v` on an Ed25519 signer printed its private key. If you printed one of these to read its key, use `jwk.PrivateJwk` on a key you hold instead.
+Printing a signer, validator, encrypter or decrypter now shows its algorithm and role, never its key. In v0.11.0, `%v` on an HMAC signer or validator printed its secret, and `%v` on an Ed25519 signer printed its private key. What `Public()` returns for an HMAC signer or validator now prints as `secret key`, and `encoding/json`, `encoding/xml` and `encoding/gob` refuse to encode it. v0.11.0 encoded it. If you printed or encoded one of these to read its key, use `jwk.PrivateJwk` on a key you hold instead.
 
 ## Upgrading from 0.10.x
 

@@ -21,21 +21,21 @@ var (
 
 type Signer struct {
 	alg    jwa.Algorithm
-	secret common.SecretKey
+	secret *common.SecretKey
 }
 
 type Validator struct {
 	alg    jwa.Algorithm
-	secret common.SecretKey
+	secret *common.SecretKey
 }
 
 func (v Validator) ValidateSignature(digest, signature []byte) (bool, error) {
-	mac := common.ProduceMac(hmac.New(sha512.New, v.secret), digest)
+	mac := common.ProduceMac(hmac.New(sha512.New, *v.secret), digest)
 	return hmac.Equal(signature, mac), nil
 }
 
 func (v Validator) Public() crypto.PublicKey {
-	return slices.Clone(v.secret)
+	return slices.Clone(*v.secret)
 }
 
 // Format prints the algorithm of the validator, never its key, for every verb.
@@ -65,7 +65,7 @@ func NewSigner(secretKey *[]byte) (*Signer, error) {
 
 	return &Signer{
 		alg:    jwa.HS512,
-		secret: slices.Clone(secret),
+		secret: common.SealSecret(secret),
 	}, nil
 }
 
@@ -82,7 +82,7 @@ func NewValidator(publicKey crypto.PublicKey) (*Validator, error) {
 
 	return &Validator{
 		alg:    jwa.HS512,
-		secret: slices.Clone(secret),
+		secret: common.SealSecret(secret),
 	}, nil
 }
 
@@ -91,12 +91,12 @@ func (signer *Signer) Alg() jwa.Algorithm {
 }
 
 // Format prints the algorithm of the signer, never its key, for every verb.
-func (signer *Signer) Format(f fmt.State, _ rune) {
+func (signer Signer) Format(f fmt.State, _ rune) {
 	common.FormatKeyHolder(f, signer.Alg(), "signer")
 }
 
 func (signer *Signer) Public() crypto.PublicKey {
-	return slices.Clone(signer.secret)
+	return slices.Clone(*signer.secret)
 }
 
 // Sign macs the signing input whole. An hmac algorithm has no pre-hashed mode,
@@ -105,5 +105,5 @@ func (signer *Signer) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts
 	if opts != nil && opts.HashFunc() != 0 {
 		return nil, fmt.Errorf("%wan hmac algorithm has no pre-hashed mode, so the signing input must be passed whole", joseerror.ErrSigningError)
 	}
-	return common.ProduceMac(hmac.New(sha512.New, signer.secret), digest), nil
+	return common.ProduceMac(hmac.New(sha512.New, *signer.secret), digest), nil
 }

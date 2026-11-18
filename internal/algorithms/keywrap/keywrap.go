@@ -18,12 +18,12 @@ import (
 
 type Encrypter struct {
 	alg jwa.Algorithm
-	kek []byte
+	kek *common.SecretKey
 }
 
 type Decrypter struct {
 	alg jwa.Algorithm
-	kek []byte
+	kek *common.SecretKey
 }
 
 var keySizes = map[jwa.Algorithm]int{
@@ -49,7 +49,7 @@ func NewEncrypter(alg jwa.Algorithm, kek []byte) (*Encrypter, error) {
 	if err := checkKey(alg, kek, joseerror.ErrInvalidPublicKey); err != nil {
 		return nil, err
 	}
-	return &Encrypter{alg: alg, kek: slices.Clone(kek)}, nil
+	return &Encrypter{alg: alg, kek: common.SealSecret(kek)}, nil
 }
 
 // NewDecrypter returns a Decrypter for alg that unwraps a CEK with kek, which
@@ -58,7 +58,7 @@ func NewDecrypter(alg jwa.Algorithm, kek []byte) (*Decrypter, error) {
 	if err := checkKey(alg, kek, joseerror.ErrInvalidPrivateKey); err != nil {
 		return nil, err
 	}
-	return &Decrypter{alg: alg, kek: slices.Clone(kek)}, nil
+	return &Decrypter{alg: alg, kek: common.SealSecret(kek)}, nil
 }
 
 func (encrypter *Encrypter) Alg() jwa.Algorithm {
@@ -66,12 +66,12 @@ func (encrypter *Encrypter) Alg() jwa.Algorithm {
 }
 
 // Format prints the algorithm of the encrypter, never its key, for every verb.
-func (encrypter *Encrypter) Format(f fmt.State, _ rune) {
+func (encrypter Encrypter) Format(f fmt.State, _ rune) {
 	common.FormatKeyHolder(f, encrypter.Alg(), "encrypter")
 }
 
 func (encrypter *Encrypter) Public() crypto.PublicKey {
-	return common.SecretKey(slices.Clone(encrypter.kek))
+	return common.SecretKey(slices.Clone(*encrypter.kek))
 }
 
 // WrapKey generates a random CEK of the length enc requires and wraps it with
@@ -85,7 +85,7 @@ func (encrypter *Encrypter) WrapKey(rand io.Reader, enc jwa.Encryption, header m
 	if _, err := io.ReadFull(rand, cek); err != nil {
 		return nil, nil, fmt.Errorf("%wgenerating a content encryption key: %s", joseerror.ErrEncryptionError, err.Error())
 	}
-	encryptedKey, err = aeskw.Wrap(encrypter.kek, cek)
+	encryptedKey, err = aeskw.Wrap(*encrypter.kek, cek)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%wwrapping the content encryption key: %s", joseerror.ErrEncryptionError, err.Error())
 	}
@@ -97,16 +97,16 @@ func (decrypter *Decrypter) Alg() jwa.Algorithm {
 }
 
 // Format prints the algorithm of the decrypter, never its key, for every verb.
-func (decrypter *Decrypter) Format(f fmt.State, _ rune) {
+func (decrypter Decrypter) Format(f fmt.State, _ rune) {
 	common.FormatKeyHolder(f, decrypter.Alg(), "decrypter")
 }
 
 func (decrypter *Decrypter) Public() crypto.PublicKey {
-	return common.SecretKey(slices.Clone(decrypter.kek))
+	return common.SecretKey(slices.Clone(*decrypter.kek))
 }
 
 // Decrypt unwraps msg, the JWE Encrypted Key, with AES Key Wrap and returns the
 // CEK. Any failure is aeskw.ErrUnwrap. opts is not read.
 func (decrypter *Decrypter) Decrypt(_ io.Reader, msg []byte, _ crypto.DecrypterOpts) ([]byte, error) {
-	return aeskw.Unwrap(decrypter.kek, msg)
+	return aeskw.Unwrap(*decrypter.kek, msg)
 }

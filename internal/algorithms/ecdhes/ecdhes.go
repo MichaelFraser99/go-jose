@@ -199,7 +199,7 @@ func (decrypter *Decrypter) Alg() jwa.Algorithm {
 }
 
 // Format prints the algorithm of the decrypter, never its key, for every verb.
-func (decrypter *Decrypter) Format(f fmt.State, _ rune) {
+func (decrypter Decrypter) Format(f fmt.State, _ rune) {
 	common.FormatKeyHolder(f, decrypter.Alg(), "decrypter")
 }
 

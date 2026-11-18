@@ -69,7 +69,7 @@ func (signer *Signer) Alg() jwa.Algorithm {
 }
 
 // Format prints the algorithm of the signer, never its key, for every verb.
-func (signer *Signer) Format(f fmt.State, _ rune) {
+func (signer Signer) Format(f fmt.State, _ rune) {
 	common.FormatKeyHolder(f, signer.Alg(), "signer")
 }
 

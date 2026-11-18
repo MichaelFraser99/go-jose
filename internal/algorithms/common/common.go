@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"log/slog"
 	"math/big"
 	"reflect"
 	"slices"
@@ -47,9 +48,34 @@ func (s SecretKey) Equal(x crypto.PublicKey) bool {
 	}
 }
 
-// Format prints "HMAC secret" for every verb, never the secret.
+// Format prints "secret key" for every verb, never the key.
 func (s SecretKey) Format(f fmt.State, _ rune) {
-	_, _ = io.WriteString(f, "HMAC secret")
+	_, _ = io.WriteString(f, "secret key")
+}
+
+// LogValue logs "secret key", never the key.
+func (s SecretKey) LogValue() slog.Value {
+	return slog.StringValue("secret key")
+}
+
+// SealSecret returns a copy of key behind a pointer. A type that holds a key
+// this way prints an address, not the key, where fmt bypasses its Format
+// method: for a verb it does not recognise, or in an unexported field.
+func SealSecret(key []byte) *SecretKey {
+	sealed := SecretKey(slices.Clone(key))
+	return &sealed
+}
+
+var errSecretKeyNotEncoded = errors.New("this key is withheld from encoding, so that it never reaches a log or a response by accident; write it with jwk.PrivateJwk")
+
+// MarshalText refuses, so that a secret key is never encoded by accident.
+func (s SecretKey) MarshalText() ([]byte, error) {
+	return nil, errSecretKeyNotEncoded
+}
+
+// GobEncode refuses, so that a secret key is never encoded by accident.
+func (s SecretKey) GobEncode() ([]byte, error) {
+	return nil, errSecretKeyNotEncoded
 }
 
 // FormatKeyHolder prints alg and role, such as "HS256 signer", for every verb,

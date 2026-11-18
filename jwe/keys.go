@@ -4,6 +4,7 @@ import (
 	"crypto"
 	"fmt"
 	"io"
+	"log/slog"
 	"slices"
 
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
@@ -30,7 +31,7 @@ type DirectKey struct {
 
 type directEncrypter struct {
 	*direct.Encrypter
-	key DirectKey
+	key *DirectKey
 }
 
 func (d *directEncrypter) Public() crypto.PublicKey {
@@ -39,7 +40,7 @@ func (d *directEncrypter) Public() crypto.PublicKey {
 
 type directDecrypter struct {
 	*direct.Decrypter
-	key DirectKey
+	key *DirectKey
 }
 
 func (d *directDecrypter) Public() crypto.PublicKey {
@@ -49,6 +50,11 @@ func (d *directDecrypter) Public() crypto.PublicKey {
 // Format prints the enc a DirectKey is bound to, never its key, for every verb.
 func (k DirectKey) Format(f fmt.State, _ rune) {
 	_, _ = fmt.Fprintf(f, "jwe.DirectKey for %s", k.Enc)
+}
+
+// LogValue logs the enc a DirectKey is bound to, never its key.
+func (k DirectKey) LogValue() slog.Value {
+	return slog.StringValue("jwe.DirectKey for " + k.Enc.String())
 }
 
 // PasswordKey is the key for PBES2-HS256+A128KW, PBES2-HS384+A192KW and
@@ -71,7 +77,7 @@ type PasswordKey struct {
 
 type passwordEncrypter struct {
 	*pbes2.Encrypter
-	key PasswordKey
+	key *PasswordKey
 }
 
 func (p *passwordEncrypter) Public() crypto.PublicKey {
@@ -80,7 +86,7 @@ func (p *passwordEncrypter) Public() crypto.PublicKey {
 
 type passwordDecrypter struct {
 	*pbes2.Decrypter
-	key PasswordKey
+	key *PasswordKey
 }
 
 func (p *passwordDecrypter) Public() crypto.PublicKey {
@@ -90,6 +96,11 @@ func (p *passwordDecrypter) Public() crypto.PublicKey {
 // Format prints "jwe.PasswordKey" for every verb, never the password.
 func (k PasswordKey) Format(f fmt.State, _ rune) {
 	_, _ = io.WriteString(f, "jwe.PasswordKey")
+}
+
+// LogValue logs "jwe.PasswordKey", never the password.
+func (k PasswordKey) LogValue() slog.Value {
+	return slog.StringValue("jwe.PasswordKey")
 }
 
 // GetEncrypter returns an Encrypter for the key management algorithm alg.
@@ -145,7 +156,7 @@ func GetEncrypter(alg jwa.Algorithm, key crypto.PublicKey) (model.Encrypter, err
 		if err != nil {
 			return nil, err
 		}
-		return &passwordEncrypter{Encrypter: inner, key: PasswordKey{Password: slices.Clone(passwordKey.Password), Count: passwordKey.Count}}, nil
+		return &passwordEncrypter{Encrypter: inner, key: &PasswordKey{Password: slices.Clone(passwordKey.Password), Count: passwordKey.Count}}, nil
 	case jwa.Dir:
 		directKey, ok := key.(DirectKey)
 		if !ok {
@@ -155,7 +166,7 @@ func GetEncrypter(alg jwa.Algorithm, key crypto.PublicKey) (model.Encrypter, err
 		if err != nil {
 			return nil, err
 		}
-		return &directEncrypter{Encrypter: inner, key: DirectKey{Key: slices.Clone(directKey.Key), Enc: directKey.Enc}}, nil
+		return &directEncrypter{Encrypter: inner, key: &DirectKey{Key: slices.Clone(directKey.Key), Enc: directKey.Enc}}, nil
 	case jwa.ES256, jwa.ES384, jwa.ES512, jwa.RS256, jwa.RS384, jwa.RS512, jwa.PS256, jwa.PS384, jwa.PS512, jwa.HS256, jwa.HS384, jwa.HS512, jwa.EdDSA, jwa.Ed25519, jwa.MLDSA44, jwa.MLDSA65, jwa.MLDSA87, jwa.Unknown:
 		return nil, fmt.Errorf("%w%s is not a key management algorithm this library implements", joseerror.ErrUnsupportedAlgorithm, algorithmName(alg))
 	default:
@@ -214,7 +225,7 @@ func GetDecrypter(alg jwa.Algorithm, key crypto.PrivateKey) (model.Decrypter, er
 		if err != nil {
 			return nil, err
 		}
-		return &passwordDecrypter{Decrypter: inner, key: PasswordKey{Password: slices.Clone(passwordKey.Password), Count: passwordKey.Count}}, nil
+		return &passwordDecrypter{Decrypter: inner, key: &PasswordKey{Password: slices.Clone(passwordKey.Password), Count: passwordKey.Count}}, nil
 	case jwa.Dir:
 		directKey, ok := key.(DirectKey)
 		if !ok {
@@ -224,7 +235,7 @@ func GetDecrypter(alg jwa.Algorithm, key crypto.PrivateKey) (model.Decrypter, er
 		if err != nil {
 			return nil, err
 		}
-		return &directDecrypter{Decrypter: inner, key: DirectKey{Key: slices.Clone(directKey.Key), Enc: directKey.Enc}}, nil
+		return &directDecrypter{Decrypter: inner, key: &DirectKey{Key: slices.Clone(directKey.Key), Enc: directKey.Enc}}, nil
 	case jwa.ES256, jwa.ES384, jwa.ES512, jwa.RS256, jwa.RS384, jwa.RS512, jwa.PS256, jwa.PS384, jwa.PS512, jwa.HS256, jwa.HS384, jwa.HS512, jwa.EdDSA, jwa.Ed25519, jwa.MLDSA44, jwa.MLDSA65, jwa.MLDSA87, jwa.Unknown:
 		return nil, fmt.Errorf("%w%s is not a key management algorithm this library implements", joseerror.ErrUnsupportedAlgorithm, algorithmName(alg))
 	default:

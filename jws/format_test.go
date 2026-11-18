@@ -1,6 +1,7 @@
 package jws_test
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -8,8 +9,15 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/base64"
+	"encoding/gob"
 	"encoding/hex"
+	"encoding/json"
+	"encoding/xml"
 	"fmt"
+	"html"
+	"html/template"
+	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 
@@ -18,7 +26,60 @@ import (
 	"github.com/MichaelFraser99/go-jose/model"
 )
 
-var formatVerbs = []string{"%v", "%+v", "%#v", "%s", "%q", "%x", "%X", "%d"}
+type printRoute struct {
+	name  string
+	print func(any) string
+}
+
+func printRoutes() []printRoute {
+	var routes []printRoute
+	for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q", "%x", "%X", "%d"} {
+		routes = append(routes, printRoute{"fmt " + verb, func(v any) string { return fmt.Sprintf(verb, v) }})
+	}
+	for _, verb := range []string{"%w", "%p"} {
+		routes = append(routes, printRoute{"fmt bad verb " + verb, func(v any) string { return fmt.Sprintf(verb, v) }})
+	}
+	for _, verb := range []string{"%v", "%+v", "%s", "%q", "%x"} {
+		routes = append(routes, printRoute{"unexported field " + verb, func(v any) string {
+			return fmt.Sprintf(verb, struct{ held any }{v})
+		}})
+	}
+	routes = append(routes,
+		printRoute{"html/template", func(v any) string {
+			var out bytes.Buffer
+			if err := template.Must(template.New("t").Parse(`{{.}}`)).Execute(&out, v); err != nil {
+				return err.Error()
+			}
+			return html.UnescapeString(out.String())
+		}},
+		printRoute{"slog text", func(v any) string {
+			var out bytes.Buffer
+			slog.New(slog.NewTextHandler(&out, nil)).Info("m", "key", v)
+			return out.String()
+		}},
+		printRoute{"slog json", func(v any) string {
+			var out bytes.Buffer
+			slog.New(slog.NewJSONHandler(&out, nil)).Info("m", "key", v)
+			return out.String()
+		}},
+		printRoute{"encoding/json", func(v any) string {
+			out, _ := json.Marshal(v)
+			return string(out)
+		}},
+		printRoute{"encoding/gob", func(v any) string {
+			var out bytes.Buffer
+			_ = gob.NewEncoder(&out).Encode(v)
+			return out.String()
+		}},
+		printRoute{"encoding/xml", func(v any) string {
+			out, _ := xml.Marshal(v)
+			return string(out)
+		}},
+	)
+	return routes
+}
+
+var labelled = map[string]bool{"fmt %v": true, "fmt %+v": true, "fmt %#v": true, "fmt %s": true, "fmt %q": true, "fmt %x": true, "fmt %X": true, "fmt %d": true, "html/template": true, "slog text": true}
 
 func keyIn(printed string, key []byte) string {
 	forms := map[string]string{
@@ -45,10 +106,11 @@ func TestFormat_ASignerOrHMACValidatorNeverPrintsItsKey(t *testing.T) {
 		}
 	}
 	type holder struct {
-		name  string
-		names string
-		value any
-		key   []byte
+		name    string
+		names   string
+		value   any
+		key     []byte
+		exposed []string
 	}
 	var holders []holder
 	for alg, secret := range secrets {
@@ -61,9 +123,9 @@ func TestFormat_ASignerOrHMACValidatorNeverPrintsItsKey(t *testing.T) {
 			t.Fatal(err)
 		}
 		holders = append(holders,
-			holder{alg.String() + " signer", alg.String(), signer, secret},
-			holder{alg.String() + " validator", alg.String(), validator, secret},
-			holder{alg.String() + " signer.Public()", "HMAC", signer.Public(), secret},
+			holder{alg.String() + " signer", alg.String(), signer, secret, nil},
+			holder{alg.String() + " validator", alg.String(), validator, secret, nil},
+			holder{alg.String() + " signer.Public()", "secret key", signer.Public(), secret, []string{"fmt bad verb", "unexported field"}},
 		)
 	}
 	_, edKey, err := ed25519.GenerateKey(rand.Reader)
@@ -74,7 +136,7 @@ func TestFormat_ASignerOrHMACValidatorNeverPrintsItsKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	holders = append(holders, holder{"Ed25519 signer", "Ed25519", edSigner, edKey.Seed()})
+	holders = append(holders, holder{"Ed25519 signer", "Ed25519", edSigner, edKey.Seed(), nil})
 	for alg, curve := range map[jwa.Algorithm]elliptic.Curve{jwa.ES256: elliptic.P256(), jwa.ES384: elliptic.P384(), jwa.ES512: elliptic.P521()} {
 		key, err := ecdsa.GenerateKey(curve, rand.Reader)
 		if err != nil {
@@ -88,7 +150,7 @@ func TestFormat_ASignerOrHMACValidatorNeverPrintsItsKey(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		holders = append(holders, holder{alg.String() + " signer", alg.String(), signer, d[1:]})
+		holders = append(holders, holder{alg.String() + " signer", alg.String(), signer, d[1:], nil})
 	}
 	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -99,7 +161,7 @@ func TestFormat_ASignerOrHMACValidatorNeverPrintsItsKey(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		holders = append(holders, holder{alg.String() + " signer", alg.String(), signer, rsaKey.D.Bytes()})
+		holders = append(holders, holder{alg.String() + " signer", alg.String(), signer, rsaKey.D.Bytes(), nil})
 	}
 	for alg, params := range map[jwa.Algorithm]mldsa.Parameters{jwa.MLDSA44: mldsa.MLDSA44(), jwa.MLDSA65: mldsa.MLDSA65(), jwa.MLDSA87: mldsa.MLDSA87()} {
 		key, err := mldsa.GenerateKey(params)
@@ -110,18 +172,22 @@ func TestFormat_ASignerOrHMACValidatorNeverPrintsItsKey(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		holders = append(holders, holder{alg.String() + " signer", alg.String(), signer, key.Bytes()})
+		holders = append(holders, holder{alg.String() + " signer", alg.String(), signer, key.Bytes(), nil})
 	}
 
 	for _, h := range holders {
-		for _, verb := range formatVerbs {
-			t.Run(h.name+" "+verb, func(t *testing.T) {
-				printed := fmt.Sprintf(verb, h.value)
-				if form := keyIn(printed, h.key); form != "" {
-					t.Errorf("[README Signers] printing a %s with %s must not show its key, but it shows it in %s form: %s", h.name, verb, form, printed)
+		for _, route := range printRoutes() {
+			t.Run(h.name+" "+route.name, func(t *testing.T) {
+				printed := route.print(h.value)
+				exposed := slices.ContainsFunc(h.exposed, func(prefix string) bool { return strings.HasPrefix(route.name, prefix) })
+				if form := keyIn(printed, h.key); form != "" && !exposed {
+					t.Errorf("[README Errors] %s of a %s must not show its key, but it shows it in %s form: %s", route.name, h.name, form, printed)
 				}
-				if !strings.Contains(printed, h.names) {
-					t.Errorf("[README Signers] printing a %s with %s must name %s, got %s", h.name, verb, h.names, printed)
+				if labelled[route.name] && !strings.Contains(printed, h.names) {
+					t.Errorf("[README Errors] %s of a %s must name %s, got %s", route.name, h.name, h.names, printed)
+				}
+				if _, logged, _ := strings.Cut(printed, " key="); route.name == "slog text" && !strings.Contains(logged, h.names) {
+					t.Errorf("[README Errors] %s of a %s must name %s, got %s", route.name, h.name, h.names, printed)
 				}
 			})
 		}
