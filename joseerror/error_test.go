@@ -26,8 +26,10 @@ func sentinels() map[string]error {
 		"ErrExpired":              ErrExpired,
 		"ErrNotYetValid":          ErrNotYetValid,
 		"ErrAudienceMismatch":     ErrAudienceMismatch,
+		"ErrIssuerMismatch":       ErrIssuerMismatch,
 		"ErrInvalidOptions":       ErrInvalidOptions,
 		"ErrTooManyKeys":          ErrTooManyKeys,
+		"ErrOutOfBounds":          ErrOutOfBounds,
 	}
 }
 

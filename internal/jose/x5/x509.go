@@ -200,7 +200,7 @@ func validateCertificateChain(certificates []*x509.Certificate, roots *x509.Cert
 		KeyUsages:     keyUsages,
 	})
 	if err != nil {
-		return fmt.Errorf("%wthe certificate chain does not validate against the configured trust anchors: %s", joseerror.ErrNoKeyIdentifierMatch, err.Error())
+		return fmt.Errorf("%wthe certificate chain does not validate against the configured trust anchors: %s", joseerror.ErrNoKeyIdentifierMatch, jsonutils.QuoteBounded(err.Error()))
 	}
 	if namesNoExtendedKeyUsage(signingCertificate) {
 		return fmt.Errorf("%wthe signing certificate's extended key usage extension names no purpose", joseerror.ErrNoKeyIdentifierMatch)

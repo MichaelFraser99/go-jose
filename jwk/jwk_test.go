@@ -172,7 +172,7 @@ func TestPublicJwk(t *testing.T) {
 				if err != nil {
 					t.Fatalf("error generating key: %s", err.Error())
 				}
-				return &pubKey
+				return pubKey
 			},
 			validate: func(t *testing.T, input map[string]any) {
 				CheckPresenceAndValue(t, input, "kty", "OKP")
@@ -304,7 +304,7 @@ func TestPrivateJwk(t *testing.T) {
 				if err != nil {
 					t.Fatalf("error generating key: %s", err.Error())
 				}
-				return &key
+				return key
 			},
 			validate: func(t *testing.T, input map[string]any) {
 				CheckPresenceAndValue(t, input, "kty", "OKP")

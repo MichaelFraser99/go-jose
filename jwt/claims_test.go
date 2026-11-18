@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -44,6 +45,7 @@ type claimsTestCase struct {
 	payload string
 	opts    *model.JoseOptions
 	want    error
+	notWant error
 	clause  string
 }
 
@@ -64,6 +66,9 @@ func claimsTestRun(t *testing.T, tests []claimsTestCase) {
 			}
 			if !errors.Is(err, tt.want) {
 				t.Errorf("[%s] %s: want %q, got %q", tt.clause, tt.payload, tt.want, err)
+			}
+			if tt.notWant != nil && errors.Is(err, tt.notWant) {
+				t.Errorf("[%s] %s: must not match %q, got %q", tt.clause, tt.payload, tt.notWant, err)
 			}
 		})
 	}
@@ -218,6 +223,202 @@ func TestValidate_RefusesOptionValuesNoTokenCanMeetWhateverTheToken(t *testing.T
 			if validated, err := Validate(context.Background(), token, nil, nil, nil, jweOpts); !errors.Is(err, joseerror.ErrInvalidOptions) || validated != nil {
 				t.Errorf("[RFC 6838 4.2, RFC 8725 3.1] JWEOptions with %s can match no token, so Validate must refuse %q with ErrInvalidOptions, even one of three segments, got %v", name, token, err)
 			}
+		}
+	}
+}
+
+func TestValidate_RequiredClaims(t *testing.T) {
+	require := func(names ...string) *model.JoseOptions {
+		return &model.JoseOptions{RequiredClaims: names}
+	}
+	claimsTestRun(t, []claimsTestCase{
+		{name: "nil options require nothing", payload: `{}`, clause: "RFC 7519 4.1"},
+		{name: "zero options require nothing", payload: `{}`, opts: &model.JoseOptions{}, clause: "RFC 7519 4.1"},
+		{name: "an empty list requires nothing", payload: `{}`, opts: require(), clause: "RFC 7519 4.1"},
+		{name: "a required exp that is absent", payload: `{"sub":"a"}`, opts: require("exp"), want: joseerror.ErrMissingClaim, clause: "RFC 7519 4.1"},
+		{name: "a required exp that is present", payload: `{"exp":1800000000}`, opts: require("exp"), clause: "RFC 7519 4.1"},
+		{name: "a required exp that is null is still not a NumericDate", payload: `{"exp":null}`, opts: require("exp"), want: joseerror.ErrMalformedClaim, notWant: joseerror.ErrMissingClaim, clause: "RFC 7519 4.1.4"},
+		{name: "a required exp that is present and expired", payload: `{"exp":1600000000}`, opts: require("exp"), want: joseerror.ErrExpired, clause: "RFC 7519 4.1.4"},
+		{name: "a required private claim that is null is a member", payload: `{"tenant":null}`, opts: require("tenant"), clause: "RFC 7519 4"},
+		{name: "a required private claim that is false is a member", payload: `{"tenant":false}`, opts: require("tenant"), clause: "RFC 7519 4"},
+		{name: "a required private claim that is an empty string is a member", payload: `{"tenant":""}`, opts: require("tenant"), clause: "RFC 7519 4"},
+		{name: "a required private claim that is an empty object is a member", payload: `{"tenant":{}}`, opts: require("tenant"), clause: "RFC 7519 4"},
+		{name: "a claim nested in another object is not a member", payload: `{"ext":{"tenant":"a"}}`, opts: require("tenant"), want: joseerror.ErrMissingClaim, clause: "RFC 7519 4"},
+		{name: "every required claim present", payload: `{"iss":"https://issuer.example","sub":"a","exp":1800000000}`, opts: require("iss", "sub", "exp"), clause: "RFC 7519 4.1"},
+		{name: "one of several required claims absent", payload: `{"iss":"https://issuer.example","exp":1800000000}`, opts: require("iss", "sub", "exp"), want: joseerror.ErrMissingClaim, clause: "RFC 7519 4.1"},
+		{name: "a name differing only in case", payload: `{"EXP":1800000000}`, opts: require("exp"), want: joseerror.ErrMissingClaim, clause: "RFC 7519 10.1.1"},
+		{name: "a required name differing only in case", payload: `{"exp":1800000000}`, opts: require("EXP"), want: joseerror.ErrMissingClaim, clause: "RFC 7519 10.1.1"},
+		{name: "a name with a trailing space", payload: `{"exp ":1800000000}`, opts: require("exp"), want: joseerror.ErrMissingClaim, clause: "RFC 7519 7.3"},
+		{name: "a name written with a JSON escape", payload: `{"exp":1800000000}`, opts: require("exp"), clause: "RFC 8259 8.3"},
+		{name: "a name in NFD against one in NFC", payload: `{"café":1}`, opts: require("café"), want: joseerror.ErrMissingClaim, clause: "RFC 7519 7.3"},
+		{name: "a name in NFC against one in NFC", payload: `{"café":1}`, opts: require("café"), clause: "RFC 7519 7.3"},
+		{name: "a duplicated requirement that is met", payload: `{"exp":1800000000}`, opts: require("exp", "exp"), clause: "RFC 7519 4.1"},
+		{name: "a duplicated requirement that is not met", payload: `{}`, opts: require("exp", "exp"), want: joseerror.ErrMissingClaim, clause: "RFC 7519 4.1"},
+		{name: "a duplicated member whose last value is null is a member", payload: `{"tenant":1,"tenant":null}`, opts: require("tenant"), clause: "RFC 7519 4"},
+		{name: "an empty name against a token with an empty-named member", payload: `{"":1}`, opts: require(""), want: joseerror.ErrInvalidOptions, clause: "RFC 7519 4"},
+		{name: "an empty name beside one that is met", payload: `{"exp":1800000000}`, opts: require("exp", ""), want: joseerror.ErrInvalidOptions, clause: "RFC 7519 4"},
+		{name: "an empty name against an expired token", payload: `{"exp":1600000000}`, opts: require(""), want: joseerror.ErrInvalidOptions, notWant: joseerror.ErrExpired, clause: "RFC 7519 4"},
+		{name: "an empty name against a token with a malformed iss", payload: `{"iss":5}`, opts: require(""), want: joseerror.ErrInvalidOptions, notWant: joseerror.ErrMalformedClaim, clause: "RFC 7519 4"},
+	})
+}
+
+func TestValidate_AMissingRequiredClaimIsNamedInTheError(t *testing.T) {
+	claimsTestFixClock(t, claimsTestNow)
+	err := claimsTestValidate(t, `{"iss":"https://issuer.example","exp":1800000000}`, &model.JoseOptions{RequiredClaims: []string{"iss", "sub", "exp"}})
+	if !errors.Is(err, joseerror.ErrMissingClaim) || !strings.Contains(err.Error(), `the "sub" claim`) {
+		t.Fatalf(`[RFC 7519 4.1] the error must name the absent claim "sub", quoted, got %v`, err)
+	}
+	for _, present := range []string{`"iss"`, `"exp"`} {
+		if strings.Contains(err.Error(), present) {
+			t.Errorf("[RFC 7519 4.1] the error must not name %s, which is present, got %q", present, err)
+		}
+	}
+}
+
+func TestValidate_ExpectedIssuer(t *testing.T) {
+	expect := func(issuers ...string) *model.JoseOptions {
+		return &model.JoseOptions{ExpectedIssuer: issuers}
+	}
+	one := expect("https://issuer.example")
+	claimsTestRun(t, []claimsTestCase{
+		{name: "no expectation accepts any issuer", payload: `{"iss":"https://someone-else.example"}`, clause: "RFC 7519 4.1.1"},
+		{name: "zero options accept any issuer", payload: `{"iss":"https://someone-else.example"}`, opts: &model.JoseOptions{}, clause: "RFC 7519 4.1.1"},
+		{name: "an empty expectation accepts any issuer", payload: `{"iss":"https://someone-else.example"}`, opts: expect(), clause: "RFC 7519 4.1.1"},
+		{name: "zero options accept no iss", payload: `{}`, opts: &model.JoseOptions{}, clause: "RFC 7519 4.1.1"},
+		{name: "the expected issuer", payload: `{"iss":"https://issuer.example"}`, opts: one, clause: "RFC 7519 4.1.1"},
+		{name: "the second of two expected issuers", payload: `{"iss":"https://issuer.example"}`, opts: expect("https://other.example", "https://issuer.example"), clause: "RFC 7519 4.1.1"},
+		{name: "an iss written with JSON escapes is the same string", payload: `{"iss":"https:\/\/issuer.example"}`, opts: one, clause: "RFC 8259 8.3"},
+		{name: "another issuer", payload: `{"iss":"https://someone-else.example"}`, opts: one, want: joseerror.ErrIssuerMismatch, notWant: joseerror.ErrMissingClaim, clause: "RFC 7519 4.1.1"},
+		{name: "an iss differing only in case", payload: `{"iss":"https://ISSUER.example"}`, opts: one, want: joseerror.ErrIssuerMismatch, clause: "RFC 7519 2"},
+		{name: "an iss with a trailing slash", payload: `{"iss":"https://issuer.example/"}`, opts: one, want: joseerror.ErrIssuerMismatch, clause: "RFC 7519 2"},
+		{name: "an iss without the expected trailing slash", payload: `{"iss":"https://issuer.example"}`, opts: expect("https://issuer.example/"), want: joseerror.ErrIssuerMismatch, clause: "RFC 7519 2"},
+		{name: "an iss with the default port", payload: `{"iss":"https://issuer.example:443"}`, opts: one, want: joseerror.ErrIssuerMismatch, clause: "RFC 7519 2"},
+		{name: "an iss with a percent-encoded unreserved character", payload: `{"iss":"https://issuer.example/%7Eid"}`, opts: expect("https://issuer.example/~id"), want: joseerror.ErrIssuerMismatch, clause: "RFC 7519 2"},
+		{name: "an iss with a trailing space", payload: `{"iss":"https://issuer.example "}`, opts: one, want: joseerror.ErrIssuerMismatch, clause: "RFC 7519 2"},
+		{name: "an iss that is a prefix of the expected issuer", payload: `{"iss":"https://issuer"}`, opts: one, want: joseerror.ErrIssuerMismatch, clause: "RFC 7519 2"},
+		{name: "an iss that extends the expected issuer", payload: `{"iss":"https://issuer.example.attacker.example"}`, opts: one, want: joseerror.ErrIssuerMismatch, clause: "RFC 7519 2"},
+		{name: "an iss that is an empty string", payload: `{"iss":""}`, opts: one, want: joseerror.ErrIssuerMismatch, clause: "RFC 7519 4.1.1"},
+		{name: "an iss in NFD against an expected issuer in NFC", payload: `{"iss":"https://café.example"}`, opts: expect("https://café.example"), want: joseerror.ErrIssuerMismatch, clause: "RFC 7519 2"},
+		{name: "an iss with a lookalike Cyrillic letter", payload: `{"iss":"https://іssuer.example"}`, opts: one, want: joseerror.ErrIssuerMismatch, clause: "RFC 7519 2"},
+		{name: "no iss at all", payload: `{"sub":"a"}`, opts: one, want: joseerror.ErrMissingClaim, notWant: joseerror.ErrIssuerMismatch, clause: "RFC 7519 4.1.1"},
+		{name: "an iss that is a number", payload: `{"iss":5}`, opts: one, want: joseerror.ErrMalformedClaim, notWant: joseerror.ErrIssuerMismatch, clause: "RFC 7519 4.1.1"},
+		{name: "an iss that is null", payload: `{"iss":null}`, opts: one, want: joseerror.ErrMalformedClaim, notWant: joseerror.ErrMissingClaim, clause: "RFC 7519 4.1.1"},
+		{name: "an iss that is an array holding the expected issuer", payload: `{"iss":["https://issuer.example"]}`, opts: one, want: joseerror.ErrMalformedClaim, notWant: joseerror.ErrIssuerMismatch, clause: "RFC 7519 4.1.1"},
+		{name: "the expected issuer named in a private claim only", payload: `{"issuer":"https://issuer.example"}`, opts: one, want: joseerror.ErrMissingClaim, clause: "RFC 7519 4.1.1"},
+		{name: "an empty expected issuer against an empty iss", payload: `{"iss":""}`, opts: expect(""), want: joseerror.ErrInvalidOptions, clause: "RFC 7519 4.1.1"},
+		{name: "an empty expected issuer beside one the token names", payload: `{"iss":"https://issuer.example"}`, opts: expect("https://issuer.example", ""), want: joseerror.ErrInvalidOptions, clause: "RFC 7519 4.1.1"},
+		{name: "an empty expected issuer against a token with no iss", payload: `{}`, opts: expect(""), want: joseerror.ErrInvalidOptions, notWant: joseerror.ErrMissingClaim, clause: "RFC 7519 4.1.1"},
+		{name: "an empty expected issuer against an expired token", payload: `{"exp":1600000000}`, opts: expect(""), want: joseerror.ErrInvalidOptions, notWant: joseerror.ErrExpired, clause: "RFC 7519 4.1.1"},
+	})
+}
+
+func TestValidate_AnIssuerMismatchQuotesTheIssBounded(t *testing.T) {
+	opts := &model.JoseOptions{ExpectedIssuer: []string{"https://issuer.example"}}
+	for name, iss := range map[string]string{
+		"a megabyte of ASCII":               strings.Repeat("a", 1<<20),
+		"an escaped line break":             `https://issuer.example\nlevel=admin`,
+		"half a megabyte of two-byte runes": strings.Repeat("é", 1<<18),
+	} {
+		t.Run(name, func(t *testing.T) {
+			claimsTestFixClock(t, claimsTestNow)
+			err := claimsTestValidate(t, `{"iss":"`+iss+`"}`, opts)
+			if !errors.Is(err, joseerror.ErrIssuerMismatch) {
+				t.Fatalf("[RFC 7519 4.1.1] an iss of %s is not the expected issuer, want %q, got %v", name, joseerror.ErrIssuerMismatch, err)
+			}
+			if strings.ContainsAny(err.Error(), "\n\r") {
+				t.Errorf("[RFC 7519 4.1.1] the error must quote the peer's iss, not echo a raw line break, got %q", err)
+			}
+			if len(err.Error()) > 512 {
+				t.Errorf("[RFC 7519 4.1.1] the error must echo a bounded prefix of the peer's iss, got %d bytes", len(err.Error()))
+			}
+		})
+	}
+}
+
+func TestValidate_AnEmptyRequiredClaimOrExpectedIssuerIsRefusedBeforeTheTokenIsRead(t *testing.T) {
+	for name, opts := range map[string]*model.JoseOptions{
+		"RequiredClaims": {RequiredClaims: []string{""}},
+		"ExpectedIssuer": {ExpectedIssuer: []string{""}},
+	} {
+		for _, token := range []string{"", "not a token", "a.b.c", "a.b.c.d.e"} {
+			if validated, err := Validate(context.Background(), token, nil, nil, opts, nil); !errors.Is(err, joseerror.ErrInvalidOptions) || validated != nil {
+				t.Errorf("[RFC 7519 4.1] an empty string in %s names nothing, so the options are refused whatever the token %q: want %q, got %v", name, token, joseerror.ErrInvalidOptions, err)
+			}
+		}
+	}
+}
+
+func TestCheckOptions_RefusesWhatValidateRefusesBeforeReadingTheToken(t *testing.T) {
+	nilDecrypter := []model.Decrypter{nil}
+	for name, tt := range map[string]struct {
+		opts       *model.JoseOptions
+		decrypters []model.Decrypter
+		jweOpts    *model.JWEOptions
+	}{
+		"an empty ExpectedAudience entry":             {opts: &model.JoseOptions{ExpectedAudience: []string{""}}},
+		"an empty ExpectedIssuer entry":               {opts: &model.JoseOptions{ExpectedIssuer: []string{""}}},
+		"an empty RequiredClaims entry":               {opts: &model.JoseOptions{RequiredClaims: []string{"exp", ""}}},
+		"a JWE alg in AllowedSigningAlgorithms":       {opts: &model.JoseOptions{AllowedSigningAlgorithms: []jwa.Algorithm{jwa.A128KW}}},
+		"an AcceptedTypes entry with a space":         {opts: &model.JoseOptions{AcceptedTypes: []string{"JWT "}}},
+		"a nil decrypter":                             {decrypters: nilDecrypter},
+		"a JWS alg in AllowedKeyManagementAlgorithms": {jweOpts: &model.JWEOptions{AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.ES256}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := CheckOptions(tt.opts, tt.decrypters, tt.jweOpts); !errors.Is(err, joseerror.ErrInvalidOptions) {
+				t.Errorf("[RFC 7519 4.1, RFC 8725 3.1] %s can match no token, so CheckOptions must refuse it with ErrInvalidOptions, got %v", name, err)
+			}
+			if _, err := Validate(context.Background(), "a.b.c", nil, tt.decrypters, tt.opts, tt.jweOpts); !errors.Is(err, joseerror.ErrInvalidOptions) {
+				t.Errorf("[RFC 7519 4.1, RFC 8725 3.1] Validate must refuse %s as CheckOptions does, got %v", name, err)
+			}
+		})
+	}
+	for name, opts := range map[string]*model.JoseOptions{
+		"nil options":  nil,
+		"zero options": {},
+		"every new field set": {
+			ExpectedAudience: []string{"https://rp.example"},
+			ExpectedIssuer:   []string{"https://issuer.example"},
+			RequiredClaims:   []string{"exp", "tenant"},
+		},
+	} {
+		if err := CheckOptions(opts, nil, nil); err != nil {
+			t.Errorf("[RFC 7519 4.1] %s can be met by a token, so CheckOptions must accept them, got %v", name, err)
+		}
+	}
+}
+
+func TestValidate_AMissingRequiredClaimNameIsQuotedAndBounded(t *testing.T) {
+	long := strings.Repeat("n", 100_000)
+	for name, tt := range map[string]struct {
+		claim    string
+		mustHave string
+	}{
+		"a 100,000-character name":     {claim: long, mustHave: `"` + strings.Repeat("n", 64) + `"...`},
+		"a name holding a line break":  {claim: "x\nlevel=INFO", mustHave: `"x\nlevel=INFO"`},
+		"a name holding an apostrophe": {claim: "it's", mustHave: `"it's"`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			claimsTestFixClock(t, claimsTestNow)
+			err := claimsTestValidate(t, `{}`, &model.JoseOptions{RequiredClaims: []string{tt.claim}})
+			if !errors.Is(err, joseerror.ErrMissingClaim) {
+				t.Fatalf("[RFC 7519 4.1] a token without %s must be refused with ErrMissingClaim, got %v", name, err)
+			}
+			if strings.ContainsAny(err.Error(), "\n\r") || len(err.Error()) > 256 {
+				t.Errorf("[RFC 7519 4.1] the claim name must be quoted and cut, got %d bytes: %q", len(err.Error()), err)
+			}
+			if !strings.Contains(err.Error(), tt.mustHave) {
+				t.Errorf("[RFC 7519 4.1] the error must hold %s, got %q", tt.mustHave, err)
+			}
+		})
+	}
+}
+
+func TestValidate_ANilContextIsRefusedBeforeTheTokenIsRead(t *testing.T) {
+	var unset context.Context
+	for _, token := range []string{"garbage", "a.b.c", "a.b.c.d.e"} {
+		validated, err := Validate(unset, token, nil, nil, nil, nil)
+		if !errors.Is(err, joseerror.ErrInvalidOptions) || validated != nil {
+			t.Errorf("a nil ctx can bound no fetch, so Validate must refuse it with ErrInvalidOptions whatever the token %q, got %v", token, err)
 		}
 	}
 }

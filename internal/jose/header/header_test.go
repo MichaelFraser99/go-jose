@@ -53,7 +53,7 @@ func TestValidateHeader(t *testing.T) {
 		encodedCertificates = append(encodedCertificates, base64.StdEncoding.EncodeToString(cert))
 	}
 
-	var jwkKeysArray []crypto.PublicKey
+	var rs256JkuKeys []crypto.PublicKey
 	keySet := model.Jwks{}
 
 	for i := 0; i < 5; i++ {
@@ -63,24 +63,21 @@ func TestValidateHeader(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to generate test rsa rsaKey: %s", err)
 			}
-			jwkKeysArray = append(jwkKeysArray, k.Public())
+			rs256JkuKeys = append(rs256JkuKeys, k.Public())
 			entry = mustJwk(t)(common.JwkFromRSAPublicKey(k.Public().(*rsa.PublicKey)))
 		} else {
 			k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 			if err != nil {
 				t.Fatalf("Failed to generate test ec rsaKey: %s", err)
 			}
-			jwkKeysArray = append(jwkKeysArray, k.Public())
 			entry = mustJwk(t)(common.JwkFromECDSAPublicKey(k.Public().(*ecdsa.PublicKey)))
 		}
 
 		keySet.Keys = append(keySet.Keys, entry)
 	}
-	jwkKeysArray = append(jwkKeysArray, rsaKey.Public())
-	jwkKeysArray = append(jwkKeysArray, rsaKey.Public())
+	rs256JkuKeys = append(rs256JkuKeys, rsaKey.Public())
 	keySet.Keys = append(keySet.Keys, rsaJwk)
 	keySet.Keys = append(keySet.Keys, psJwk)
-	rs256JkuKeys := jwkKeysArray[:len(jwkKeysArray)-1]
 
 	m := http.NewServeMux()
 	m.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {

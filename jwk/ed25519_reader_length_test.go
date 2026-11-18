@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/MichaelFraser99/go-jose/joseerror"
@@ -117,12 +118,12 @@ func TestPrivateFromJwk_ProducesAKeyTheStandardLibraryWillUse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a jwk this library produced must read back: %v", err)
 	}
-	readKey, ok := read.(*ed25519.PrivateKey)
+	readKey, ok := read.(ed25519.PrivateKey)
 	if !ok {
-		t.Fatalf("expected an *ed25519.PrivateKey, got %T", read)
+		t.Fatalf("[x509.ParsePKCS8PrivateKey godoc] an Ed25519 private key is an ed25519.PrivateKey, got %T", read)
 	}
 
-	signature := ed25519.Sign(*readKey, []byte("the signing input"))
+	signature := ed25519.Sign(readKey, []byte("the signing input"))
 	if !ed25519.Verify(public, []byte("the signing input"), signature) {
 		t.Error("[RFC 8037 2] the key read back must sign so that the original public key verifies it")
 	}
@@ -157,6 +158,31 @@ func TestFromJwk_AFailedReadReturnsNoKey(t *testing.T) {
 			}
 			if key != nil {
 				t.Errorf("a refused read must return a nil key, not an interface holding a typed nil: calling a method on it panics. Got %#v", key)
+			}
+		})
+	}
+}
+
+func TestPrivateFromJwk_AnEd25519LengthRefusalNamesTheMemberAtFault(t *testing.T) {
+	tests := map[string]struct {
+		x, d int
+		want string
+	}{
+		"x one octet short, d whole": {x: ed25519.PublicKeySize - 1, d: ed25519.SeedSize, want: "the 'x' parameter of an Ed25519 jwk is 32 octets, got 31"},
+		"x one octet over, d whole":  {x: ed25519.PublicKeySize + 1, d: ed25519.SeedSize, want: "the 'x' parameter of an Ed25519 jwk is 32 octets, got 33"},
+		"x empty, d whole":           {x: 0, d: ed25519.SeedSize, want: "the 'x' parameter of an Ed25519 jwk is 32 octets, got 0"},
+		"d one octet short, x whole": {x: ed25519.PublicKeySize, d: ed25519.SeedSize - 1, want: "the 'd' parameter of an Ed25519 jwk is 32 octets, got 31"},
+		"d one octet over, x short":  {x: ed25519.PublicKeySize - 1, d: ed25519.SeedSize + 1, want: "the 'd' parameter of an Ed25519 jwk is 32 octets, got 33"},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := PrivateFromJwk(ed25519Jwk(t, test.x, test.d))
+			if !errors.Is(err, joseerror.ErrInvalidPrivateKey) {
+				t.Fatalf("[RFC 8032 5.1.5] x=%d d=%d must be refused with ErrInvalidPrivateKey, got %v", test.x, test.d, err)
+			}
+			if !strings.Contains(err.Error(), test.want) {
+				t.Errorf("[RFC 8037 2] the refusal must name the member at fault and its length, %q, got %q", test.want, err.Error())
 			}
 		})
 	}

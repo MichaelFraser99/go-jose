@@ -101,7 +101,9 @@ func GetSigner(alg jwa.Algorithm, opts *model.Opts) (model.Signer, error) {
 //
 // alg - Determines which signer type gets returned
 //
-// privateKey - The provided `crypto.PrivateKey` implementation. Must be a pointer to the relevant key type for the selected algorithm
+// privateKey - An *ecdsa.PrivateKey for ES, an *rsa.PrivateKey for RS and PS,
+// an ed25519.PrivateKey or a pointer to one for Ed25519, and an
+// *mldsa.PrivateKey for ML-DSA. The HMAC algorithms are refused.
 func GetSignerFromPrivateKey(alg jwa.Algorithm, privateKey crypto.PrivateKey) (model.Signer, error) {
 	var s model.Signer
 	var err error

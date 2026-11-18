@@ -21,7 +21,6 @@ import (
 
 	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
 	jose_errors "github.com/MichaelFraser99/go-jose/joseerror"
-	"github.com/MichaelFraser99/go-jose/model"
 )
 
 type SecretKey []byte
@@ -200,7 +199,7 @@ func JwkFromECDSAPrivateKey(privateKey *ecdsa.PrivateKey) (map[string]any, error
 // refused rather than encoded.
 func JwkFromEdDSAPublicKey(publicKey *ed25519.PublicKey) (map[string]any, error) {
 	if publicKey == nil {
-		return nil, fmt.Errorf("%wan Ed25519 public key is %d bytes, got none", jose_errors.ErrInvalidPublicKey, ed25519.PublicKeySize)
+		return nil, fmt.Errorf("%wan Ed25519 public key is %d octets, got 0", jose_errors.ErrInvalidPublicKey, ed25519.PublicKeySize)
 	}
 	if err := CheckEd25519PublicKey(*publicKey, jose_errors.ErrInvalidPublicKey); err != nil {
 		return nil, err
@@ -224,7 +223,7 @@ func JwkFromEdDSAPublicKey(publicKey *ed25519.PublicKey) (map[string]any, error)
 // of its first is refused rather than encoded.
 func JwkFromEdDSAPrivateKey(privateKey *ed25519.PrivateKey) (map[string]any, error) {
 	if privateKey == nil {
-		return nil, fmt.Errorf("%wan Ed25519 private key is %d bytes, got none", jose_errors.ErrInvalidPrivateKey, ed25519.PrivateKeySize)
+		return nil, fmt.Errorf("%wan Ed25519 private key is %d octets, got 0", jose_errors.ErrInvalidPrivateKey, ed25519.PrivateKeySize)
 	}
 	if err := CheckEd25519PrivateKey(*privateKey); err != nil {
 		return nil, err
@@ -271,7 +270,7 @@ func requireOKPSubtype(jwk map[string]any, want string, class error) error {
 }
 
 // OKPPublicKeyFromJwk reads the jwk of an OKP public key. RFC 8037 section 2
-// names the subtype in "crv": Ed25519 is returned as an *ed25519.PublicKey and
+// names the subtype in "crv": Ed25519 is returned as an ed25519.PublicKey and
 // X25519 as an *ecdh.PublicKey. Any other subtype is refused with
 // ErrUnsupportedAlgorithm.
 func OKPPublicKeyFromJwk(jwk map[string]any) (crypto.PublicKey, error) {
@@ -294,7 +293,7 @@ func OKPPublicKeyFromJwk(jwk map[string]any) (crypto.PublicKey, error) {
 }
 
 // OKPPrivateKeyFromJwk reads the jwk of an OKP private key. RFC 8037 section 2
-// names the subtype in "crv": Ed25519 is returned as an *ed25519.PrivateKey and
+// names the subtype in "crv": Ed25519 is returned as an ed25519.PrivateKey and
 // X25519 as an *ecdh.PrivateKey. Any other subtype is refused with
 // ErrUnsupportedAlgorithm.
 func OKPPrivateKeyFromJwk(jwk map[string]any) (crypto.PrivateKey, error) {
@@ -442,7 +441,7 @@ func ellipticCurveOfECDH(curve ecdh.Curve, class error) (elliptic.Curve, error) 
 	}
 }
 
-func EdDSAPublicKeyFromJwk(jwk map[string]any) (*ed25519.PublicKey, error) {
+func EdDSAPublicKeyFromJwk(jwk map[string]any) (ed25519.PublicKey, error) {
 	if err := requireOKPSubtype(jwk, "Ed25519", jose_errors.ErrInvalidPublicKey); err != nil {
 		return nil, err
 	}
@@ -456,10 +455,10 @@ func EdDSAPublicKeyFromJwk(jwk map[string]any) (*ed25519.PublicKey, error) {
 		return nil, err
 	}
 
-	return model.Pointer(ed25519.PublicKey(xBytes)), nil
+	return ed25519.PublicKey(xBytes), nil
 }
 
-func EdDSAPrivateKeyFromJwk(jwk map[string]any) (*ed25519.PrivateKey, error) {
+func EdDSAPrivateKeyFromJwk(jwk map[string]any) (ed25519.PrivateKey, error) {
 	if err := requireOKPSubtype(jwk, "Ed25519", jose_errors.ErrInvalidPrivateKey); err != nil {
 		return nil, err
 	}
@@ -475,13 +474,16 @@ func EdDSAPrivateKeyFromJwk(jwk map[string]any) (*ed25519.PrivateKey, error) {
 	}
 
 	if len(dBytes) != ed25519.SeedSize {
-		return nil, fmt.Errorf("%wthe 'd' parameter of an Ed25519 jwk is %d bytes, got %d", jose_errors.ErrInvalidPrivateKey, ed25519.SeedSize, len(dBytes))
+		return nil, fmt.Errorf("%wthe 'd' parameter of an Ed25519 jwk is %d octets, got %d", jose_errors.ErrInvalidPrivateKey, ed25519.SeedSize, len(dBytes))
+	}
+	if len(xBytes) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf("%wthe 'x' parameter of an Ed25519 jwk is %d octets, got %d", jose_errors.ErrInvalidPrivateKey, ed25519.PublicKeySize, len(xBytes))
 	}
 	private := ed25519.PrivateKey(append(dBytes[:ed25519.SeedSize:ed25519.SeedSize], xBytes...))
 	if err := CheckEd25519PrivateKey(private); err != nil {
 		return nil, err
 	}
-	return model.Pointer(private), nil
+	return private, nil
 }
 
 // RSAPrivateKeyFromJwk reads the jwk of an RSA private key with either no

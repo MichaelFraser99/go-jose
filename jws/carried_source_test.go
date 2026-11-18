@@ -33,7 +33,7 @@ func TestVerifyCompactSerialization_AKeyTheTokenCarriesThatCannotBeUsedRefusesTh
 	tests := map[string]map[string]any{
 		"an x that is not base64url": with("x", "!!!"),
 		"an x one octet short":       with("x", base64.RawURLEncoding.EncodeToString(x[1:])),
-		"a crv this library lacks":   with("crv", "P-999"),
+		"a crv that is not a string": with("crv", 256),
 	}
 	for name, inline := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -59,9 +59,15 @@ func TestVerifyCompactSerialization_AKeyTheTokenCarriesThatIsNotSelectedGivesWay
 		t.Fatal(err)
 	}
 	unanchored := leaf(t, p256Key(t), rootCA(t, p256Key(t)))
+	otherCurve, err := jwk.PublicJwk(&keys.signingKey.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	(*otherCurve)["crv"] = "P-999"
 
 	tests := map[string]map[string]any{
 		"a jwk whose kid differs from the header's":    {"jwk": *carried, "kid": (*served)["kid"], "jku": jku.URL},
+		"a jwk on a curve ES256 does not name":         {"jwk": *otherCurve, "jku": jku.URL},
 		"an x5c chain that reaches no configured root": {"x5c": []string{der64(unanchored)}, "jku": jku.URL},
 	}
 	for name, head := range tests {
@@ -73,7 +79,7 @@ func TestVerifyCompactSerialization_AKeyTheTokenCarriesThatIsNotSelectedGivesWay
 				t.Fatalf("unexpected error class: %v", err)
 			}
 			if err != nil {
-				t.Errorf("[RFC 7515 4.1.4, 4.1.6] %s selects no key, which is not a fault in the key, so the jku's key must still verify the token, got %v", name, err)
+				t.Errorf("[RFC 7515 4.1.4, 4.1.6, RFC 7518 3.4] %s selects no key, which is not a fault in the key, so the jku's key must still verify the token, got %v", name, err)
 			}
 		})
 	}
