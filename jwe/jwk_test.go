@@ -179,6 +179,7 @@ func TestGetEncrypterFromJwk_TheFixturesAreAcceptedWithoutTheirFault(t *testing.
 	} {
 		for variant, members := range map[string][2]map[string]any{
 			"bare":                      {{}, {}},
+			"a string kid":              {{"kid": "recipient"}, {"kid": "recipient"}},
 			"alg and use":               {{"alg": c.alg.String(), "use": "enc"}, {"alg": c.alg.String(), "use": "enc"}},
 			"use and key_ops":           {{"use": "enc", "key_ops": []any{"wrapKey", "unwrapKey"}}, {"use": "enc", "key_ops": []any{"wrapKey", "unwrapKey"}}},
 			"key_ops alone":             {{"key_ops": []any{"wrapKey"}}, {"key_ops": []any{"unwrapKey"}}},
@@ -308,6 +309,16 @@ func TestGetEncrypterFromJwk_RefusesAJwkThatDeclaresAnotherUse(t *testing.T) {
 			encrypter: map[string]any{"alg": []any{"A128KW"}},
 			decrypter: map[string]any{"alg": []any{"A128KW"}},
 			clause:    "RFC 7517 4.4",
+		},
+		"a kid that is a number": {
+			encrypter: map[string]any{"alg": "A128KW", "kid": 123},
+			decrypter: map[string]any{"alg": "A128KW", "kid": 123},
+			clause:    "RFC 7517 4.5",
+		},
+		"a kid that is an array": {
+			encrypter: map[string]any{"kid": []any{"k"}},
+			decrypter: map[string]any{"kid": []any{"k"}},
+			clause:    "RFC 7517 4.5",
 		},
 		"use sig": {
 			encrypter: map[string]any{"alg": "A128KW", "use": "sig"},

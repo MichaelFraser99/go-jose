@@ -67,8 +67,9 @@ var agreementOperations = map[string]bool{"deriveKey": true, "deriveBits": true}
 // are refused with ErrUnsupportedAlgorithm too, as a password is not a key a
 // jwk holds; build a PasswordKey instead.
 //
-// RFC 8725 section 3.1 requires each key to be used with exactly one algorithm,
-// so a jwk whose "alg" is present and is not the string alg names is refused.
+// Its "kid" must be a string (RFC 7517 section 4.5). RFC 8725 section 3.1
+// requires each key to be used with exactly one algorithm, so a jwk whose "alg"
+// is present and is not the string alg names is refused.
 // A jwk whose "use" is present and is not "enc", or whose "key_ops" is present
 // and lacks "wrapKey", is refused too (RFC 7517 sections 4.2 and 4.3). So is a
 // jwk whose "use" and "key_ops" are not consistent, or whose "key_ops" lists a
@@ -108,7 +109,7 @@ func GetEncrypterFromJwk(alg jwa.Algorithm, publicJwk map[string]any, opts *mode
 // P-384 or P-521, or an OKP X25519 private key. For A128KW, A192KW, A256KW and
 // the AES GCM key wraps, it is an "oct" key. dir and the PBES2 algorithms are
 // refused as GetEncrypterFromJwk refuses them. The
-// jwk's "alg", "use" and "key_ops" are held to the rules GetEncrypterFromJwk
+// jwk's "kid", "alg", "use" and "key_ops" are held to the rules GetEncrypterFromJwk
 // applies, with "unwrapKey" in place of "wrapKey", and, for an ECDH-ES key,
 // "deriveKey" or "deriveBits" (RFC 7517 section 4.3). opts may be nil, and its
 // StrictKeyOperations applies as it does to GetEncrypterFromJwk. Every refusal
@@ -145,6 +146,9 @@ func notFromJwk(alg jwa.Algorithm) error {
 }
 
 func checkKeyDeclarations(alg jwa.Algorithm, key map[string]any, operations []string, strictKeyOperations bool, class error) error {
+	if err := internal_jwk.CheckMemberShape(key, class, false); err != nil {
+		return err
+	}
 	if member, present := key["alg"]; present {
 		if name, isString := member.(string); name != alg.String() {
 			return fmt.Errorf("%wthe jwk's alg %s does not name %s", class, describe(name, isString), alg.String())

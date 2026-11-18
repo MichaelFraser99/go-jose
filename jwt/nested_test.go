@@ -514,7 +514,7 @@ func TestValidate_AnEncryptOnlyJWTIsRefusedUnderEveryAlgThatIsNotASharedSecret(t
 		t.Run(alg.String(), func(t *testing.T) {
 			r := recipientFor(t, alg)
 			token := encryptOnly(t, r, map[string]any{"sub": "admin"})
-			if validated, err := Validate(context.Background(), token, nil, []model.Decrypter{r.decrypter}, nil, nil); !errors.Is(err, joseerror.ErrInvalidSignature) || validated != nil {
+			if validated, err := Validate(context.Background(), token, newTestRetriever(nil), []model.Decrypter{r.decrypter}, nil, nil); !errors.Is(err, joseerror.ErrInvalidSignature) || validated != nil {
 				t.Errorf("[RFC 8725 2.1] only a shared key or password shows who encrypted a JWT, so an encrypt-only JWT under %s must be refused by default, got %v", alg, err)
 			}
 		})
@@ -544,7 +544,7 @@ func TestValidate_RefusesAnUnauthenticatedJWTBeforeAnyDecrypterRuns(t *testing.T
 		t.Run(name, func(t *testing.T) {
 			counter := &countingDecrypter{Decrypter: c.r.decrypter}
 			token := encryptOnly(t, c.r, map[string]any{"sub": "admin"})
-			if _, err := Validate(context.Background(), token, nil, []model.Decrypter{counter}, c.opts, nil); !errors.Is(err, joseerror.ErrInvalidSignature) || counter.calls != 0 {
+			if _, err := Validate(context.Background(), token, newTestRetriever(nil), []model.Decrypter{counter}, c.opts, nil); !errors.Is(err, joseerror.ErrInvalidSignature) || counter.calls != 0 {
 				t.Errorf("[RFC 7519 7.2] the refusal depends only on the protected header, so it must come before any decrypter runs; got %v after %d decryptions", err, counter.calls)
 			}
 		})

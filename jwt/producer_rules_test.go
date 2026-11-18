@@ -10,6 +10,7 @@ import (
 	"crypto/mldsa"
 	"crypto/rand"
 	"crypto/rsa"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"math/big"
@@ -294,12 +295,14 @@ func TestValidate_RefusesATokenOfTheWrongShape(t *testing.T) {
 		{name: "two segments", token: "eyJhbGciOiJFUzI1NiJ9.e30", want: joseerror.ErrMalformedToken, clause: "RFC 7515 7.1"},
 		{name: "four segments", token: "a.b.c.d", want: joseerror.ErrMalformedToken, clause: "RFC 7515 7.1"},
 		{name: "six segments", token: "a.b.c.d.e.f", want: joseerror.ErrMalformedToken, clause: "RFC 7515 7.1"},
-		{name: "five segments, the shape of a JWE", token: "a.b.c.d.e", want: joseerror.ErrUnsupportedAlgorithm, clause: "RFC 7516 9"},
+		{name: "five segments whose header is not a JWE header", token: "a.b.c.d.e", want: joseerror.ErrMalformedToken, clause: "RFC 7516 9"},
+		{name: "five segments whose header names no enc", token: base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"A128KW"}`)) + ".b.c.d.e", want: joseerror.ErrMalformedToken, clause: "RFC 7516 9"},
+		{name: "a JWE, with no decrypters", token: base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"A128KW","enc":"A128GCM"}`)) + ".b.c.d.e", want: joseerror.ErrUnsupportedAlgorithm, clause: "RFC 7516 9"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			validated, err := Validate(context.Background(), tt.token, nil, nil, nil, nil)
+			validated, err := Validate(context.Background(), tt.token, newTestRetriever(nil), nil, nil, nil)
 			if !errors.Is(err, tt.want) || validated != nil {
 				t.Errorf("[%s] want %q and no token, got %v and %q", tt.clause, tt.want, validated, err)
 			}
@@ -341,7 +344,7 @@ func TestNew_RefusesAJweKeyManagementAlgorithm(t *testing.T) {
 }
 
 func TestValidate_AJWEWithNoDecryptersAsksForThem(t *testing.T) {
-	_, err := Validate(context.Background(), "a.b.c.d.e", nil, nil, nil, nil)
+	_, err := Validate(context.Background(), base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"A128KW","enc":"A128GCM"}`))+".b.c.d.e", newTestRetriever(nil), nil, nil, nil)
 	if !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || !strings.Contains(err.Error(), "no decrypters") {
 		t.Errorf("[RFC 7519 7.2 step 8] a five-part token is a JWE, and with no decrypters Validate cannot decrypt it, so want ErrUnsupportedAlgorithm saying so, got %v", err)
 	}

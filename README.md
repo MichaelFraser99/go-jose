@@ -569,12 +569,12 @@ func jwt.Validate(ctx context.Context, token string, outOfBoundsPublicKey model.
 | `EncryptionHeader` | The JWE Protected Header, or nil for a JWT that is only signed |
 | `Decrypter` | The decrypter that decrypted the token, or nil for a JWT that is only signed |
 
-`opts` applies to the JWS and to the claims. `jweOpts` applies to the JWE, and has its own type, `model.JWEOptions`, so the two cannot be swapped. A rule for one layer can be wrong for the other. For example, an `AcceptedTypes` of `JWT` is correct for a signed JWT, but refuses the JWE around it, which usually has no `typ`. A JWT that is only signed needs no decrypters. If you give decrypters or `jweOpts`, `Validate` checks them as options for every token, as `jwe.CheckOptions` describes, and uses neither for a signed JWT. `jwt.CheckOptions(opts, decrypters, jweOpts)` runs every check that `Validate` makes before it reads the token. Call it at startup to find a configuration fault before the first token arrives. `jws.CheckOptions` and `jwe.CheckOptions` do the same for `jws.Verify` and `jwe.Decrypt`.
+`opts` applies to the JWS and to the claims. `jweOpts` applies to the JWE, and has its own type, `model.JWEOptions`, so the two cannot be swapped. A rule for one layer can be wrong for the other. For example, an `AcceptedTypes` of `JWT` is correct for a signed JWT, but refuses the JWE around it, which usually has no `typ`. A JWT that is only signed needs no decrypters. If you give decrypters or `jweOpts`, `Validate` checks them as options for every token, as `jwe.CheckOptions` describes, and uses neither for a signed JWT. `jwt.CheckOptions(retriever, decrypters, opts, jweOpts)` takes the arguments that you pass to `Validate`, and runs every check that `Validate` makes before it reads the token. It refuses arguments under which no token can pass, with `ErrInvalidOptions`. One example is `RequireEncryptedJWT` with no decrypters. Another is `RequireSignedJWT` with no retriever and none of `KeySet`, `UseTokenProvidedKeys` and `X509Roots`. Call it at startup to find a configuration fault before the first token arrives. `jws.CheckOptions` and `jwe.CheckOptions` do the same for `jws.Verify` and `jwe.Decrypt`.
 
 RFC 7519 allows a JWT that is signed, encrypted, or both. To accept only the shapes that you expect, set these in `opts`:
 
-- `RequireSignedJWT` refuses a JWT that is only encrypted, under any key, with `ErrInvalidSignature`. Set it if every JWT must carry an issuer's signature. If you also hold a shared key, its other holders then cannot write claims of their own.
-- `RequireEncryptedJWT` refuses a JWT that is not encrypted, with `ErrUnsupportedAlgorithm`. Set it if your peers encrypt every JWT to you.
+- `RequireSignedJWT` refuses a JWT that is only encrypted, under any key, with `ErrInvalidSignature`. Set it if every JWT must carry an issuer's signature. It needs a source of signing keys: with no retriever and none of `KeySet`, `UseTokenProvidedKeys` and `X509Roots`, every call fails with `ErrInvalidOptions`. If you also hold a shared key, its other holders then cannot write claims of their own.
+- `RequireEncryptedJWT` refuses a JWT that is not encrypted, with `ErrUnsupportedAlgorithm`. Set it if your peers encrypt every JWT to you. It needs a decrypter whose `alg` the JWE options permit. Without one, every call fails with `ErrInvalidOptions`.
 
 `Validate` returns a nil `*Token` with every error, so check `err` before you read the token.
 
@@ -715,7 +715,7 @@ These functions enforce what the JWK declares about itself:
 
 Both functions take a `*model.JWEOptions` as the last argument, and it can be nil. If `StrictKeyOperations` is set, they also refuse a JWK that RFC 7517 section 4.3 discourages. See [Keys that section 4.3 discourages](#keys-that-section-43-discourages).
 
-A refused JWK gives `ErrInvalidPublicKey` from `GetEncrypterFromJwk` and `ErrInvalidPrivateKey` from `GetDecrypterFromJwk`. A JWK cannot hold a `dir` key, because no JWK member names the `enc` that the key is bound to. For `dir`, build a `jwe.DirectKey`.
+A JWK's `kid` must be a string (RFC 7517 section 4.5). A refused JWK gives `ErrInvalidPublicKey` from `GetEncrypterFromJwk` and `ErrInvalidPrivateKey` from `GetDecrypterFromJwk`. A JWK cannot hold a `dir` key, because no JWK member names the `enc` that the key is bound to. For `dir`, build a `jwe.DirectKey`.
 
 CAUTION: Do not log or publish what `Public()` returns for an `A128KW` to `A256KW`, `A128GCMKW` to `A256GCMKW`, PBES2 or `dir` encrypter or decrypter. A shared key or password has no public half, so `Public()` returns the secret itself, as it does for an HMAC signer.
 
@@ -841,7 +841,7 @@ signed, err := jwt.New(signer, nil, claims, jwt.Opts{})
 token, err := jwt.Encrypt(encrypter, jwa.A256GCM, *signed, nil)
 ```
 
-`jwt.Encrypt` refuses a `signed` that is not three base64url segments with a JSON object header, with `ErrMalformedToken`. It refuses a `cty` in the header that does not name `JWT`, with `ErrMalformedClaim`. Otherwise its errors are those of `jwe.Encrypt`.
+`jwt.Encrypt` refuses a `signed` that `Validate` would refuse for its shape, whatever the options, with `ErrMalformedToken`. That is a `signed` that is not three base64url segments, whose header is not a JSON object that passes the header checks of `jwt.New`, or whose payload is not a JSON object. A header whose `cty` names `JWT` signs a JWT, not a claims set, so it is refused with `ErrUnsupportedAlgorithm`. `jwt.Encrypt` does not verify the signature. It refuses a `cty` in the header that does not name `JWT`, with `ErrMalformedClaim`. Otherwise its errors are those of `jwe.Encrypt`.
 
 To read the token, give `jwt.Validate` your decrypters:
 
@@ -849,7 +849,7 @@ To read the token, give `jwt.Validate` your decrypters:
 validated, err := jwt.Validate(ctx, token, retriever, decrypters, opts, jweOpts)
 ```
 
-`Validate` decrypts a token of five segments with `jwe.Decrypt`, and returns its errors. With no decrypters, it refuses the token with `ErrUnsupportedAlgorithm`. The JWE's `cty` decides what the plaintext is (RFC 7519 section 7.2 step 8). `Validate` reads it from the protected header before it decrypts, so it can refuse an unauthenticated JWT without running any decrypter. The header is authenticated by the decryption that follows. So a token whose `cty` was changed in transit is refused either way, though the error names the shape, not `ErrDecryptionFailed`:
+`Validate` decrypts a token of five segments with `jwe.Decrypt`, and returns its errors. With no decrypters, it refuses the token with `ErrUnsupportedAlgorithm`. A token of five segments whose protected header is not a JSON object with an `enc` member is not a JWE (RFC 7516 section 9), so it is refused with `ErrMalformedToken`. The same rule applies to the plaintext of a Nested JWT. The JWE's `cty` decides what the plaintext is (RFC 7519 section 7.2 step 8). `Validate` reads it from the protected header before it decrypts, so it can refuse an unauthenticated JWT without running any decrypter. The header is authenticated by the decryption that follows. So a token whose `cty` was changed in transit is refused either way, though the error names the shape, not `ErrDecryptionFailed`:
 
 - If `cty` names `JWT`, the plaintext is a Nested JWT. It must be a signed JWT, which `Validate` verifies with the retriever and `opts`. A JWE inside the JWE is refused with `ErrUnsupportedAlgorithm`, as this library does not implement that nesting. Any other plaintext that is not a JWS is refused with `ErrMalformedToken`.
 - Otherwise the plaintext is the claims set. RFC 7519 allows a JWT that is only encrypted. The plaintext must be a JSON object, else `ErrMalformedToken`.
@@ -981,7 +981,7 @@ These are new:
 - `JoseOptions` fields: `KeySet`, `StrictKeyOperations`, `RequireSignedJWT`, `RequireEncryptedJWT`, `RequiredClaims`, `ExpectedIssuer` and `AllowedKeyURLs`. Each is off when unset. See [Verifying with your own key set](#verifying-with-your-own-key-set).
 - `jws.GetSignerFromJwk`, which builds a signer from a private jwk. See [Signers](#signers).
 - `jwt.Encrypt` and `jwt.Token`, for encrypted JWTs. See [Encrypted JWTs](#encrypted-jwts).
-- `jwt.CheckOptions`, which refuses at startup the options that `jwt.Validate` would refuse for every token.
+- `jwt.CheckOptions`, `jws.CheckOptions` and `jwe.CheckOptions`, which refuse at startup the options that `jwt.Validate`, `jws.Verify` and `jwe.Decrypt` would refuse for every token.
 - `jwe.PasswordKey` for PBES2, and the `alg` constants `jwa.A128GCMKW` to `jwa.A256GCMKW` and `jwa.PBES2HS256A128KW` to `jwa.PBES2HS512A256KW`.
 - The error sentinels `ErrEncryptionError`, `ErrOutOfBounds` and `ErrIssuerMismatch`. `ErrDecryptionFailed` now has a use.
 
@@ -1010,7 +1010,9 @@ The error from a failed `jku` or `x5u` fetch no longer matches `*url.Error` thro
 
 `AcceptedTypes` and the `cty` check now ignore the case of ASCII letters only. v0.11.0 used Unicode case folding, so a `typ` with a lookalike letter, such as `ſecevent+jwt` with a long s, matched `secevent+jwt`. Media type names are ASCII (RFC 6838 section 4.2), so no valid `typ` or `cty` is affected, and you need to change nothing.
 
-A verifier given no retriever, and none of `KeySet`, `UseTokenProvidedKeys` and `X509Roots`, refuses every token with `ErrInvalidOptions`. v0.11.0 refused it with `ErrMalformedToken`, which blamed the token for a configuration fault. If token keys are allowed and the token names none, the error is `ErrNoKeyIdentifierMatch`. If you test for `ErrMalformedToken` in this case, test for these instead. If you give `jwt.Validate` decrypters, an encrypt-only JWT can pass, so the options are not wrong: a signed JWT that no key verifies is refused with `ErrInvalidSignature`.
+A verifier given no retriever, and none of `KeySet`, `UseTokenProvidedKeys` and `X509Roots`, refuses every token with `ErrInvalidOptions`. v0.11.0 refused it with `ErrMalformedToken`, which blamed the token for a configuration fault. If token keys are allowed and the token names none, the error is `ErrNoKeyIdentifierMatch`. If you test for `ErrMalformedToken` in this case, test for these instead. If you give `jwt.Validate` decrypters and an encrypt-only JWT can pass, the options are not wrong: a signed JWT that no key verifies is refused with `ErrInvalidSignature`. An encrypt-only JWT can pass when `RequireSignedJWT` is off and a decrypter is for `dir`, an AES key wrap or PBES2, or `AllowUnauthenticatedJWT` is set. `jwt.Validate` now makes this check before it reads the token, so a malformed token under such options also gets `ErrInvalidOptions`.
+
+`jwt.Validate` refuses a token of five segments whose protected header is not a JSON object with an `enc` member with `ErrMalformedToken`. RFC 7516 section 9 says such a token is not a JWE. v0.11.0 refused every token of five segments with `ErrUnsupportedAlgorithm`. A JWE with no decrypters to decrypt it is still refused with `ErrUnsupportedAlgorithm`.
 
 Two option values that no token could meet now fail every call with `ErrInvalidOptions`. One is an `AllowedSigningAlgorithms` entry that is not a signature algorithm this library implements. v0.11.0 refused every token with `ErrUnsupportedAlgorithm` instead. The other is an `AcceptedTypes` entry that is not a media type name, such as one with stray whitespace. v0.11.0 refused every token with `ErrMalformedClaim` or `ErrMissingClaim`. Correct the entry. Valid options are not affected.
 
