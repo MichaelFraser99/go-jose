@@ -28,13 +28,14 @@ import (
 
 var errSignWithEdDSA = fmt.Errorf("%wEdDSA is accepted only for verification: RFC 9864 section 4.1.2 deprecates it, so sign with Ed25519", joseerror.ErrUnsupportedAlgorithm)
 
-// GetSigner
-//
-// # Returns a Signer implementation for the given algorithm complete with generated keypair
-//
-// alg - Determines which signer type gets returned
-//
-// opts - Extra options object to control additional algorithm specific behaviour. BitSize determines the size of key to be returned for RSA keys - if none specified defaults to 2048. SecretKey is used to define a secret key value for HMAC algorithms
+// GetSigner returns a signer for alg with a newly generated key: an EC key on
+// the curve alg names, an RSA key of opts.BitSize bits (2048 when unset), an
+// Ed25519 key or an ML-DSA key. For HS256, HS384 and HS512 it signs with
+// opts.SecretKey, which is required and must be at least the hash output size
+// (RFC 7518 section 3.2). EdDSA is refused, as RFC 9864 section 4.1.2 deprecates
+// it: sign with Ed25519. A model.Signer gives no way to read its private key
+// back, so a generated key lasts only as long as the signer. To keep a key,
+// generate it yourself and use GetSignerFromPrivateKey.
 func GetSigner(alg jwa.Algorithm, opts *model.Opts) (model.Signer, error) {
 	var s model.Signer
 	var err error

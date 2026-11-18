@@ -354,7 +354,9 @@ type JWEOptions struct {
 // RFC 8725 section 3.1 requires each key to be used with exactly one algorithm,
 // so bind such a key to its algorithm with JoseOptions.AllowedSigningAlgorithms.
 // That list applies to every key the retriever returns, so keys bound to
-// different algorithms of one family need separate retrievers.
+// different algorithms of one family need separate retrievers. Every key it
+// returns is tried, whatever the token's "kid" and "alg". To choose keys from a
+// JWK Set by "kid", set JoseOptions.KeySet instead.
 type Retriever func() ([]crypto.PublicKey, error)
 
 type Jwks struct {
@@ -482,13 +484,14 @@ type Signer interface {
 	crypto.Signer
 }
 
-// Validator verifies JWS signatures per RFC 7515 / RFC 7518.
+// Validator verifies JWS signatures per RFC 7515 and RFC 7518.
 //
-// ValidateSignature expects the raw JWS Signing Input as digest (not pre-hashed).
-// The implementation hashes it internally using the algorithm's designated hash
-// before performing verification.
+// ValidateSignature takes the JWS Signing Input of RFC 7515 section 5.2 step 8,
+// not a hash of it, and hashes it with the algorithm's own hash. It reports
+// false with a nil error for a signature that does not verify, and an error
+// only when the signature could not be checked.
 type Validator interface {
-	ValidateSignature(digest, signature []byte) (bool, error)
+	ValidateSignature(signingInput, signature []byte) (bool, error)
 	Public() crypto.PublicKey
 }
 

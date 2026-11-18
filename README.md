@@ -105,7 +105,7 @@ func GetAlgorithm(alg string) Algorithm
 `GetAlgorithm` returns the algorithm a name identifies, and `Unknown` if no algorithm has that name. The comparison is case sensitive, because RFC 7515 section 4.1.1 makes the `alg` header value case sensitive.
 
 ## Signers
-To create a Signer, use `jws.GetSigner`. It takes an algorithm and an optional `model.Opts`, and returns a `model.Signer` with a generated key pair. `Opts.BitSize` sets the modulus size for the RSA algorithms. `Opts.SecretKey` carries the secret for the HMAC algorithms, where it is required rather than optional. The example below generates a signer for ES256:
+To create a Signer, use `jws.GetSigner`. It takes an algorithm and an optional `model.Opts`, and returns a `model.Signer` with a generated key pair. `Opts.BitSize` sets the modulus size for the RSA algorithms. `Opts.SecretKey` carries the secret for the HMAC algorithms, where it is required rather than optional. A `model.Signer` gives no way to read its private key back. So a key that `GetSigner` generates lasts only as long as the signer. To keep a key, generate it yourself, save it with `jwk.PrivateJwk`, and build the signer with `GetSignerFromPrivateKey` or `GetSignerFromJwk`. The example below generates a signer for ES256:
 ```go
 signer, err := jws.GetSigner(jwa.ES256, nil)
 ```
@@ -182,7 +182,7 @@ validator, err := jws.GetValidatorFromJwk(jwa.ES256, publicKeyMap, nil)
 // Validate a signature
 validator, err := jws.GetValidator(jwa.ES256, publicKey)
 
-valid, err := validator.ValidateSignature(digest, signature)
+valid, err := validator.ValidateSignature(signingInput, signature)
 ```
 
 Finally, validators expose their PublicKey with the `Public()` method
@@ -329,7 +329,7 @@ A fetch stopped by either limit returns an error that matches `ErrApplicationErr
 - A token whose format or header is wrong reports that fault, because those checks run first.
 - A key that verifies the token while `ctx` is ending still verifies it. Ending `ctx` stops further work, but a signature already checked stays valid. `jwe.Decrypt` does the same.
 
-With no client, `jku` and `x5u` contribute no key. Each member of a `jku` set is judged on its own, as [Which keys are selected](#which-keys-are-selected) describes, and a member this library cannot read is skipped, as RFC 7517 section 5 recommends. A document that is not a JWK Set is refused as a whole: one without a `keys` member, one whose `keys` is null or not an array, and one whose `keys` array holds a number, string, boolean or array. An `x5u` resource is read as the PEM encoding RFC 7515 section 4.1.5 requires. A server that sends raw DER instead is still read: a body that parses as DER certificates is taken as exactly those certificates, and is never searched for PEM text. Any other body is read as PEM text, so a body whose explanatory text is not valid UTF-8 is refused.
+With no client, `jku` and `x5u` contribute no key. Each member of a `jku` set is judged on its own, as [Which keys are selected](#which-keys-are-selected) describes, and a member this library cannot read is skipped, as RFC 7517 section 5 recommends. A document that is not a JWK Set is refused as a whole: one without a `keys` member, one whose `keys` is null or not an array, and one whose `keys` array holds a null, number, string, boolean or array. An `x5u` resource is read as the PEM encoding RFC 7515 section 4.1.5 requires. A server that sends raw DER instead is still read: a body that parses as DER certificates is taken as exactly those certificates, and is never searched for PEM text. Any other body is read as PEM text, so a body whose explanatory text is not valid UTF-8 is refused.
 
 ### Which keys are selected
 
