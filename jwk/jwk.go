@@ -83,7 +83,9 @@ func PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error) {
 
 // PrivateJwk builds the jwk of a private key. A symmetric key, as a []byte or
 // what Public returns for one, becomes an "oct" jwk (RFC 7518 section 6.4) with
-// no "kid", as RFC 7638 section 7 says its thumbprint should be concealed. An
+// no "kid", as RFC 7638 section 7 says its thumbprint should be concealed. What
+// Public returns also carries an "alg" naming the algorithm it was made for
+// (RFC 7517 section 4.4), as RFC 8725 section 3.1 binds it to one. An
 // *ecdh.PrivateKey on X25519 becomes an "OKP" jwk (RFC 8037 section 2), and one
 // on P-256, P-384 or P-521 the "EC" jwk of the same scalar, which
 // PrivateFromJwk reads as an *ecdsa.PrivateKey.
@@ -106,7 +108,10 @@ func PrivateJwk(privateKey crypto.PrivateKey) (*map[string]any, error) {
 	case []byte:
 		m, err = common.JwkFromSecretKey(key)
 	case common.SecretKey:
-		m, err = common.JwkFromSecretKey(key)
+		m, err = common.JwkFromSecretKey(common.SecretBytes(key))
+		if err == nil {
+			m["alg"] = common.SecretAlgorithm(key)
+		}
 	default:
 		return nil, fmt.Errorf("%wunknown private key format provided", joseerror.ErrInvalidPrivateKey)
 	}

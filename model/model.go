@@ -346,15 +346,25 @@ type JWEOptions struct {
 	StrictKeyOperations bool
 }
 
-// Retriever supplies the keys a token may be verified with. A bare
-// crypto.PublicKey carries no algorithm. An EC key is bound to one algorithm by
-// its curve, as RFC 7518 section 3.4 defines each ES algorithm over one curve.
-// An RSA key verifies a token under any of RS256 to PS512 that the token names,
-// and an HMAC secret under any HS algorithm whose minimum length it meets.
-// RFC 8725 section 3.1 requires each key to be used with exactly one algorithm,
-// so bind such a key to its algorithm with JoseOptions.AllowedSigningAlgorithms.
-// That list applies to every key the retriever returns, so keys bound to
-// different algorithms of one family need separate retrievers.
+// Retriever supplies the keys a token may be verified with. Each key it returns
+// that a validator of the token's alg accepts is tried, whatever the token's
+// "kid". A key no such validator accepts, such as a raw []byte or an HMAC
+// secret made for another algorithm, is skipped. If the retriever returns no
+// error and no key verifies the token, the error matches ErrInvalidSignature,
+// as it does for a forged token, unless more keys were tried than
+// JoseOptions.MaxKeysTried allows. To choose keys from a JWK Set by "kid", set
+// JoseOptions.KeySet instead.
+//
+// A bare crypto.PublicKey carries no algorithm. An EC key is bound to one
+// algorithm by its curve, as RFC 7518 section 3.4 defines each ES algorithm over
+// one curve. An HMAC secret must be the value an HMAC Signer's Public method
+// returns, which is bound to the signer's algorithm, so it verifies only a token
+// under that algorithm. An RSA key verifies a token under any of RS256 to PS512
+// that the token names. RFC 8725 section 3.1 requires each key to be used with
+// exactly one algorithm, so bind an RSA key to its algorithm with
+// JoseOptions.AllowedSigningAlgorithms. That list applies to every key the
+// retriever returns, so RSA keys bound to different algorithms need separate
+// retrievers.
 type Retriever func() ([]crypto.PublicKey, error)
 
 type Jwks struct {
@@ -482,13 +492,14 @@ type Signer interface {
 	crypto.Signer
 }
 
-// Validator verifies JWS signatures per RFC 7515 / RFC 7518.
+// Validator verifies JWS signatures per RFC 7515 and RFC 7518.
 //
-// ValidateSignature expects the raw JWS Signing Input as digest (not pre-hashed).
-// The implementation hashes it internally using the algorithm's designated hash
-// before performing verification.
+// ValidateSignature takes the JWS Signing Input of RFC 7515 section 5.2 step 8,
+// not a hash of it, and hashes it with the algorithm's own hash. It reports
+// false with a nil error for a signature that does not verify, and an error
+// only when the signature could not be checked.
 type Validator interface {
-	ValidateSignature(digest, signature []byte) (bool, error)
+	ValidateSignature(signingInput, signature []byte) (bool, error)
 	Public() crypto.PublicKey
 }
 
