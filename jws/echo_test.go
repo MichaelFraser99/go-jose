@@ -56,6 +56,37 @@ func TestGetValidatorFromJwk_ARefusedAlgIsEchoedQuotedAndBounded(t *testing.T) {
 	}
 }
 
+func TestGetSignerFromJwk_ARefusedAlgOrKeyOpIsEchoedQuotedAndBounded(t *testing.T) {
+	long := strings.Repeat("A", 1000) + "\r\nforged log line"
+	secret := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+
+	tests := map[string]struct {
+		member   string
+		value    any
+		mustHave string
+	}{
+		"a long alg":             {member: "alg", value: long, mustHave: jsonutils.QuoteBounded(long)},
+		"an alg array":           {member: "alg", value: []any{strings.Repeat("A", 1000)}, mustHave: "not a string"},
+		"a long use":             {member: "use", value: long, mustHave: jsonutils.QuoteBounded(long)},
+		"a long key_op repeated": {member: "key_ops", value: []any{"sign", long, long}, mustHave: jsonutils.QuoteBounded(long)},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := GetSignerFromJwk(jwa.HS256, map[string]any{"kty": "oct", "k": secret, test.member: test.value}, nil)
+			if err == nil {
+				t.Fatalf("[RFC 7517 4] a jwk with %s must not build an HS256 signer", name)
+			}
+			if strings.ContainsAny(err.Error(), "\r\n") || len(err.Error()) > 300 {
+				t.Errorf("a jwk's value must be quoted and capped, got %d bytes: %q", len(err.Error()), err.Error())
+			}
+			if !strings.Contains(err.Error(), test.mustHave) {
+				t.Errorf("expected the error to contain %q, got %q", test.mustHave, err.Error())
+			}
+		})
+	}
+}
+
 func TestVerify_AnAlgTheOptionsDoNotAllowIsEchoedInDoubleQuotes(t *testing.T) {
 	signer, err := GetSigner(jwa.ES256, nil)
 	if err != nil {

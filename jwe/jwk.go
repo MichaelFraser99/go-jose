@@ -158,26 +158,16 @@ func checkKeyDeclarations(alg jwa.Algorithm, key map[string]any, operations []st
 		}
 	}
 
-	member, opsPresent := key["key_ops"]
+	ops, opsPresent, err := internal_jwk.KeyOperations(key, class)
+	if err != nil {
+		return err
+	}
 	if !opsPresent {
 		return nil
 	}
-	ops, ok := member.([]any)
-	if !ok {
-		return fmt.Errorf("%wthe jwk's key_ops must be an array", class)
-	}
 	permitted := false
 	signature, agreement := "", false
-	seen := map[string]bool{}
-	for _, op := range ops {
-		name, ok := op.(string)
-		if !ok {
-			return fmt.Errorf("%wthe jwk's key_ops must hold strings", class)
-		}
-		if seen[name] {
-			return fmt.Errorf("%wthe jwk's key_ops lists %s more than once", class, jsonutils.QuoteBounded(name))
-		}
-		seen[name] = true
+	for _, name := range ops {
 		if usePresent && signatureOperations[name] {
 			return fmt.Errorf("%wthe jwk's use enc and key_ops %s are not consistent", class, jsonutils.QuoteBounded(name))
 		}

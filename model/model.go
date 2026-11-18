@@ -175,10 +175,11 @@ type JoseOptions struct {
 	// WebCrypto gives an ECDH private key. Off by default, including when no
 	// options are passed, because no MUST forbids such a jwk.
 	//
-	// It applies to jws.GetValidatorFromJwk, the members of KeySet, and the jwk and
-	// jku keys of a token. JWEOptions.StrictKeyOperations does the same for the jwe
-	// constructors. Neither KeySet members nor a token's keys are checked when
-	// IgnoreKeyUse is on, as no "use" or "key_ops" rule applies to them then.
+	// It applies to jws.GetSignerFromJwk, jws.GetValidatorFromJwk, the members of
+	// KeySet, and the jwk and jku keys of a token. JWEOptions.StrictKeyOperations
+	// does the same for the jwe constructors. Neither KeySet members nor a token's
+	// keys are checked when IgnoreKeyUse is on, as no "use" or "key_ops" rule
+	// applies to them then.
 	StrictKeyOperations bool
 
 	// X509ExtKeyUsages names the extended key usages that permit an x5c or x5u

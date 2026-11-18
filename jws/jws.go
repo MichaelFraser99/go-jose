@@ -59,13 +59,7 @@ func CheckOptions(opts *model.JoseOptions) error {
 	}
 	for _, alg := range opts.AllowedSigningAlgorithms {
 		if !hasValidator(alg) {
-			name := alg.String()
-			if alg == jwa.Unknown {
-				name = "jwa.Unknown (what GetAlgorithm returns for a name it does not recognise)"
-			} else if name == "" {
-				name = fmt.Sprintf("jwa.Algorithm(%d)", int(alg))
-			}
-			return fmt.Errorf("%wAllowedSigningAlgorithms holds %s, which is not a signature algorithm this library implements", joseerror.ErrInvalidOptions, name)
+			return fmt.Errorf("%wAllowedSigningAlgorithms holds %s, which is not a signature algorithm this library implements", joseerror.ErrInvalidOptions, algorithmArgument(alg))
 		}
 	}
 	if err := header.CheckAcceptedTypes(opts.AcceptedTypes); err != nil {
@@ -212,4 +206,18 @@ func wrapAll(errs []error) error {
 		args[i] = err
 	}
 	return fmt.Errorf(format, args...)
+}
+
+func algorithmArgument(alg jwa.Algorithm) string {
+	if alg == jwa.Unknown {
+		return "jwa.Unknown (what GetAlgorithm returns for a name it does not recognise)"
+	}
+	if name := alg.String(); name != "" {
+		return name
+	}
+	return fmt.Sprintf("jwa.Algorithm(%d)", int(alg))
+}
+
+func notASignatureAlgorithm(alg jwa.Algorithm) error {
+	return fmt.Errorf("%w%s is not a signature algorithm this library implements", joseerror.ErrUnsupportedAlgorithm, algorithmArgument(alg))
 }

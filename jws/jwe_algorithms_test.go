@@ -29,8 +29,15 @@ func TestAJWEKeyManagementAlgorithmCannotSignOrVerifyAJWS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	privateJwk, err := jwk.PrivateJwk(rsaKey)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, alg := range jweKeyManagementAlgorithms {
 		t.Run(alg.String(), func(t *testing.T) {
+			if signer, err := jws.GetSignerFromJwk(alg, *privateJwk, nil); !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || signer != nil {
+				t.Errorf("[RFC 7518 4.1] GetSignerFromJwk must refuse %s, got %#v and %v", alg, signer, err)
+			}
 			if signer, err := jws.GetSigner(alg, &model.Opts{SecretKey: model.Pointer(make([]byte, 64))}); !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || signer != nil {
 				t.Errorf("[RFC 7518 4.1] %s is a key management algorithm, not a signature, so GetSigner must refuse it, got %#v and %v", alg, signer, err)
 			}

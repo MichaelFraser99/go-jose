@@ -157,9 +157,9 @@ func MLDSAPrivateKeyFromJwk(jwk map[string]any) (*mldsa.PrivateKey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%werror extracting 'pub' parameter from jwk: %w", jose_errors.ErrInvalidPrivateKey, err)
 	}
-	priv, err := jsonutils.ExtractAndDecodeBase64urlString(jwk, "priv")
+	priv, err := PrivateMember(jwk, "priv", "an AKP private key jwk", jsonutils.ExtractAndDecodeBase64urlString)
 	if err != nil {
-		return nil, fmt.Errorf("%werror extracting 'priv' parameter from jwk: %w", jose_errors.ErrInvalidPrivateKey, err)
+		return nil, err
 	}
 	privateKey, err := mldsa.NewPrivateKey(params, priv)
 	if err != nil {
