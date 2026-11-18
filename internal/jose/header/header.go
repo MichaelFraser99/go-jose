@@ -23,7 +23,8 @@ import (
 
 // ValidateHeader performs standard JOSE header validation upon the decoded protected header portion of a JWS.
 //
-// On success, a series of Retriever functions are returned which will yield key(s) for validation purposes.
+// On success, a series of Retriever functions are returned which will yield key(s) for validation purposes:
+// first one for the members of opts.KeySet, then one for each key the header names that opts allow.
 // A header that breaks RFC 7515 is refused with ErrMalformedToken wrapping the
 // reason. A header that is well formed but names what this library does not
 // implement, or what the options refuse, is refused with that reason alone.
@@ -65,6 +66,9 @@ func ValidateHeader(ctx context.Context, header map[string]any, client *http.Cli
 	}
 
 	var jwkRetrievers []model.Retriever
+	if opts.KeySet != nil {
+		jwkRetrievers = append(jwkRetrievers, jwk.RetrieveKeySet(opts.KeySet, params.kid, *alg, opts.IgnoreKeyUse, opts.StrictKeyOperations))
+	}
 	if params.jwk != nil && opts.UseTokenProvidedKeys {
 		jwkRetrievers = append(jwkRetrievers, carried(jwk.InlineJWK(*params.jwk, params.kid, *alg, opts.IgnoreKeyUse, opts.StrictKeyOperations)))
 	}
