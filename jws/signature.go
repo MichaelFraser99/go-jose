@@ -35,7 +35,8 @@ var errSignWithEdDSA = fmt.Errorf("%wEdDSA is accepted only for verification: RF
 // (RFC 7518 section 3.2). EdDSA is refused, as RFC 9864 section 4.1.2 deprecates
 // it: sign with Ed25519. A model.Signer gives no way to read its private key
 // back, so a generated key lasts only as long as the signer. To keep a key,
-// generate it yourself and use GetSignerFromPrivateKey.
+// generate it yourself, save it with jwk.PrivateJwk, and build the signer with
+// GetSignerFromPrivateKey or GetSignerFromJwk.
 func GetSigner(alg jwa.Algorithm, opts *model.Opts) (model.Signer, error) {
 	var s model.Signer
 	var err error
@@ -133,7 +134,7 @@ func GetSignerFromPrivateKey(alg jwa.Algorithm, privateKey crypto.PrivateKey) (m
 	case jwa.PS512:
 		s, err = ps512.NewSignerFromPrivateKey(privateKey)
 	case jwa.HS256, jwa.HS384, jwa.HS512:
-		return nil, fmt.Errorf("%wHMAC Signers cannot be created this way - please use GetSigner and specify the secret key using the Opts function", joseerror.ErrUnsupportedAlgorithm)
+		return nil, fmt.Errorf("%wHMAC signers take their secret through GetSigner, in model.Opts.SecretKey, or through GetSignerFromJwk, as an oct jwk", joseerror.ErrUnsupportedAlgorithm)
 	case jwa.Ed25519:
 		s, err = eddsa.NewSignerFromPrivateKey(privateKey)
 	case jwa.MLDSA44, jwa.MLDSA65, jwa.MLDSA87:

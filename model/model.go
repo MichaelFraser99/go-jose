@@ -350,7 +350,9 @@ type JWEOptions struct {
 // crypto.PublicKey carries no algorithm. An EC key is bound to one algorithm by
 // its curve, as RFC 7518 section 3.4 defines each ES algorithm over one curve.
 // An RSA key verifies a token under any of RS256 to PS512 that the token names,
-// and an HMAC secret under any HS algorithm whose minimum length it meets.
+// and an HMAC secret under any HS algorithm whose minimum length it meets. An
+// HMAC secret must be the value an HMAC Signer's Public method returns. A key no
+// validator of the token's alg accepts, such as a raw []byte, is skipped.
 // RFC 8725 section 3.1 requires each key to be used with exactly one algorithm,
 // so bind such a key to its algorithm with JoseOptions.AllowedSigningAlgorithms.
 // That list applies to every key the retriever returns, so keys bound to
