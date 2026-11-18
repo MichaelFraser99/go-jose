@@ -169,18 +169,18 @@ func ECDSAPublicKeyFromJwk(jwk map[string]any) (*ecdsa.PublicKey, error) {
 }
 
 func readECDSAPublicKey(jwk map[string]any, class error) (*ecdsa.PublicKey, error) {
-	curve, err := extractECDSACurveFromJwk(jwk)
+	curve, err := extractECDSACurveFromJwk(jwk, class)
 	if err != nil {
-		return nil, fmt.Errorf("error extracting curve from ECDSA jwk: %w", err)
+		return nil, err
 	}
 
-	xBytes, err := jsonutils.ExtractAndDecodeBase64urlString(jwk, "x")
+	xBytes, err := KeyMember(jwk, "x", "an EC jwk", class, jsonutils.ExtractAndDecodeBase64urlString)
 	if err != nil {
-		return nil, fmt.Errorf("error extracting 'x' coordinate from jwk: %w", err)
+		return nil, err
 	}
-	yBytes, err := jsonutils.ExtractAndDecodeBase64urlString(jwk, "y")
+	yBytes, err := KeyMember(jwk, "y", "an EC jwk", class, jsonutils.ExtractAndDecodeBase64urlString)
 	if err != nil {
-		return nil, fmt.Errorf("error extracting 'y' coordinate from jwk: %w", err)
+		return nil, err
 	}
 
 	coordinateBytes := (curve.Params().BitSize + 7) / 8
@@ -196,10 +196,14 @@ func readECDSAPublicKey(jwk map[string]any, class error) (*ecdsa.PublicKey, erro
 	return publicKey, nil
 }
 
-func extractECDSACurveFromJwk(jwk map[string]any) (elliptic.Curve, error) {
-	curveName, ok := jwk["crv"].(string)
+func extractECDSACurveFromJwk(jwk map[string]any, class error) (elliptic.Curve, error) {
+	raw, present := jwk["crv"]
+	if !present {
+		return nil, fmt.Errorf("%w%wan EC jwk must carry a 'crv' naming its curve", class, jose_errors.ErrMissingClaim)
+	}
+	curveName, ok := raw.(string)
 	if !ok {
-		return nil, fmt.Errorf("%wthe 'crv' claim must be a string naming a registered curve", jose_errors.ErrInvalidPublicKey)
+		return nil, fmt.Errorf("%w%wthe 'crv' claim must be a string naming a registered curve", class, jose_errors.ErrMalformedClaim)
 	}
 	switch curveName {
 	case "P-256":
@@ -336,11 +340,11 @@ func JwkFromEdDSAPrivateKey(privateKey *ed25519.PrivateKey) (map[string]any, err
 func okpSubtype(jwk map[string]any, class error) (string, error) {
 	raw, present := jwk["crv"]
 	if !present {
-		return "", fmt.Errorf("%wan OKP jwk must carry a 'crv' naming its subtype", class)
+		return "", fmt.Errorf("%w%wan OKP jwk must carry a 'crv' naming its subtype", class, jose_errors.ErrMissingClaim)
 	}
 	crv, ok := raw.(string)
 	if !ok {
-		return "", fmt.Errorf("%wthe 'crv' claim must be a string", class)
+		return "", fmt.Errorf("%w%wthe 'crv' claim must be a string", class, jose_errors.ErrMalformedClaim)
 	}
 	if crv != "Ed25519" && crv != "X25519" {
 		return "", fmt.Errorf("%wthe 'crv' of an OKP jwk is not one of Ed25519 and X25519", jose_errors.ErrUnsupportedAlgorithm)
@@ -414,9 +418,9 @@ func X25519PublicKeyFromJwk(jwk map[string]any) (*ecdh.PublicKey, error) {
 	if err := requireOKPSubtype(jwk, "X25519", jose_errors.ErrInvalidPublicKey); err != nil {
 		return nil, err
 	}
-	xBytes, err := jsonutils.ExtractAndDecodeBase64urlString(jwk, "x")
+	xBytes, err := KeyMember(jwk, "x", "an X25519 jwk", jose_errors.ErrInvalidPublicKey, jsonutils.ExtractAndDecodeBase64urlString)
 	if err != nil {
-		return nil, fmt.Errorf("error extracting 'x' parameter from jwk: %w", err)
+		return nil, err
 	}
 	return x25519PublicKey(xBytes, jose_errors.ErrInvalidPublicKey)
 }
@@ -430,9 +434,9 @@ func X25519PrivateKeyFromJwk(jwk map[string]any) (*ecdh.PrivateKey, error) {
 	if err := requireOKPSubtype(jwk, "X25519", jose_errors.ErrInvalidPrivateKey); err != nil {
 		return nil, err
 	}
-	xBytes, err := jsonutils.ExtractAndDecodeBase64urlString(jwk, "x")
+	xBytes, err := PrivateMember(jwk, "x", "an X25519 private key jwk", jsonutils.ExtractAndDecodeBase64urlString)
 	if err != nil {
-		return nil, fmt.Errorf("error extracting 'x' parameter from jwk: %w", err)
+		return nil, err
 	}
 	dBytes, err := PrivateMember(jwk, "d", "an X25519 private key jwk", jsonutils.ExtractAndDecodeBase64urlString)
 	if err != nil {
@@ -536,9 +540,9 @@ func EdDSAPublicKeyFromJwk(jwk map[string]any) (ed25519.PublicKey, error) {
 		return nil, err
 	}
 
-	xBytes, err := jsonutils.ExtractAndDecodeBase64urlString(jwk, "x")
+	xBytes, err := KeyMember(jwk, "x", "an Ed25519 jwk", jose_errors.ErrInvalidPublicKey, jsonutils.ExtractAndDecodeBase64urlString)
 	if err != nil {
-		return nil, fmt.Errorf("error extracting 'x' parameter from jwk: %w", err)
+		return nil, err
 	}
 
 	if err := CheckEd25519PublicKey(xBytes, jose_errors.ErrInvalidPublicKey); err != nil {
@@ -553,9 +557,9 @@ func EdDSAPrivateKeyFromJwk(jwk map[string]any) (ed25519.PrivateKey, error) {
 		return nil, err
 	}
 
-	xBytes, err := jsonutils.ExtractAndDecodeBase64urlString(jwk, "x")
+	xBytes, err := PrivateMember(jwk, "x", "an Ed25519 private key jwk", jsonutils.ExtractAndDecodeBase64urlString)
 	if err != nil {
-		return nil, fmt.Errorf("error extracting 'x' parameter from jwk: %w", err)
+		return nil, err
 	}
 
 	dBytes, err := PrivateMember(jwk, "d", "an Ed25519 private key jwk", jsonutils.ExtractAndDecodeBase64urlString)
@@ -589,12 +593,11 @@ func EdDSAPrivateKeyFromJwk(jwk map[string]any) (ed25519.PrivateKey, error) {
 // them and its CRT values. A key with no primes whose modulus is not two
 // primes is refused, and so is any key whose modulus is over
 // MaximumRSAModulusBits, before its private members are checked. A
-// refusal for "n" or "e" carries ErrInvalidPrivateKey and wraps the public key
-// error.
+// refusal for "n" or "e" carries ErrInvalidPrivateKey, as every refusal does.
 func RSAPrivateKeyFromJwk(jwk map[string]any) (*rsa.PrivateKey, error) {
-	publicKey, err := RSAPublicKeyFromJwk(jwk)
+	publicKey, err := readRSAPublicKey(jwk, jose_errors.ErrInvalidPrivateKey)
 	if err != nil {
-		return nil, fmt.Errorf("%wthe public members of an RSA private jwk are not a public key: %w", jose_errors.ErrInvalidPrivateKey, err)
+		return nil, err
 	}
 
 	dBytes, err := PrivateMember(jwk, "d", "an RSA private key jwk", extractBase64urlUInt)
@@ -603,14 +606,16 @@ func RSAPrivateKeyFromJwk(jwk map[string]any) (*rsa.PrivateKey, error) {
 	}
 
 	if jsonutils.KeyPresent(jwk, "oth") {
-		return nil, fmt.Errorf("%wan RSA jwk with more than two primes is not supported", jose_errors.ErrInvalidPrivateKey)
+		return nil, fmt.Errorf("%wan RSA jwk that carries 'oth' is refused, as this library reads a key of exactly two primes", jose_errors.ErrInvalidPrivateKey)
 	}
 
+	primeMembers := []string{"p", "q", "dp", "dq", "qi"}
 	pPresent := jsonutils.KeyPresent(jwk, "p")
-	for _, v := range []string{"q", "dp", "dq", "qi"} {
-		present := jsonutils.KeyPresent(jwk, v)
-		if present != pPresent {
-			return nil, fmt.Errorf("%wmalformed RSA jwk - refer to text in section 6.3.2 of RFC 7518 for explanation", jose_errors.ErrInvalidPrivateKey)
+	if slices.ContainsFunc(primeMembers, func(name string) bool { return jsonutils.KeyPresent(jwk, name) }) {
+		for _, name := range primeMembers {
+			if !jsonutils.KeyPresent(jwk, name) {
+				return nil, fmt.Errorf("%w%wan RSA private key jwk that carries any of 'p', 'q', 'dp', 'dq' and 'qi' must carry all of them (RFC 7518 section 6.3.2), and it lacks '%s'", jose_errors.ErrInvalidPrivateKey, jose_errors.ErrMissingClaim, name)
+			}
 		}
 	}
 
@@ -628,10 +633,10 @@ func RSAPrivateKeyFromJwk(jwk map[string]any) (*rsa.PrivateKey, error) {
 	}
 
 	members := map[string]*big.Int{}
-	for _, v := range []string{"p", "q", "dp", "dq", "qi"} {
-		b, err := extractBase64urlUInt(jwk, v)
+	for _, v := range primeMembers {
+		b, err := PrivateMember(jwk, v, "an RSA private key jwk", extractBase64urlUInt)
 		if err != nil {
-			return nil, fmt.Errorf("error extracting '%s' parameter from jwk: %w", v, err)
+			return nil, err
 		}
 		members[v] = new(big.Int).SetBytes(b)
 	}
@@ -672,26 +677,30 @@ func extractBase64urlUInt(jwk map[string]any, name string) ([]byte, error) {
 // RFC 3447 section 3.1 makes n a product of primes, so an "n" of zero is
 // refused.
 func RSAPublicKeyFromJwk(jwk map[string]any) (*rsa.PublicKey, error) {
-	nBytes, err := extractBase64urlUInt(jwk, "n")
+	return readRSAPublicKey(jwk, jose_errors.ErrInvalidPublicKey)
+}
+
+func readRSAPublicKey(jwk map[string]any, class error) (*rsa.PublicKey, error) {
+	nBytes, err := KeyMember(jwk, "n", "an RSA jwk", class, extractBase64urlUInt)
 	if err != nil {
-		return nil, fmt.Errorf("error extracting 'n' parameter from jwk: %w", err)
+		return nil, err
 	}
 
-	eBytes, err := extractBase64urlUInt(jwk, "e")
+	eBytes, err := KeyMember(jwk, "e", "an RSA jwk", class, extractBase64urlUInt)
 	if err != nil {
-		return nil, fmt.Errorf("error extracting 'e' parameter from jwk: %w", err)
+		return nil, err
 	}
 
 	e := new(big.Int).SetBytes(eBytes)
 	if e.BitLen() > 31 {
-		return nil, fmt.Errorf("%wthe 'e' of an RSA jwk is an odd integer from 3 to 2^31-1", jose_errors.ErrInvalidPublicKey)
+		return nil, fmt.Errorf("%wthe 'e' of an RSA jwk is an odd integer from 3 to 2^31-1", class)
 	}
 
 	publicKey := &rsa.PublicKey{
 		N: new(big.Int).SetBytes(nBytes),
 		E: int(e.Int64()),
 	}
-	if err := checkRSAPublicKey(publicKey, jose_errors.ErrInvalidPublicKey); err != nil {
+	if err := checkRSAPublicKey(publicKey, class); err != nil {
 		return nil, err
 	}
 	return publicKey, nil
@@ -810,17 +819,23 @@ func ProduceMac(h hash.Hash, digest []byte) []byte {
 	return h.Sum(nil)
 }
 
-// PrivateMember reads the private member name of a jwk with read, and refuses
-// it with ErrInvalidPrivateKey. A member that is absent also matches
-// ErrMissingClaim, and one that read refuses keeps the sentinel read gives
-// it. keyJwk names the jwk in the message, such as "an RSA private key jwk".
+// PrivateMember reads the private member name of a jwk as KeyMember does, and
+// refuses it with ErrInvalidPrivateKey.
 func PrivateMember(jwk map[string]any, name, keyJwk string, read func(map[string]any, string) ([]byte, error)) ([]byte, error) {
+	return KeyMember(jwk, name, keyJwk, jose_errors.ErrInvalidPrivateKey, read)
+}
+
+// KeyMember reads the member name of a jwk with read, and refuses it with class,
+// ErrInvalidPublicKey or ErrInvalidPrivateKey. A member that is absent also
+// matches ErrMissingClaim, and one that read refuses keeps the sentinel read
+// gives it. keyJwk names the jwk in the message, such as "an RSA private key jwk".
+func KeyMember(jwk map[string]any, name, keyJwk string, class error, read func(map[string]any, string) ([]byte, error)) ([]byte, error) {
 	value, err := read(jwk, name)
 	if errors.Is(err, jose_errors.ErrMissingClaim) {
-		return nil, fmt.Errorf("%w%s must carry '%s': %w", jose_errors.ErrInvalidPrivateKey, keyJwk, name, err)
+		return nil, fmt.Errorf("%w%s must carry '%s': %w", class, keyJwk, name, err)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("%wthe '%s' of %s is malformed: %w", jose_errors.ErrInvalidPrivateKey, name, keyJwk, err)
+		return nil, fmt.Errorf("%wthe '%s' of %s is malformed: %w", class, name, keyJwk, err)
 	}
 	return value, nil
 }
