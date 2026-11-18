@@ -14,6 +14,7 @@ import (
 	"encoding/asn1"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/internal/jose/header"
 	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
@@ -119,7 +120,9 @@ func New(signer crypto.Signer, head, body map[string]any, opts Opts) (*string, e
 //
 // A token of five segments is a JWE (RFC 7516 section 9). It is decrypted with
 // jwe.Decrypt, decrypters and jweOpts, with the errors Decrypt returns; with no
-// decrypters it is refused with ErrUnsupportedAlgorithm. Then, as section 7.2
+// decrypters it is refused with ErrUnsupportedAlgorithm. A token of five
+// segments whose protected header is not a JSON object with an "enc" member is
+// not a JWE, and is refused with ErrMalformedToken. Then, as section 7.2
 // step 8 requires:
 //   - If the JWE's "cty" is "JWT" (section 5.2), the plaintext is a Nested JWT. It
 //     is verified as a token of three segments is. A JWE nested in the JWE is
@@ -169,16 +172,14 @@ func New(signer crypto.Signer, head, body map[string]any, opts Opts) (*string, e
 // and calls CheckOptions, so options that are wrong whatever the token are
 // refused with ErrInvalidOptions too.
 //
-// With decrypters and a nil outOfBoundsPublicKey, an encrypt-only JWT can
-// still pass, so the options are not wrong. A JWS, signed alone or nested, is
-// then refused as the token's fault: ErrInvalidSignature, matching
-// ErrNoKeyIdentifierMatch, unless a member of opts.KeySet or a key the token
-// names verifies it.
+// With decrypters and a nil outOfBoundsPublicKey, a JWS, signed alone or
+// nested, that no key verifies is refused as the token's fault:
+// ErrInvalidSignature, matching ErrNoKeyIdentifierMatch.
 func Validate(ctx context.Context, token string, outOfBoundsPublicKey model.Retriever, decrypters []model.Decrypter, opts *model.JoseOptions, jweOpts *model.JWEOptions) (*Token, error) {
 	if ctx == nil {
 		return nil, fmt.Errorf("%wthe context passed is nil", joseerror.ErrInvalidOptions)
 	}
-	if err := CheckOptions(opts, decrypters, jweOpts); err != nil {
+	if err := CheckOptions(outOfBoundsPublicKey, decrypters, opts, jweOpts); err != nil {
 		return nil, err
 	}
 	if outOfBoundsPublicKey == nil && len(decrypters) > 0 && (opts == nil || opts.KeySet == nil) {
@@ -199,16 +200,48 @@ func Validate(ctx context.Context, token string, outOfBoundsPublicKey model.Retr
 
 // CheckOptions refuses, with ErrInvalidOptions, options that are wrong whatever
 // the token: an empty string in opts.ExpectedAudience, ExpectedIssuer or
-// RequiredClaims, what jws.CheckOptions refuses of opts, and what
-// jwe.CheckOptions refuses of decrypters and jweOpts. Validate calls it before
-// reading the token, so a caller can call it once at startup instead. A nil
-// retriever that no token key can stand in for is refused by Validate alone,
-// after the header is checked.
-func CheckOptions(opts *model.JoseOptions, decrypters []model.Decrypter, jweOpts *model.JWEOptions) error {
+// RequiredClaims, what jws.CheckOptions refuses of opts, what jwe.CheckOptions
+// refuses of decrypters and jweOpts, and arguments under which no token can
+// pass. Validate calls it with its own arguments before reading the token, so
+// a caller can call it once at startup instead.
+//
+// No token can pass when opts.RequireEncryptedJWT is set and no decrypter
+// implements a key management alg that jweOpts.AllowedKeyManagementAlgorithms
+// permits. Nor can one pass when outOfBoundsPublicKey is nil and none of
+// opts.KeySet, UseTokenProvidedKeys and X509Roots is set, so no key can verify
+// a signature, unless an encrypt-only JWT can pass. Those three supply no HMAC
+// key, so with opts.AllowedSigningAlgorithms naming only HS256, HS384 or HS512
+// they count as unset. That needs a permitted
+// decrypter, opts.RequireSignedJWT unset, and either a decrypter for dir, an AES
+// key wrap or PBES2, or jweOpts.AllowUnauthenticatedJWT set.
+func CheckOptions(outOfBoundsPublicKey model.Retriever, decrypters []model.Decrypter, opts *model.JoseOptions, jweOpts *model.JWEOptions) error {
 	if err := validateOptions(opts); err != nil {
 		return err
 	}
-	return jwe.CheckOptions(decrypters, jweOpts)
+	if err := jwe.CheckOptions(decrypters, jweOpts); err != nil {
+		return err
+	}
+	permitted := slices.DeleteFunc(slices.Clone(decrypters), func(decrypter model.Decrypter) bool {
+		return !slices.Contains(header.KeyManagementAlgorithms, decrypter.Alg()) || jweOpts != nil && len(jweOpts.AllowedKeyManagementAlgorithms) > 0 && !slices.Contains(jweOpts.AllowedKeyManagementAlgorithms, decrypter.Alg())
+	})
+	if opts != nil && opts.RequireEncryptedJWT && len(permitted) == 0 {
+		return fmt.Errorf("%wRequireEncryptedJWT is set and no decrypter implements a permitted alg, so no token can pass", joseerror.ErrInvalidOptions)
+	}
+	tokenKeySources := opts != nil && (opts.KeySet != nil || opts.UseTokenProvidedKeys || opts.X509Roots != nil)
+	hmacOnly := tokenKeySources && onlyHMAC(opts.AllowedSigningAlgorithms)
+	if outOfBoundsPublicKey != nil || tokenKeySources && !hmacOnly {
+		return nil
+	}
+	encryptOnly := (opts == nil || !opts.RequireSignedJWT) && slices.ContainsFunc(permitted, func(decrypter model.Decrypter) bool {
+		return slices.Contains(senderAuthenticatingEncryption, decrypter.Alg()) || jweOpts != nil && jweOpts.AllowUnauthenticatedJWT
+	})
+	if encryptOnly {
+		return nil
+	}
+	if hmacOnly {
+		return fmt.Errorf("%wAllowedSigningAlgorithms names only HMAC algorithms, and KeySet, UseTokenProvidedKeys and X509Roots supply no HMAC key, so no signature can verify, and no encrypt-only JWT can pass; pass a retriever that returns an HMAC signer's Public", joseerror.ErrInvalidOptions)
+	}
+	return fmt.Errorf("%wno retriever or KeySet was given and no key the token names is allowed, so no signature can verify, and no encrypt-only JWT can pass; pass a retriever, or set KeySet, UseTokenProvidedKeys or X509Roots", joseerror.ErrInvalidOptions)
 }
 
 func validateSigned(ctx context.Context, token string, outOfBoundsPublicKey model.Retriever, opts *model.JoseOptions, result *Token) (*Token, error) {
@@ -224,7 +257,13 @@ func validateSigned(ctx context.Context, token string, outOfBoundsPublicKey mode
 }
 
 func validateEncrypted(ctx context.Context, token string, outOfBoundsPublicKey model.Retriever, decrypters []model.Decrypter, opts *model.JoseOptions, jweOpts *model.JWEOptions) (*Token, error) {
+	if !namesJWE(token) {
+		return nil, fmt.Errorf("%wa token of five segments is a JWE, whose protected header is a base64url JSON object with an 'enc' member (RFC 7516 section 9)", joseerror.ErrMalformedToken)
+	}
 	if len(decrypters) == 0 {
+		if _, _, _, err := jwe.Decrypt(ctx, token, nil, jweOpts); err != nil && !errors.Is(err, joseerror.ErrDecryptionFailed) {
+			return nil, fmt.Errorf("failed to decrypt jwe compact serialization: %w", err)
+		}
 		return nil, fmt.Errorf("%wthe token has the five segments of a JWE, and no decrypters were given to decrypt it", joseerror.ErrUnsupportedAlgorithm)
 	}
 	unverified, err := jwe.ParseHeader(token, jweOpts)
@@ -249,7 +288,7 @@ func validateEncrypted(ctx context.Context, token string, outOfBoundsPublicKey m
 	}
 	result := &Token{EncryptionHeader: head, Decrypter: decrypter}
 	if nested {
-		if strings.Count(string(plaintext), ".") == 4 {
+		if strings.Count(string(plaintext), ".") == 4 && namesJWE(string(plaintext)) {
 			return nil, fmt.Errorf("%wa JWT encrypted inside a JWE is not supported: the plaintext is a JWE", joseerror.ErrUnsupportedAlgorithm)
 		}
 		return validateSigned(ctx, string(plaintext), outOfBoundsPublicKey, opts, result)
@@ -264,6 +303,19 @@ func validateEncrypted(ctx context.Context, token string, outOfBoundsPublicKey m
 	}
 	result.Claims = body
 	return result, nil
+}
+
+func onlyHMAC(allowed []jwa.Algorithm) bool {
+	return len(allowed) > 0 && !slices.ContainsFunc(allowed, func(alg jwa.Algorithm) bool {
+		return alg != jwa.HS256 && alg != jwa.HS384 && alg != jwa.HS512
+	})
+}
+
+func namesJWE(token string) bool {
+	protected, _, _ := strings.Cut(token, ".")
+	head, err := jsonutils.DecodeBase64urlMap(protected)
+	_, hasEnc := head["enc"]
+	return err == nil && hasEnc
 }
 
 func noSigningKeys() ([]crypto.PublicKey, error) {
@@ -289,11 +341,22 @@ func checkUnsigned(head map[string]any, opts *model.JoseOptions, jweOpts *model.
 // signedJWT must be a JWS Compact Serialization of three base64url segments
 // whose header is a JSON object, else ErrMalformedToken, and whose "alg" is a
 // signature algorithm this library implements, else ErrUnsupportedAlgorithm: an
-// "alg" of "none" is not a signature (RFC 8725 section 3.1). The signature is
-// not verified. A "cty" in head that does not name "JWT" is refused with
-// ErrMalformedClaim. head is not modified.
+// "alg" of "none" is not a signature (RFC 8725 section 3.1). An absent or
+// non-string "alg" is ErrMalformedToken with ErrMissingClaim or
+// ErrMalformedClaim, as Validate reports it. Its header is held to the rules
+// Validate applies to the header's shape whatever the options, and its payload
+// must be a JSON object, the claims set, else ErrMalformedToken. A JWE passed as
+// signedJWT is a JWT encrypted inside a JWE, which this library does not
+// implement, so it is ErrUnsupportedAlgorithm. A header whose "cty" names "JWT" signs a JWT, not a claims
+// set: that is valid RFC 7519 this library does not implement, and is refused
+// with ErrUnsupportedAlgorithm. The signature is not verified. A "cty" in head
+// that does not name "JWT" is refused with ErrMalformedClaim. head is not
+// modified.
 func Encrypt(encrypter model.Encrypter, enc jwa.Encryption, signedJWT string, head map[string]any) (string, error) {
 	segments := strings.SplitN(signedJWT, ".", 4)
+	if strings.Count(signedJWT, ".") == 4 && namesJWE(signedJWT) {
+		return "", fmt.Errorf("%wa JWT encrypted inside a JWE is not supported: the token passed is a JWE", joseerror.ErrUnsupportedAlgorithm)
+	}
 	if len(segments) != 3 {
 		return "", fmt.Errorf("%wa signed JWT has three segments, got %d", joseerror.ErrMalformedToken, strings.Count(signedJWT, ".")+1)
 	}
@@ -301,13 +364,28 @@ func Encrypt(encrypter model.Encrypter, enc jwa.Encryption, signedJWT string, he
 	if err != nil {
 		return "", fmt.Errorf("%wthe signed JWT's header is not a base64url JSON object: %v", joseerror.ErrMalformedToken, err)
 	}
+	if _, present := signedHead["alg"]; !present {
+		return "", fmt.Errorf("%w%wthe signed JWT's header has no 'alg' (RFC 7515 section 4.1.1)", joseerror.ErrMalformedToken, joseerror.ErrMissingClaim)
+	}
+	if _, isString := signedHead["alg"].(string); !isString {
+		return "", fmt.Errorf("%w%wthe signed JWT's 'alg' is not a string (RFC 7515 section 4.1.1)", joseerror.ErrMalformedToken, joseerror.ErrMalformedClaim)
+	}
 	if name, _ := signedHead["alg"].(string); jwa.GetAlgorithm(name) == jwa.Unknown || isKeyManagement(jwa.GetAlgorithm(name)) {
 		return "", fmt.Errorf("%wthe signed JWT's alg %s is not a signature algorithm this library implements", joseerror.ErrUnsupportedAlgorithm, jsonutils.QuoteBounded(name))
+	}
+	if err := header.CheckHeaderShape(signedHead); err != nil {
+		return "", fmt.Errorf("%wthe signed JWT's header: %w", joseerror.ErrMalformedToken, err)
+	}
+	if header.NamesNestedJWT(signedHead) {
+		return "", fmt.Errorf("%wa JWT signed inside a JWS is not supported: the signed JWT's 'cty' header names JWT", joseerror.ErrUnsupportedAlgorithm)
 	}
 	for _, segment := range segments[1:] {
 		if _, err := jsonutils.DecodeBase64url(segment); err != nil {
 			return "", fmt.Errorf("%wthe signed JWT has a segment that is not base64url: %v", joseerror.ErrMalformedToken, err)
 		}
+	}
+	if _, err := jsonutils.DecodeBase64urlMap(segments[1]); err != nil {
+		return "", fmt.Errorf("%wthe signed JWT's payload is not a claims set, a JSON object: %v", joseerror.ErrMalformedToken, err)
 	}
 	h := maps.Clone(head)
 	if h == nil {

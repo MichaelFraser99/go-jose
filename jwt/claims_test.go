@@ -364,7 +364,7 @@ func TestCheckOptions_RefusesWhatValidateRefusesBeforeReadingTheToken(t *testing
 		"a JWS alg in AllowedKeyManagementAlgorithms": {jweOpts: &model.JWEOptions{AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.ES256}}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if err := CheckOptions(tt.opts, tt.decrypters, tt.jweOpts); !errors.Is(err, joseerror.ErrInvalidOptions) {
+			if err := CheckOptions(nil, tt.decrypters, tt.opts, tt.jweOpts); !errors.Is(err, joseerror.ErrInvalidOptions) {
 				t.Errorf("[RFC 7519 4.1, RFC 8725 3.1] %s can match no token, so CheckOptions must refuse it with ErrInvalidOptions, got %v", name, err)
 			}
 			if _, err := Validate(context.Background(), "a.b.c", nil, tt.decrypters, tt.opts, tt.jweOpts); !errors.Is(err, joseerror.ErrInvalidOptions) {
@@ -381,7 +381,7 @@ func TestCheckOptions_RefusesWhatValidateRefusesBeforeReadingTheToken(t *testing
 			RequiredClaims:   []string{"exp", "tenant"},
 		},
 	} {
-		if err := CheckOptions(opts, nil, nil); err != nil {
+		if err := CheckOptions(newTestRetriever(nil), nil, opts, nil); err != nil {
 			t.Errorf("[RFC 7519 4.1] %s can be met by a token, so CheckOptions must accept them, got %v", name, err)
 		}
 	}

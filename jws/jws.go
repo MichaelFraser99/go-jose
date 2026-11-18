@@ -77,7 +77,7 @@ func verify(ctx context.Context, compactSerialization string, outOfBoundsPublicK
 	}
 	components := strings.SplitN(compactSerialization, ".", 4)
 	if len(components) != 3 {
-		return nil, nil, nil, fmt.Errorf("%winvalid compact serialization format", joseerror.ErrMalformedToken)
+		return nil, nil, nil, fmt.Errorf("%wa JWS Compact Serialization has three segments, got %d", joseerror.ErrMalformedToken, strings.Count(compactSerialization, ".")+1)
 	}
 
 	protectedHeader, err = jsonutils.DecodeBase64urlMap(components[0])
