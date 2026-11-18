@@ -38,6 +38,11 @@ func (v Validator) Public() crypto.PublicKey {
 	return slices.Clone(v.secret)
 }
 
+// Format prints the algorithm of the validator, never its key, for every verb.
+func (v Validator) Format(f fmt.State, _ rune) {
+	common.FormatKeyHolder(f, v.alg, "validator")
+}
+
 // MinimumSecretBytes is the smallest secret HS384 may be keyed with: RFC 7518
 // section 3.2 requires at least the hash output size.
 const MinimumSecretBytes = 48
@@ -83,6 +88,11 @@ func NewValidator(publicKey crypto.PublicKey) (*Validator, error) {
 
 func (signer *Signer) Alg() jwa.Algorithm {
 	return signer.alg
+}
+
+// Format prints the algorithm of the signer, never its key, for every verb.
+func (signer *Signer) Format(f fmt.State, _ rune) {
+	common.FormatKeyHolder(f, signer.Alg(), "signer")
 }
 
 func (signer *Signer) Public() crypto.PublicKey {

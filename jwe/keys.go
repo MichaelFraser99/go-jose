@@ -3,6 +3,7 @@ package jwe
 import (
 	"crypto"
 	"fmt"
+	"io"
 	"slices"
 
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
@@ -45,6 +46,11 @@ func (d *directDecrypter) Public() crypto.PublicKey {
 	return DirectKey{Key: slices.Clone(d.key.Key), Enc: d.key.Enc}
 }
 
+// Format prints the enc a DirectKey is bound to, never its key, for every verb.
+func (k DirectKey) Format(f fmt.State, _ rune) {
+	_, _ = fmt.Fprintf(f, "jwe.DirectKey for %s", k.Enc)
+}
+
 // PasswordKey is the key for PBES2-HS256+A128KW, PBES2-HS384+A192KW and
 // PBES2-HS512+A256KW: a password, as octets, and the PBKDF2 iteration count to
 // encrypt with (RFC 7518 section 4.8). A text password must be its UTF-8
@@ -79,6 +85,11 @@ type passwordDecrypter struct {
 
 func (p *passwordDecrypter) Public() crypto.PublicKey {
 	return PasswordKey{Password: slices.Clone(p.key.Password), Count: p.key.Count}
+}
+
+// Format prints "jwe.PasswordKey" for every verb, never the password.
+func (k PasswordKey) Format(f fmt.State, _ rune) {
+	_, _ = io.WriteString(f, "jwe.PasswordKey")
 }
 
 // GetEncrypter returns an Encrypter for the key management algorithm alg.

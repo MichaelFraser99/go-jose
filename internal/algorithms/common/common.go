@@ -22,6 +22,7 @@ import (
 
 	"github.com/MichaelFraser99/go-jose/internal/jose/jsonutils"
 	jose_errors "github.com/MichaelFraser99/go-jose/joseerror"
+	"github.com/MichaelFraser99/go-jose/jwa"
 )
 
 type SecretKey []byte
@@ -44,6 +45,17 @@ func (s SecretKey) Equal(x crypto.PublicKey) bool {
 	default:
 		return false
 	}
+}
+
+// Format prints "HMAC secret" for every verb, never the secret.
+func (s SecretKey) Format(f fmt.State, _ rune) {
+	_, _ = io.WriteString(f, "HMAC secret")
+}
+
+// FormatKeyHolder prints alg and role, such as "HS256 signer", for every verb,
+// so that printing a value that holds key material never prints the key.
+func FormatKeyHolder(f fmt.State, alg jwa.Algorithm, role string) {
+	_, _ = fmt.Fprintf(f, "%s %s", alg, role)
 }
 
 // ECDSAPrivateKeyFromJwk reads the jwk of an ECDSA private key.

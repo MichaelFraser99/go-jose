@@ -129,6 +129,11 @@ func (decrypter *Decrypter) Alg() jwa.Algorithm {
 	return decrypter.alg
 }
 
+// Format prints the algorithm of the decrypter, never its key, for every verb.
+func (decrypter *Decrypter) Format(f fmt.State, _ rune) {
+	common.FormatKeyHolder(f, decrypter.Alg(), "decrypter")
+}
+
 func (decrypter *Decrypter) Public() crypto.PublicKey {
 	return keycopy.RSAPublicKey(decrypter.publicKey)
 }

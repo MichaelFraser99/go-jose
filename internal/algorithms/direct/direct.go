@@ -10,6 +10,7 @@ import (
 	"io"
 	"slices"
 
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/contentenc"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
@@ -77,6 +78,11 @@ func (encrypter *Encrypter) Alg() jwa.Algorithm {
 	return jwa.Dir
 }
 
+// Format prints the algorithm of the encrypter, never its key, for every verb.
+func (encrypter *Encrypter) Format(f fmt.State, _ rune) {
+	common.FormatKeyHolder(f, encrypter.Alg(), "encrypter")
+}
+
 // Public returns a copy of the Key, which GetDecrypter accepts.
 func (encrypter *Encrypter) Public() crypto.PublicKey {
 	return encrypter.key.clone()
@@ -94,6 +100,11 @@ func (encrypter *Encrypter) WrapKey(_ io.Reader, enc jwa.Encryption, header map[
 
 func (decrypter *Decrypter) Alg() jwa.Algorithm {
 	return jwa.Dir
+}
+
+// Format prints the algorithm of the decrypter, never its key, for every verb.
+func (decrypter *Decrypter) Format(f fmt.State, _ rune) {
+	common.FormatKeyHolder(f, decrypter.Alg(), "decrypter")
 }
 
 // Public returns a copy of the Key.

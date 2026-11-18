@@ -92,6 +92,11 @@ func (encrypter *Encrypter) Alg() jwa.Algorithm {
 	return encrypter.alg
 }
 
+// Format prints the algorithm of the encrypter, never its key, for every verb.
+func (encrypter *Encrypter) Format(f fmt.State, _ rune) {
+	common.FormatKeyHolder(f, encrypter.Alg(), "encrypter")
+}
+
 func (encrypter *Encrypter) Public() crypto.PublicKey {
 	return common.SecretKey(slices.Clone(encrypter.kek))
 }
@@ -131,6 +136,11 @@ func (encrypter *Encrypter) WrapKey(rand io.Reader, enc jwa.Encryption, header m
 
 func (decrypter *Decrypter) Alg() jwa.Algorithm {
 	return decrypter.alg
+}
+
+// Format prints the algorithm of the decrypter, never its key, for every verb.
+func (decrypter *Decrypter) Format(f fmt.State, _ rune) {
+	common.FormatKeyHolder(f, decrypter.Alg(), "decrypter")
 }
 
 func (decrypter *Decrypter) Public() crypto.PublicKey {

@@ -69,6 +69,11 @@ func (signer *Signer) Alg() jwa.Algorithm {
 	return signer.alg
 }
 
+// Format prints the algorithm of the signer, never its key, for every verb.
+func (signer *Signer) Format(f fmt.State, _ rune) {
+	common.FormatKeyHolder(f, signer.Alg(), "signer")
+}
+
 func (signer *Signer) Public() crypto.PublicKey {
 	return signer.privateKey.Public()
 }

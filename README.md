@@ -717,7 +717,7 @@ Both functions take a `*model.JWEOptions` as the last argument, and it can be ni
 
 A refused JWK gives `ErrInvalidPublicKey` from `GetEncrypterFromJwk` and `ErrInvalidPrivateKey` from `GetDecrypterFromJwk`. A JWK cannot hold a `dir` key, because no JWK member names the `enc` that the key is bound to. For `dir`, build a `jwe.DirectKey`.
 
-CAUTION: Do not log or publish what `Public()` returns for an `A128KW` to `A256KW`, `A128GCMKW` to `A256GCMKW`, PBES2 or `dir` encrypter or decrypter. A shared key or password has no public half, so `Public()` returns the secret itself, as it does for an HMAC signer.
+CAUTION: Do not log or publish what `Public()` returns for an `A128KW` to `A256KW`, `A128GCMKW` to `A256GCMKW`, PBES2 or `dir` encrypter or decrypter. A shared key or password has no public half, so `Public()` returns the secret itself, as it does for an HMAC signer. Printing that value with `fmt` does not show the secret, but its `Key` or `Password` field holds it.
 
 With `ECDH-ES`, the key that the two parties agree is the content encryption key, and the encrypted key is empty. With `ECDH-ES+A128KW` to `ECDH-ES+A256KW`, the agreed key wraps a random content encryption key. `Encrypt` makes a new ephemeral key for each token, as RFC 7518 section 4.6 requires, and writes its public half to the `epk` header. Do not set `epk` yourself: `Encrypt` refuses it with `ErrMalformedClaim`.
 
@@ -934,6 +934,8 @@ Build `jweOpts` for each request, as above, because the hook writes to a variabl
 
 CAUTION: Do not send an error message to the sender of a token. A message can hold parser detail, Go type names, your configuration and text from the token. Send a fixed message, and log the error on your side.
 
+Printing a signer, validator, encrypter or decrypter with `fmt` shows its algorithm and role, such as `HS256 signer`, and never its key. This holds for every verb, `%#v` included, so a log line that prints one does not leak its key. Printing what `Public()` returns for an HMAC signer shows `HMAC secret`. Printing a `jwe.DirectKey` shows the `enc` it is bound to, and printing a `jwe.PasswordKey` shows its type name only.
+
 Each sentinel carries a prefix terminated by `": "`, so wrap one with `%w` immediately followed by the rest of the message and no space:
 
 ```go
@@ -1025,6 +1027,8 @@ A JWS whose `cty` is `JWT`, that is a JWT signed inside another JWS, is refused 
 A JWE `alg` cannot sign. `jws.GetSigner`, `jws.GetSignerFromPrivateKey`, `jws.GetSignerFromJwk`, `jws.GetValidator`, `jws.GetValidatorFromJwk` and `jwt.New` refuse one with `ErrUnsupportedAlgorithm`.
 
 `jwa.GetAlgorithm` now resolves the JWE names, such as `"RSA-OAEP"` and `"dir"`. If your code reads `jwa.GetAlgorithm(name) != jwa.Unknown` as "a signature algorithm", that test is no longer correct. Ask for a signer or validator instead: both refuse a JWE `alg`.
+
+Printing a signer, validator, encrypter or decrypter with `fmt` now shows its algorithm and role, never its key. In v0.11.0, `%v` on an HMAC signer or validator printed its secret, and `%v` on an Ed25519 signer printed its private key. If you printed one of these to read its key, use `jwk.PrivateJwk` on a key you hold instead.
 
 ## Upgrading from 0.10.x
 
