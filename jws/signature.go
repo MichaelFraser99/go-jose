@@ -28,13 +28,16 @@ import (
 
 var errSignWithEdDSA = fmt.Errorf("%wEdDSA is accepted only for verification: RFC 9864 section 4.1.2 deprecates it, so sign with Ed25519", joseerror.ErrUnsupportedAlgorithm)
 
-// GetSigner
-//
-// # Returns a Signer implementation for the given algorithm complete with generated keypair
-//
-// alg - Determines which signer type gets returned
-//
-// opts - Extra options object to control additional algorithm specific behaviour. BitSize determines the size of key to be returned for RSA keys - if none specified defaults to 2048. SecretKey is used to define a secret key value for HMAC algorithms
+// GetSigner returns a signer for alg with a newly generated key: an EC key on
+// the curve alg names, an RSA key of opts.BitSize bits (2048 when unset), an
+// Ed25519 key or an ML-DSA key. For HS256, HS384 and HS512 it signs with
+// opts.SecretKey, which is required and must be at least the hash output size
+// (RFC 7518 section 3.2). EdDSA is refused, as RFC 9864 section 4.1.2 deprecates
+// it: sign with Ed25519. Of a key it generates, the signer gives only the public
+// half, through Public, so a generated key lasts only as long as the signer. An
+// HMAC signer's Public returns the secret the caller passed. To keep a key,
+// generate it yourself, save it with jwk.PrivateJwk, and build the signer with
+// GetSignerFromPrivateKey or GetSignerFromJwk.
 func GetSigner(alg jwa.Algorithm, opts *model.Opts) (model.Signer, error) {
 	var s model.Signer
 	var err error
@@ -132,7 +135,7 @@ func GetSignerFromPrivateKey(alg jwa.Algorithm, privateKey crypto.PrivateKey) (m
 	case jwa.PS512:
 		s, err = ps512.NewSignerFromPrivateKey(privateKey)
 	case jwa.HS256, jwa.HS384, jwa.HS512:
-		return nil, fmt.Errorf("%wHMAC Signers cannot be created this way - please use GetSigner and specify the secret key using the Opts function", joseerror.ErrUnsupportedAlgorithm)
+		return nil, fmt.Errorf("%wHMAC signers take their secret through GetSigner, in model.Opts.SecretKey, or through GetSignerFromJwk, as an oct jwk", joseerror.ErrUnsupportedAlgorithm)
 	case jwa.Ed25519:
 		s, err = eddsa.NewSignerFromPrivateKey(privateKey)
 	case jwa.MLDSA44, jwa.MLDSA65, jwa.MLDSA87:

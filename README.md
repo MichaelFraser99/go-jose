@@ -105,7 +105,7 @@ func GetAlgorithm(alg string) Algorithm
 `GetAlgorithm` returns the algorithm a name identifies, and `Unknown` if no algorithm has that name. The comparison is case sensitive, because RFC 7515 section 4.1.1 makes the `alg` header value case sensitive.
 
 ## Signers
-To create a Signer, use `jws.GetSigner`. It takes an algorithm and an optional `model.Opts`, and returns a `model.Signer` with a generated key pair. `Opts.BitSize` sets the modulus size for the RSA algorithms. `Opts.SecretKey` carries the secret for the HMAC algorithms, where it is required rather than optional. The example below generates a signer for ES256:
+To create a Signer, use `jws.GetSigner`. It takes an algorithm and an optional `model.Opts`, and returns a `model.Signer` with a generated key pair. `Opts.BitSize` sets the modulus size for the RSA algorithms. `Opts.SecretKey` carries the secret for the HMAC algorithms, where it is required rather than optional. Of a key that `GetSigner` generates, the signer gives only the public half, through `Public`. So a generated key lasts only as long as the signer. An HMAC signer is different: you pass the secret, and its `Public` returns that secret. To keep a key, generate it yourself, save it with `jwk.PrivateJwk`, and build the signer with `GetSignerFromPrivateKey` or `GetSignerFromJwk`. The example below generates a signer for ES256:
 ```go
 signer, err := jws.GetSigner(jwa.ES256, nil)
 ```
@@ -182,7 +182,7 @@ validator, err := jws.GetValidatorFromJwk(jwa.ES256, publicKeyMap, nil)
 // Validate a signature
 validator, err := jws.GetValidator(jwa.ES256, publicKey)
 
-valid, err := validator.ValidateSignature(digest, signature)
+valid, err := validator.ValidateSignature(signingInput, signature)
 ```
 
 Finally, validators expose their PublicKey with the `Public()` method
@@ -241,7 +241,7 @@ head, payload, err := jws.Verify(ctx, token, nil, &model.JoseOptions{KeySet: &ke
 
 The set holds your own keys, so it needs no other option. It does not turn on `UseTokenProvidedKeys`, and a `jwk` or `jku` the token names is still ignored. A member is used for a token only when it passes the rules in [Which keys are selected](#which-keys-are-selected). So the token's `kid` selects among your keys. A member published for another `alg`, of a key type the `alg` cannot use, or marked for another use is skipped. `IgnoreKeyUse` and `StrictKeyOperations` apply as they do to a `jku` set. A member this library cannot read as a public key is skipped, as RFC 7517 section 5 recommends. A member that holds a private key is read for its public half, because the set is your own and RFC 7517 section 5 lets a set hold private keys.
 
-An `oct` member is never used, because a secret key has no public half. To verify an HMAC token, pass a retriever as [Validators](#validators) describes.
+An `oct` member is never used, because a secret key has no public half. To verify an HMAC token, build a signer with the secret, as [Algorithms Supported](#algorithms-supported) describes, and return `signer.Public()` from your retriever.
 
 The selected keys are tried after your retriever's keys and before any key the token names. Each selected key counts towards `MaxKeysTried`. If no member is selected and no other key verifies the token, the error is `ErrInvalidSignature`, which also matches `ErrNoKeyIdentifierMatch`, unless another key source failed. A `KeySet` that is not nil counts as a key source even when it holds no keys. So an empty set refuses every token with that error, a 401, and not with `ErrInvalidOptions`.
 
@@ -331,7 +331,7 @@ A fetch stopped by either limit returns an error that matches `ErrApplicationErr
 - A token whose format or header is wrong reports that fault, because those checks run first.
 - A key that verifies the token while `ctx` is ending still verifies it. Ending `ctx` stops further work, but a signature already checked stays valid. `jwe.Decrypt` does the same.
 
-With no client, `jku` and `x5u` contribute no key. Each member of a `jku` set is judged on its own, as [Which keys are selected](#which-keys-are-selected) describes, and a member this library cannot read is skipped, as RFC 7517 section 5 recommends. A document that is not a JWK Set is refused as a whole: one without a `keys` member, one whose `keys` is null or not an array, and one whose `keys` array holds a number, string, boolean or array. An `x5u` resource is read as the PEM encoding RFC 7515 section 4.1.5 requires. A server that sends raw DER instead is still read: a body that parses as DER certificates is taken as exactly those certificates, and is never searched for PEM text. Any other body is read as PEM text, so a body whose explanatory text is not valid UTF-8 is refused.
+With no client, `jku` and `x5u` contribute no key. Each member of a `jku` set is judged on its own, as [Which keys are selected](#which-keys-are-selected) describes, and a member this library cannot read is skipped, as RFC 7517 section 5 recommends. A document that is not a JWK Set is refused as a whole: one without a `keys` member, one whose `keys` is null or not an array, and one whose `keys` array holds a null, number, string, boolean or array. An `x5u` resource is read as the PEM encoding RFC 7515 section 4.1.5 requires. A server that sends raw DER instead is still read: a body that parses as DER certificates is taken as exactly those certificates, and is never searched for PEM text. Any other body is read as PEM text, so a body whose explanatory text is not valid UTF-8 is refused.
 
 ### Which keys are selected
 
@@ -464,7 +464,8 @@ An RSA private key with no primes is encoded as `n`, `e` and `d`. RFC 7518 secti
 jwkMap, err := jwk.PublicJwk(publicKey)
 
 // From a Signer. Note Public() is a call. Its result is already a pointer
-// for the EC and RSA algorithms, and a value for Ed25519
+// for the EC, RSA and ML-DSA algorithms, and a value for Ed25519. An HMAC
+// signer's Public() is its secret, which PublicJwk refuses
 signer, err := jws.GetSigner(jwa.ES256, nil)
 signerJwkMap, err := jwk.PublicJwk(signer.Public())
 ```
@@ -1053,7 +1054,7 @@ Every change below is a compile error or a silent behaviour change for a consume
 - `model.Jwks.RetrieveByKeyID` returns `[]map[string]any`, every key carrying the `kid` in set order, not one `map[string]any`. It returns an error only when no key carries the `kid`. To keep the old exactly-one meaning, check `len(keys) == 1` and use `keys[0]`.
 - `model.Jwks.Add` with `EnforceUniqueKIDs` refuses a `kid` the set already holds more than once. v0.10.0 added it.
 - `json.Marshal` of an empty `model.Jwks` writes `{"keys":[]}`. v0.10.0 wrote `{"keys":null}`.
-- Decoding JSON into `model.Jwks` refuses a document with no `keys` member, with `"keys": null`, or that is `null`, and reads `keys` only by its exact name. It also refuses an element of the `keys` array that is `null`, and a document that is not UTF-8 or holds an unpaired UTF-16 surrogate escape. v0.10.0 refused an element that was a number, string or array with a plain JSON error. The refusal now matches `ErrKeystoreError`. See [Key sets](#key-sets).
+- Decoding JSON into `model.Jwks` refuses a document with no `keys` member, with `"keys": null`, or that is `null`, and reads `keys` only by its exact name. It also refuses an element of the `keys` array that is `null`, and a document that is not UTF-8 or holds an unpaired UTF-16 surrogate escape. v0.10.0 refused an element that was a number, string, boolean or array with a plain JSON error. The refusal now matches `ErrKeystoreError`. See [Key sets](#key-sets).
 - Every error sentinel's message now ends in `": "`, so it composes with the text that wraps it. A match on an error string breaks. Match with `errors.Is` instead.
 - A header validation error now wraps its cause with `%w`. `errors.Is` matches the inner sentinel, such as `ErrMalformedClaim` or `ErrUnsupportedAlgorithm`, as well as `ErrMalformedToken`.
 - Header errors that echo a token value use double quotes, not single quotes, and cut the value at 64 characters. Match errors with `errors.Is`, not their text.

@@ -12,6 +12,7 @@ import (
 	"github.com/MichaelFraser99/go-jose/jwa"
 	"github.com/MichaelFraser99/go-jose/jws"
 	"github.com/MichaelFraser99/go-jose/model"
+	"strings"
 	"testing"
 )
 
@@ -414,8 +415,8 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 				if err == nil {
 					t.Fatal("error should be thrown when wrong key provided")
 				}
-				if err.Error() != "unsupported algorithm: HMAC Signers cannot be created this way - please use GetSigner and specify the secret key using the Opts function" {
-					t.Errorf("wrong error returned: %s", err.Error())
+				if !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || !strings.Contains(err.Error(), "GetSigner") || !strings.Contains(err.Error(), "GetSignerFromJwk") {
+					t.Errorf("[README Signers] an HMAC signer is refused with ErrUnsupportedAlgorithm, naming GetSigner and GetSignerFromJwk, got %v", err)
 				}
 			},
 		},
@@ -427,8 +428,8 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 				if err == nil {
 					t.Fatal("error should be thrown when wrong key provided")
 				}
-				if err.Error() != "unsupported algorithm: HMAC Signers cannot be created this way - please use GetSigner and specify the secret key using the Opts function" {
-					t.Errorf("wrong error returned: %s", err.Error())
+				if !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || !strings.Contains(err.Error(), "GetSigner") || !strings.Contains(err.Error(), "GetSignerFromJwk") {
+					t.Errorf("[README Signers] an HMAC signer is refused with ErrUnsupportedAlgorithm, naming GetSigner and GetSignerFromJwk, got %v", err)
 				}
 			},
 		},
@@ -440,8 +441,8 @@ func TestGetSignerFromPrivateKey(t *testing.T) {
 				if err == nil {
 					t.Fatal("error should be thrown when wrong key provided")
 				}
-				if err.Error() != "unsupported algorithm: HMAC Signers cannot be created this way - please use GetSigner and specify the secret key using the Opts function" {
-					t.Errorf("wrong error returned: %s", err.Error())
+				if !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || !strings.Contains(err.Error(), "GetSigner") || !strings.Contains(err.Error(), "GetSignerFromJwk") {
+					t.Errorf("[README Signers] an HMAC signer is refused with ErrUnsupportedAlgorithm, naming GetSigner and GetSignerFromJwk, got %v", err)
 				}
 			},
 		},
