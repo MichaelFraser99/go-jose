@@ -95,9 +95,12 @@ func hasValidator(alg jwa.Algorithm) bool {
 // whose "key_ops" lists a value twice, or whose "use" and "key_ops" are not
 // consistent, both of which section 4.3 says MUST NOT happen. "key_ops" may be
 // a []any or a []string.
-// Every refusal carries ErrInvalidPublicKey. To verify with such a key anyway,
-// read it with jwk.PublicFromJwk and pass it to GetValidator, which applies no
-// key-use rule.
+// Every refusal of the jwk carries ErrInvalidPublicKey, except a "kty" or "crv"
+// this library does not implement, which is ErrUnsupportedAlgorithm. An alg
+// that is not a signature algorithm this library implements, such as a JWE alg,
+// is ErrUnsupportedAlgorithm too. To verify with a key whose "use" or "key_ops"
+// is refused, read it with jwk.PublicFromJwk and pass it to GetValidator, which
+// applies no key-use rule.
 //
 // opts - may be nil. With StrictKeyOperations on, a jwk that section 4.3 says
 // SHOULD NOT be published is refused too. IgnoreKeyUse does not apply here.
