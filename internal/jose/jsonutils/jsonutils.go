@@ -32,6 +32,30 @@ func QuoteBounded(value string) string {
 	return strconv.Quote(value)
 }
 
+func checkURICharacters(value string) error {
+	for i := range len(value) {
+		c := value[i]
+		if c == '%' {
+			if i+2 >= len(value) || !isHexDigit(value[i+1]) || !isHexDigit(value[i+2]) {
+				return fmt.Errorf("%w%s holds a %% that does not begin a percent-encoding (RFC 3986 section 2.1)", joseerror.ErrMalformedClaim, QuoteBounded(value))
+			}
+			continue
+		}
+		if !isURICharacter(c) {
+			return fmt.Errorf("%w%s holds a character that is not a URI character (RFC 3986 section 2): percent-encode it", joseerror.ErrMalformedClaim, QuoteBounded(value))
+		}
+	}
+	return nil
+}
+
+func isHexDigit(c byte) bool {
+	return '0' <= c && c <= '9' || 'a' <= c && c <= 'f' || 'A' <= c && c <= 'F'
+}
+
+func isURICharacter(c byte) bool {
+	return 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' || strings.IndexByte("-._~:/?#[]@!$&'()*+,;=", c) >= 0
+}
+
 // DecodeBase64url decodes Base64url Encoding as RFC 7515 section 2 defines it:
 // the RFC 4648 section 5 alphabet with no padding and no line breaks, whitespace
 // or other characters. Non-zero pad bits are refused, as RFC 4648 section 3.5
@@ -91,7 +115,8 @@ func DecodeBase64urlMap(b64u string) (map[string]any, error) {
 // section 7.2 step 10 require to be a UTF-8 representation of a JSON object, so
 // invalid UTF-8 (RFC 8725 section 3.7) and null are refused. So is a string
 // holding an unpaired UTF-16 surrogate escape, whose meaning RFC 8259 section
-// 8.2 calls unpredictable.
+// 8.2 calls unpredictable. The text of a parse error can echo the input, so it
+// is quoted with QuoteBounded.
 func DecodeJSONObject(decodedBytes []byte) (map[string]any, error) {
 	if !utf8.Valid(decodedBytes) {
 		return nil, errors.New("the decoded octets are not valid UTF-8")
@@ -102,7 +127,7 @@ func DecodeJSONObject(decodedBytes []byte) (map[string]any, error) {
 
 	var m map[string]any
 	if err := json.Unmarshal(decodedBytes, &m); err != nil {
-		return nil, err
+		return nil, errors.New(QuoteBounded(err.Error()))
 	}
 	if m == nil {
 		return nil, errors.New("the decoded JSON is null, not an object")
@@ -187,7 +212,10 @@ var (
 		if parsedUrl.Scheme != "https" {
 			return fmt.Errorf("%w%s is not a valid HTTPS URL", joseerror.ErrMalformedClaim, QuoteBounded(retrievedClaimValue))
 		}
-		return nil
+		if parsedUrl.Hostname() == "" {
+			return fmt.Errorf("%w%s is an https URL with an empty host, which RFC 9110 section 4.2.2 requires a recipient to reject", joseerror.ErrMalformedClaim, QuoteBounded(retrievedClaimValue))
+		}
+		return checkURICharacters(retrievedClaimValue)
 	}
 
 	ValidateBase64Url = func(jsonInput map[string]any, retrievedClaimValue string) error {

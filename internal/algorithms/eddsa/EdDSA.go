@@ -54,7 +54,7 @@ func NewSignerFromPrivateKey(privateKey crypto.PrivateKey) (*Signer, error) {
 		return nil, fmt.Errorf("%wshould be instance of ed25519.PrivateKey", joseerror.ErrInvalidPrivateKey)
 	}
 	if len(key) != ed25519.PrivateKeySize {
-		return nil, fmt.Errorf("%wan Ed25519 private key is %d bytes, got %d", joseerror.ErrInvalidPrivateKey, ed25519.PrivateKeySize, len(key))
+		return nil, fmt.Errorf("%wan Ed25519 private key is %d octets, got %d", joseerror.ErrInvalidPrivateKey, ed25519.PrivateKeySize, len(key))
 	}
 	derived := ed25519.NewKeyFromSeed(key.Seed())
 	if !bytes.Equal(derived[ed25519.SeedSize:], key[ed25519.SeedSize:]) {
@@ -82,7 +82,7 @@ func NewValidator(publicKey crypto.PublicKey) (*Validator, error) {
 		return nil, fmt.Errorf("%wshould be instance of ed25519.PublicKey", joseerror.ErrInvalidPublicKey)
 	}
 	if len(key) != ed25519.PublicKeySize {
-		return nil, fmt.Errorf("%wan Ed25519 public key is %d bytes, got %d", joseerror.ErrInvalidPublicKey, ed25519.PublicKeySize, len(key))
+		return nil, fmt.Errorf("%wan Ed25519 public key is %d octets, got %d", joseerror.ErrInvalidPublicKey, ed25519.PublicKeySize, len(key))
 	}
 	if err := checkPoint(key); err != nil {
 		return nil, err

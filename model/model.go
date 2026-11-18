@@ -14,6 +14,34 @@ import (
 )
 
 type JoseOptions struct {
+	// KeySet is a JWK Set (RFC 7517 section 5) of the caller's own keys, such as an
+	// issuer's jwks_uri document the caller fetched. Its keys are trusted as the
+	// retriever's are, so no other option is needed to use them. A nil KeySet adds no
+	// key. A KeySet that is not nil is a key source even when it holds no keys.
+	//
+	// For each token, a member is selected as a jku member is. Its "kid" must be absent
+	// or equal the token's kid, which RFC 7515 section 4.1.4 calls a hint. Its "alg"
+	// must be absent or equal the token's alg (RFC 8725 section 3.1). Its "kty", and
+	// "crv" where it has one, must serve the alg (RFC 7518 section 3, RFC 8037 section
+	// 3.1, RFC 9864, RFC 9964). Its "use" and "key_ops" must permit verifying (RFC
+	// 7517 sections 4.2 and 4.3), unless IgnoreKeyUse is set, and StrictKeyOperations
+	// applies. A member this library cannot read as a public key is skipped, as RFC
+	// 7517 section 5 says, and one holding a private key is read for its public half.
+	// An "oct" member is never selected, so an HMAC key must come from a retriever.
+	//
+	// The selected keys are tried after the retriever's and before any key the token
+	// names, and each counts towards MaxKeysTried. A token no member is selected for,
+	// and no other key verifies, is refused with ErrInvalidSignature matching
+	// ErrNoKeyIdentifierMatch, unless another key source failed. That match is a
+	// sign the set lacks the token's key only when the token and every member carry
+	// a kid: a member with no kid is selected for any kid, and a token with no kid
+	// selects every member its alg can use.
+	//
+	// The members are read on every call. Never change a set a call may be using:
+	// to refresh it, decode a new Jwks and swap the pointer, for example through an
+	// atomic.Pointer.
+	KeySet *Jwks
+
 	// UseTokenProvidedKeys lets a key the token names through its jwk or jku header
 	// verify it. Off by default, including when no options are passed: RFC 7515 section
 	// 10.3 requires the origin of a key to be authenticated, and neither header carries
@@ -33,22 +61,55 @@ type JoseOptions struct {
 	//
 	// Every request of a fetch, including each redirect hop, must be https, as RFC 7515
 	// sections 4.1.2 and 4.1.5 require. Any other is refused before it is sent.
+	// AllowedKeyURLs limits the URLs a token can make this client fetch.
 	//
 	// With no client, jku and x5u contribute no key.
 	HttpClient *http.Client
 
+	// AllowedKeyURLs lists the only jku and x5u values this library fetches, the
+	// allowlist draft-ietf-oauth-rfc8725bis section 3.10 names as a defence against
+	// server-side request forgery. With none listed, any https URL is fetched.
+	//
+	// A header value matches an entry only when the two strings are equal (RFC 3986
+	// section 6.2.1). Nothing is normalised: case, a trailing slash, a port, a query,
+	// a fragment or percent-encoding all make a difference. A jku or x5u that matches
+	// no entry is not fetched and contributes no key, as a kid that matches nothing
+	// does: another key source can still verify the token, and if none does the
+	// error is ErrInvalidSignature, matching ErrNoKeyIdentifierMatch.
+	//
+	// A redirect hop must send the request a listed entry sends. The hop is compared
+	// as the absolute URL the client requests, with a relative Location resolved,
+	// dot-segments removed and no fragment, against each entry parsed the same way.
+	// So an entry with a fragment matches a hop without one, and the case of a hop's
+	// scheme does not matter. Any other hop is refused before it is sent, and the
+	// fetch fails with ErrApplicationError.
+	//
+	// One list serves jku and x5u, and an empty list restricts neither. The list
+	// only restricts: jku still needs UseTokenProvidedKeys and HttpClient, and x5u
+	// still needs X509Roots and HttpClient. An entry that is not an https URL with a
+	// host (RFC 9110 section 4.2.2), or that holds a character outside RFC 3986
+	// section 2, can match no header, so it makes every call fail with
+	// ErrInvalidOptions; jws.CheckOptions finds it at startup. The list stops a peer
+	// choosing the URL, not what a listed host resolves to: keep a transport that
+	// refuses private and loopback addresses.
+	AllowedKeyURLs []string
+
 	// FetchTimeout bounds each jku or x5u fetch, from sending the request to reading the
 	// last byte of the body, provided the HttpClient's transport honours the request's
 	// context. Zero or less means 10 seconds. A deadline or cancellation on the context
-	// passed to jwt.Validate or jws.VerifyCompactSerialization also applies.
+	// passed to jwt.Validate, jws.Verify or jws.VerifyCompactSerialization also
+	// applies. Keep it below the caller's own deadline, so a slow key server fails
+	// the fetch rather than ending the caller's context.
 	FetchTimeout time.Duration
 
 	// MaxKeysTried bounds how many keys a token's signature is checked against,
 	// across every key source. RFC 7517 section 4.5 does not require a kid to be
 	// unique, so a key set a peer publishes may hold thousands of keys under one
 	// kid, each costing a signature verification. A token that would need more is
-	// refused with ErrTooManyKeys. A key that cannot be used with the token's alg
-	// costs no verification and does not count. Zero or less means 100.
+	// refused with ErrTooManyKeys. A KeySet, jku or jwk key that is not selected,
+	// because its kid, alg, use, key_ops or key type does not match the token,
+	// costs no verification and does not count, nor does any key that cannot be
+	// used with the token's alg. Zero or less means 100.
 	MaxKeysTried int
 
 	// AllowedSigningAlgorithms lists the 'alg' values a JWS may name. With none
@@ -98,7 +159,7 @@ type JoseOptions struct {
 	// verify the token, not only the retriever's key.
 	X509Roots *x509.CertPool
 
-	// IgnoreKeyUse lets a jwk or jku key verify a token whatever its "use" and "key_ops"
+	// IgnoreKeyUse lets a KeySet, jwk or jku key verify a token whatever its "use" and "key_ops"
 	// members say. Off by default, including when no options are passed: a key whose
 	// "use" is present and is not "sig", or whose "key_ops" is present and lacks
 	// "verify", is refused, because its publisher marked it as not for verifying
@@ -114,11 +175,11 @@ type JoseOptions struct {
 	// WebCrypto gives an ECDH private key. Off by default, including when no
 	// options are passed, because no MUST forbids such a jwk.
 	//
-	// It applies to jws.GetSignerFromJwk, jws.GetValidatorFromJwk and the jwk and
-	// jku keys of a token.
-	// JWEOptions.StrictKeyOperations does the same for the jwe constructors. A
-	// token's keys are not checked when IgnoreKeyUse is on, as no "use" or
-	// "key_ops" rule applies to them then.
+	// It applies to jws.GetSignerFromJwk, jws.GetValidatorFromJwk, the members of
+	// KeySet, and the jwk and jku keys of a token. JWEOptions.StrictKeyOperations
+	// does the same for the jwe constructors. Neither KeySet members nor a token's
+	// keys are checked when IgnoreKeyUse is on, as no "use" or "key_ops" rule
+	// applies to them then.
 	StrictKeyOperations bool
 
 	// X509ExtKeyUsages names the extended key usages that permit an x5c or x5u
@@ -146,6 +207,35 @@ type JoseOptions struct {
 	// when this claim is present, then the JWT MUST be rejected." Set ExpectedAudience
 	// to meet that MUST.
 	ExpectedAudience []string
+
+	// RequiredClaims names the claims a JWT must carry. jwt.Validate refuses a
+	// token whose claims set lacks a member of any of these names with
+	// ErrMissingClaim, naming the claim. RFC 7519 section 4.1 leaves which
+	// claims are required to the application, and names are compared exactly
+	// (section 7.3). A member is present whatever its value, null included, and
+	// a registered claim's type rule still applies to it. An empty string names
+	// no claim, so jwt.Validate refuses options holding one with
+	// ErrInvalidOptions.
+	RequiredClaims []string
+
+	// ExpectedIssuer names the issuers this recipient accepts. When set,
+	// jwt.Validate requires the "iss" claim to equal one of these, compared
+	// exactly with no canonicalisation (RFC 7519 section 2, StringOrURI). A
+	// token with no "iss" is refused with ErrMissingClaim, and one naming another
+	// issuer with ErrIssuerMismatch. An empty string names no issuer, so
+	// jwt.Validate refuses options holding one with ErrInvalidOptions.
+	//
+	// This compares the claim only. It does not show that the key that verified
+	// the token belongs to that issuer, which RFC 8725 section 3.8 also requires.
+	// So give jwt.Validate a retriever of that issuer's keys alone. To accept
+	// several issuers, call jwt.Validate once per issuer, each
+	// with that issuer's retriever and that issuer alone here. If one call names
+	// several issuers, a token signed with one issuer's key can claim another's
+	// "iss" and pass, so name several only for one issuer known by several
+	// values. For a JWT only encrypted under a shared key or password, the
+	// decrypter authenticates the writer, so compare Token.Decrypter with that
+	// issuer's key, or set RequireSignedJWT.
+	ExpectedIssuer []string
 
 	// RequireSignedJWT makes jwt.Validate refuse a JWT that is not signed: one
 	// that is only encrypted, under any key, with ErrInvalidSignature. Off by

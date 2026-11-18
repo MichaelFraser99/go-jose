@@ -41,7 +41,7 @@ func TestRetrieveJKU_RefusesAKeySetLargerThanTheCap(t *testing.T) {
 			}))
 			defer server.Close()
 
-			keys, err := RetrieveJKU(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0), nil, "RS256", false, false)()
+			keys, err := RetrieveJKU(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0, nil), nil, "RS256", false, false)()
 			if !tc.refuse {
 				return
 			}

@@ -260,6 +260,44 @@ func TestValidate_TheClaimRulesApplyToEveryShape(t *testing.T) {
 	}
 }
 
+func TestValidate_RequiredClaimsAndExpectedIssuerApplyToEveryShape(t *testing.T) {
+	shared := recipientFor(t, jwa.A128KW)
+	future := float64(time.Now().Add(time.Hour).Unix())
+	opts := &model.JoseOptions{RequiredClaims: []string{"exp", "tenant"}, ExpectedIssuer: []string{"https://issuer.example"}}
+	for _, tt := range []struct {
+		name   string
+		claims map[string]any
+		want   error
+		clause string
+	}{
+		{name: "every requirement met", claims: map[string]any{"iss": "https://issuer.example", "exp": future, "tenant": nil}, clause: "RFC 7519 4.1"},
+		{name: "a required exp absent", claims: map[string]any{"iss": "https://issuer.example", "tenant": "a"}, want: joseerror.ErrMissingClaim, clause: "RFC 7519 4.1"},
+		{name: "a required private claim absent", claims: map[string]any{"iss": "https://issuer.example", "exp": future}, want: joseerror.ErrMissingClaim, clause: "RFC 7519 4.1"},
+		{name: "another issuer", claims: map[string]any{"iss": "https://issuer.example/", "exp": future, "tenant": "a"}, want: joseerror.ErrIssuerMismatch, clause: "RFC 7519 2"},
+		{name: "no iss", claims: map[string]any{"exp": future, "tenant": "a"}, want: joseerror.ErrMissingClaim, clause: "RFC 7519 4.1.1"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			signed, retriever := signedJWT(t, tt.claims)
+			nested, err := Encrypt(shared.encrypter, jwa.A128GCM, signed, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for shape, token := range map[string]string{"signed": signed, "nested": nested, "encrypt-only": encryptOnly(t, shared, tt.claims)} {
+				validated, err := Validate(context.Background(), token, retriever, []model.Decrypter{shared.decrypter}, opts, nil)
+				if tt.want == nil {
+					if err != nil || validated == nil || validated.Claims["iss"] != "https://issuer.example" {
+						t.Errorf("[%s] a %s token with %s must be accepted, got %v", tt.clause, shape, tt.name, err)
+					}
+					continue
+				}
+				if !errors.Is(err, tt.want) || validated != nil {
+					t.Errorf("[%s] a %s token with %s must be refused with %v, got %v", tt.clause, shape, tt.name, tt.want, err)
+				}
+			}
+		})
+	}
+}
+
 func TestValidate_EachLayerHasItsOwnOptions(t *testing.T) {
 	shared := recipientFor(t, jwa.A128KW)
 	signed, retriever := signedJWT(t, map[string]any{"sub": "alice"})

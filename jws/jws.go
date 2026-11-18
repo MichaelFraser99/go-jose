@@ -37,6 +37,8 @@ func Verify(ctx context.Context, compactSerialization string, outOfBoundsPublicK
 // and also requires the payload to be a UTF-8 JSON object, as RFC 7519 section
 // 7.2 step 10 requires of a JWT Claims Set. A cty of "JWT" marks a Nested JWT
 // (RFC 7519 section 5.2), which is refused as unsupported before any key is sought.
+// It checks no claim: opts.RequiredClaims, ExpectedIssuer and ExpectedAudience
+// are ignored here and applied by jwt.Validate.
 func VerifyCompactSerialization(ctx context.Context, compactSerialization string, outOfBoundsPublicKey model.Retriever, opts *model.JoseOptions) (protectedHeader, body map[string]any, err error) {
 	protectedHeader, _, body, err = verify(ctx, compactSerialization, outOfBoundsPublicKey, opts, true)
 	return protectedHeader, body, err
@@ -46,9 +48,11 @@ const defaultMaxKeysTried = 100
 
 // CheckOptions refuses, with ErrInvalidOptions, options that are wrong whatever
 // the token: an AllowedSigningAlgorithms entry this library has no validator
-// for, such as a JWE alg, and an AcceptedTypes entry that is not a media type
-// name (RFC 6838 section 4.2). Verify and VerifyCompactSerialization call it
-// before reading the token.
+// for, such as a JWE alg, an AcceptedTypes entry that is not a media type
+// name (RFC 6838 section 4.2), and an AllowedKeyURLs entry that is not an https
+// URL with a host (RFC 7515 sections 4.1.2 and 4.1.5, RFC 9110 section 4.2.2)
+// or that holds a character outside RFC 3986 section 2. Verify and
+// VerifyCompactSerialization call it before reading the token.
 func CheckOptions(opts *model.JoseOptions) error {
 	if opts == nil {
 		return nil
@@ -58,7 +62,10 @@ func CheckOptions(opts *model.JoseOptions) error {
 			return fmt.Errorf("%wAllowedSigningAlgorithms holds %s, which is not a signature algorithm this library implements", joseerror.ErrInvalidOptions, algorithmArgument(alg))
 		}
 	}
-	return header.CheckAcceptedTypes(opts.AcceptedTypes)
+	if err := header.CheckAcceptedTypes(opts.AcceptedTypes); err != nil {
+		return err
+	}
+	return header.CheckAllowedKeyURLs(opts.AllowedKeyURLs)
 }
 
 func verify(ctx context.Context, compactSerialization string, outOfBoundsPublicKey model.Retriever, opts *model.JoseOptions, payloadIsJSONObject bool) (protectedHeader map[string]any, payload []byte, body map[string]any, err error) {
@@ -105,7 +112,7 @@ func verify(ctx context.Context, compactSerialization string, outOfBoundsPublicK
 
 	if len(jwkRetrievers) == 0 {
 		if opts == nil || !opts.UseTokenProvidedKeys && opts.X509Roots == nil {
-			return nil, nil, nil, fmt.Errorf("%wno retriever was given and no key the token names is allowed, so no token can verify; pass a retriever, or set UseTokenProvidedKeys or X509Roots", joseerror.ErrInvalidOptions)
+			return nil, nil, nil, fmt.Errorf("%wno retriever or KeySet was given and no key the token names is allowed, so no token can verify; pass a retriever, or set KeySet, UseTokenProvidedKeys or X509Roots", joseerror.ErrInvalidOptions)
 		}
 		return nil, nil, nil, fmt.Errorf("%wno retriever was given and the token names no key this verifier may use", joseerror.ErrNoKeyIdentifierMatch)
 	}
