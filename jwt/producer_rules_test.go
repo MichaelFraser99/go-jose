@@ -297,7 +297,9 @@ func TestValidate_RefusesATokenOfTheWrongShape(t *testing.T) {
 		{name: "six segments", token: "a.b.c.d.e.f", want: joseerror.ErrMalformedToken, clause: "RFC 7515 7.1"},
 		{name: "five segments whose header is not a JWE header", token: "a.b.c.d.e", want: joseerror.ErrMalformedToken, clause: "RFC 7516 9"},
 		{name: "five segments whose header names no enc", token: base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"A128KW"}`)) + ".b.c.d.e", want: joseerror.ErrMalformedToken, clause: "RFC 7516 9"},
-		{name: "a JWE, with no decrypters", token: base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"A128KW","enc":"A128GCM"}`)) + ".b.c.d.e", want: joseerror.ErrUnsupportedAlgorithm, clause: "RFC 7516 9"},
+		{name: "a JWE, with no decrypters", token: encryptOnly(t, recipientFor(t, jwa.A128KW), map[string]any{"sub": "a"}), want: joseerror.ErrUnsupportedAlgorithm, clause: "RFC 7516 9"},
+		{name: "a JWE whose segments are not base64url, with no decrypters", token: base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"A128KW","enc":"A128GCM"}`)) + ".b.c.d.e", want: joseerror.ErrMalformedToken, clause: "RFC 7516 9"},
+		{name: "a JWE whose header has no alg, with no decrypters", token: base64.RawURLEncoding.EncodeToString([]byte(`{"enc":"A128GCM"}`)) + ".AA.AA.AA.AA", want: joseerror.ErrMalformedToken, clause: "RFC 7516 4.1.1"},
 	}
 
 	for _, tt := range tests {
@@ -344,7 +346,7 @@ func TestNew_RefusesAJweKeyManagementAlgorithm(t *testing.T) {
 }
 
 func TestValidate_AJWEWithNoDecryptersAsksForThem(t *testing.T) {
-	_, err := Validate(context.Background(), base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"A128KW","enc":"A128GCM"}`))+".b.c.d.e", newTestRetriever(nil), nil, nil, nil)
+	_, err := Validate(context.Background(), encryptOnly(t, recipientFor(t, jwa.A128KW), map[string]any{"sub": "a"}), newTestRetriever(nil), nil, nil, nil)
 	if !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) || !strings.Contains(err.Error(), "no decrypters") {
 		t.Errorf("[RFC 7519 7.2 step 8] a five-part token is a JWE, and with no decrypters Validate cannot decrypt it, so want ErrUnsupportedAlgorithm saying so, got %v", err)
 	}

@@ -59,6 +59,15 @@ func TestCheckOptions_RefusesArgumentsUnderWhichNoTokenCanPass(t *testing.T) {
 		"no key source and only a public-key decrypter": {
 			decrypters: []model.Decrypter{public.decrypter}, tokens: []string{signed, publicOnly},
 		},
+		"only HMAC algorithms allowed, with KeySet and no retriever": {
+			decrypters: []model.Decrypter{public.decrypter}, opts: &model.JoseOptions{KeySet: &model.Jwks{}, AllowedSigningAlgorithms: []jwa.Algorithm{jwa.HS256}}, tokens: []string{signed, publicOnly},
+		},
+		"only HMAC algorithms allowed, with UseTokenProvidedKeys and no retriever": {
+			opts: &model.JoseOptions{UseTokenProvidedKeys: true, AllowedSigningAlgorithms: []jwa.Algorithm{jwa.HS256, jwa.HS512}}, tokens: []string{signed},
+		},
+		"only HMAC algorithms allowed, with X509Roots and no retriever": {
+			opts: &model.JoseOptions{X509Roots: x509.NewCertPool(), AllowedSigningAlgorithms: []jwa.Algorithm{jwa.HS384}}, tokens: []string{signed},
+		},
 		"no key source and a shared-key decrypter the JWE options do not permit": {
 			decrypters: []model.Decrypter{shared.decrypter}, jweOpts: onlyDir, tokens: []string{signed, nested, sharedOnly},
 		},
@@ -78,6 +87,19 @@ func TestCheckOptions_RefusesArgumentsUnderWhichNoTokenCanPass(t *testing.T) {
 
 func TestCheckOptions_AcceptsArgumentsUnderWhichSomeTokenPasses(t *testing.T) {
 	shared := recipientFor(t, jwa.A128KW)
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		t.Fatal(err)
+	}
+	hmacSigner, err := jws.GetSigner(jwa.HS256, &model.Opts{SecretKey: &secret})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hmacToken, err := New(hmacSigner, nil, map[string]any{"sub": "alice"}, Opts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hmacSigned, hmacRetriever := *hmacToken, newTestRetriever(hmacSigner.Public())
 	public := recipientFor(t, jwa.RSAOAEP256)
 	signed, retriever := signedJWT(t, map[string]any{"sub": "alice"})
 	nested, err := Encrypt(shared.encrypter, jwa.A128GCM, signed, nil)
@@ -97,6 +119,9 @@ func TestCheckOptions_AcceptsArgumentsUnderWhichSomeTokenPasses(t *testing.T) {
 		"RequireSignedJWT with decrypters and a retriever": {
 			retriever: retriever, decrypters: []model.Decrypter{shared.decrypter}, opts: &model.JoseOptions{RequireSignedJWT: true}, token: nested,
 		},
+		"only HMAC algorithms allowed, with a retriever": {
+			retriever: hmacRetriever, opts: &model.JoseOptions{AllowedSigningAlgorithms: []jwa.Algorithm{jwa.HS256}}, token: hmacSigned,
+		},
 		"no key source and a shared-key decrypter": {
 			decrypters: []model.Decrypter{shared.decrypter}, token: encryptOnly(t, shared, map[string]any{"sub": "alice"}),
 		},
@@ -114,9 +139,10 @@ func TestCheckOptions_AcceptsArgumentsUnderWhichSomeTokenPasses(t *testing.T) {
 		})
 	}
 	for name, opts := range map[string]*model.JoseOptions{
-		"KeySet":               {RequireSignedJWT: true, KeySet: &model.Jwks{}},
-		"UseTokenProvidedKeys": {RequireSignedJWT: true, UseTokenProvidedKeys: true},
-		"X509Roots":            {RequireSignedJWT: true, X509Roots: x509.NewCertPool()},
+		"KeySet with HMAC and ES256 allowed": {RequireSignedJWT: true, KeySet: &model.Jwks{}, AllowedSigningAlgorithms: []jwa.Algorithm{jwa.HS256, jwa.ES256}},
+		"KeySet":                             {RequireSignedJWT: true, KeySet: &model.Jwks{}},
+		"UseTokenProvidedKeys":               {RequireSignedJWT: true, UseTokenProvidedKeys: true},
+		"X509Roots":                          {RequireSignedJWT: true, X509Roots: x509.NewCertPool()},
 	} {
 		if err := CheckOptions(nil, []model.Decrypter{shared.decrypter}, opts, nil); err != nil {
 			t.Errorf("[RFC 7515 4.1] %s is a key source a signed token can pass under, so CheckOptions must accept it, got %v", name, err)

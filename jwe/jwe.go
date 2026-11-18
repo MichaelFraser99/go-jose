@@ -349,8 +349,12 @@ func parseProtected(compactSerialization string, opts *model.JWEOptions) ([]stri
 // are wrong whatever the token: a nil decrypter, more decrypters of one alg than
 // MaxKeysTried allows (100 when unset), an allow-list naming an algorithm this
 // library does not implement for that layer, and an AcceptedTypes entry that is
-// not a media type name (RFC 6838 section 4.2). Decrypt calls it before reading
-// the token, and ParseHeader with no decrypters.
+// not a media type name (RFC 6838 section 4.2). With
+// RequireRecommendedPBES2Count set, it also refuses a MaxPBES2Count below the
+// 1000 iterations RFC 7518 section 4.8.1.2 recommends, and one that n
+// decrypters of one PBES2 alg cannot each run 1000 iterations within, as no
+// PBES2 token could then pass. Decrypt calls it before reading the token, and
+// ParseHeader with no decrypters.
 func CheckOptions(decrypters []model.Decrypter, opts *model.JWEOptions) error {
 	maxKeysTried := defaultMaxKeysTried
 	if opts != nil && opts.MaxKeysTried > 0 {
@@ -376,6 +380,17 @@ func CheckOptions(decrypters []model.Decrypter, opts *model.JWEOptions) error {
 	for _, enc := range opts.AllowedContentEncryptionAlgorithms {
 		if contentenc.KeySize(enc) == 0 {
 			return fmt.Errorf("%wAllowedContentEncryptionAlgorithms holds %s, which is not a content encryption algorithm this library implements", joseerror.ErrInvalidOptions, contentenc.Name(enc))
+		}
+	}
+	if opts.RequireRecommendedPBES2Count {
+		maximum := header.MaxPBES2Count(opts)
+		if maximum < pbes2.RecommendedCount {
+			return fmt.Errorf("%wRequireRecommendedPBES2Count needs a 'p2c' of at least %d, and MaxPBES2Count allows at most %d, so no PBES2 token can pass", joseerror.ErrInvalidOptions, pbes2.RecommendedCount, maximum)
+		}
+		for _, alg := range header.PasswordAlgorithms {
+			if n := perAlg[alg]; n > 0 && maximum/n < pbes2.RecommendedCount {
+				return fmt.Errorf("%wRequireRecommendedPBES2Count needs a 'p2c' of at least %d, and %d %s decrypters at that count would run more iterations than the %d MaxPBES2Count allows, so no %s token can pass", joseerror.ErrInvalidOptions, pbes2.RecommendedCount, n, alg, maximum, alg)
+			}
 		}
 	}
 	return header.CheckAcceptedTypes(opts.AcceptedTypes)
