@@ -1086,7 +1086,7 @@ These add to the API without changing what you already use:
 
 ## Upgrading from 0.10.x
 
-Every change below is a compile error or a silent behaviour change for a consumer of v0.10.0. Additions that change nothing you already use are listed in [New in 0.11.0](#new-in-0110).
+Every change below is a compile error or a silent behaviour change for a consumer of v0.10.0. Additions that change nothing you already use are listed in [New in 0.11.0](#new-in-0110). Apply [Upgrading from 0.11.x to 0.12.0](#upgrading-from-011x-to-0120) as well.
 
 ### Module and API
 
