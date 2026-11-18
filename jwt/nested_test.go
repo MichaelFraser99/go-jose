@@ -427,7 +427,9 @@ func TestEncrypt_RefusesWhatIsNotASignedJWT(t *testing.T) {
 		{name: "a signature that is not base64url", token: parts[0] + "." + parts[1] + ".a=b", want: joseerror.ErrMalformedToken, clause: "RFC 7515 7.1"},
 		{name: "an alg of none", token: base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none"}`)) + "." + parts[1] + ".", want: joseerror.ErrUnsupportedAlgorithm, clause: "RFC 8725 3.1"},
 		{name: "a key management alg", token: base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RSA-OAEP"}`)) + "." + parts[1] + "." + parts[2], want: joseerror.ErrUnsupportedAlgorithm, clause: "RFC 7515 4.1.1"},
-		{name: "no alg", token: base64.RawURLEncoding.EncodeToString([]byte(`{"typ":"JWT"}`)) + "." + parts[1] + "." + parts[2], want: joseerror.ErrUnsupportedAlgorithm, clause: "RFC 7515 4.1.1"},
+		{name: "no alg", token: base64.RawURLEncoding.EncodeToString([]byte(`{"typ":"JWT"}`)) + "." + parts[1] + "." + parts[2], want: joseerror.ErrMissingClaim, clause: "RFC 7515 4.1.1"},
+		{name: "an alg that is not a string", token: base64.RawURLEncoding.EncodeToString([]byte(`{"alg":7}`)) + "." + parts[1] + "." + parts[2], want: joseerror.ErrMalformedClaim, clause: "RFC 7515 4.1.1"},
+		{name: "a JWE", token: encryptOnly(t, r, map[string]any{"sub": "a"}), want: joseerror.ErrUnsupportedAlgorithm, clause: "RFC 7519 5.2"},
 		{name: "a cty naming another type", token: signed, head: map[string]any{"cty": "json"}, want: joseerror.ErrMalformedClaim, clause: "RFC 7519 5.2"},
 		{name: "a cty that is not a string", token: signed, head: map[string]any{"cty": 1}, want: joseerror.ErrMalformedClaim, clause: "RFC 7519 5.2"},
 		{name: "a zip", token: signed, head: map[string]any{"zip": "DEF"}, want: joseerror.ErrUnsupportedAlgorithm, clause: "RFC 8725bis 3.6"},
@@ -514,7 +516,7 @@ func TestValidate_AnEncryptOnlyJWTIsRefusedUnderEveryAlgThatIsNotASharedSecret(t
 		t.Run(alg.String(), func(t *testing.T) {
 			r := recipientFor(t, alg)
 			token := encryptOnly(t, r, map[string]any{"sub": "admin"})
-			if validated, err := Validate(context.Background(), token, nil, []model.Decrypter{r.decrypter}, nil, nil); !errors.Is(err, joseerror.ErrInvalidSignature) || validated != nil {
+			if validated, err := Validate(context.Background(), token, newTestRetriever(nil), []model.Decrypter{r.decrypter}, nil, nil); !errors.Is(err, joseerror.ErrInvalidSignature) || validated != nil {
 				t.Errorf("[RFC 8725 2.1] only a shared key or password shows who encrypted a JWT, so an encrypt-only JWT under %s must be refused by default, got %v", alg, err)
 			}
 		})
@@ -544,7 +546,7 @@ func TestValidate_RefusesAnUnauthenticatedJWTBeforeAnyDecrypterRuns(t *testing.T
 		t.Run(name, func(t *testing.T) {
 			counter := &countingDecrypter{Decrypter: c.r.decrypter}
 			token := encryptOnly(t, c.r, map[string]any{"sub": "admin"})
-			if _, err := Validate(context.Background(), token, nil, []model.Decrypter{counter}, c.opts, nil); !errors.Is(err, joseerror.ErrInvalidSignature) || counter.calls != 0 {
+			if _, err := Validate(context.Background(), token, newTestRetriever(nil), []model.Decrypter{counter}, c.opts, nil); !errors.Is(err, joseerror.ErrInvalidSignature) || counter.calls != 0 {
 				t.Errorf("[RFC 7519 7.2] the refusal depends only on the protected header, so it must come before any decrypter runs; got %v after %d decryptions", err, counter.calls)
 			}
 		})
