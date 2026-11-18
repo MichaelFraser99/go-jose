@@ -18,10 +18,11 @@ import (
 // An "OKP" jwk of subtype Ed25519 is returned as an ed25519.PublicKey value, the
 // type x509.ParsePKIXPublicKey returns. One of subtype X25519 is returned as an
 // *ecdh.PublicKey, which RFC 8037 section 3.2 bars from signing. One of any
-// other subtype, and a "kty" or "crv" this library does not read, is refused
-// with ErrUnsupportedAlgorithm. Every other refusal matches ErrInvalidPublicKey.
-// A member that is absent also matches ErrMissingClaim, and one that is not a
-// string or not base64url also matches ErrMalformedClaim.
+// other subtype, a "kty" or "crv" this library does not read, and an AKP "alg"
+// it does not implement, are refused with ErrUnsupportedAlgorithm. Every other
+// refusal matches ErrInvalidPublicKey. A member that is absent also matches
+// ErrMissingClaim, and one that is not a string, null included, or not
+// base64url also matches ErrMalformedClaim.
 func PublicFromJwk(jwk map[string]any) (crypto.PublicKey, error) {
 	return internal_jwk.PublicFromJwk(jwk)
 }
@@ -70,10 +71,12 @@ func PublicJwk(publicKey crypto.PublicKey) (*map[string]any, error) {
 // either must be the public key of its "d" (RFC 8037 section 2). An "AKP" jwk
 // is returned as an *mldsa.PrivateKey.
 //
-// A "kty" or "crv" this library does not read is refused with
-// ErrUnsupportedAlgorithm. Every other refusal matches ErrInvalidPrivateKey. A
-// member that is absent also matches ErrMissingClaim, and one that is not a
-// string or not base64url also matches ErrMalformedClaim.
+// A "kty" or "crv" this library does not read, and an AKP "alg" it does not
+// implement, are refused with ErrUnsupportedAlgorithm. Every other refusal
+// matches ErrInvalidPrivateKey. A refusal of a jwk, other than an "oct" jwk,
+// that PublicFromJwk also refuses matches ErrInvalidPublicKey too. A member
+// that is absent also matches ErrMissingClaim, and one that is not a string,
+// null included, or not base64url also matches ErrMalformedClaim.
 func PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error) {
 	return internal_jwk.PrivateFromJwk(jwk)
 }

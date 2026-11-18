@@ -504,12 +504,11 @@ func EdDSAPrivateKeyFromJwk(jwk map[string]any) (ed25519.PrivateKey, error) {
 // them and its CRT values. A key with no primes whose modulus is not two
 // primes is refused, and so is any key whose modulus is over
 // MaximumRSAModulusBits, before its private members are checked. A
-// refusal for "n" or "e" carries ErrInvalidPrivateKey and wraps the public key
-// error.
+// refusal for "n" or "e" carries ErrInvalidPrivateKey, as every refusal does.
 func RSAPrivateKeyFromJwk(jwk map[string]any) (*rsa.PrivateKey, error) {
-	publicKey, err := RSAPublicKeyFromJwk(jwk)
+	publicKey, err := readRSAPublicKey(jwk, jose_errors.ErrInvalidPrivateKey)
 	if err != nil {
-		return nil, fmt.Errorf("%wthe public members of an RSA private jwk are not a public key: %w", jose_errors.ErrInvalidPrivateKey, err)
+		return nil, err
 	}
 
 	dBytes, err := PrivateMember(jwk, "d", "an RSA private key jwk", extractBase64urlUInt)
@@ -518,7 +517,7 @@ func RSAPrivateKeyFromJwk(jwk map[string]any) (*rsa.PrivateKey, error) {
 	}
 
 	if jsonutils.KeyPresent(jwk, "oth") {
-		return nil, fmt.Errorf("%wan RSA jwk with more than two primes is not supported", jose_errors.ErrInvalidPrivateKey)
+		return nil, fmt.Errorf("%wan RSA jwk that carries 'oth' is refused, as this library reads a key of exactly two primes", jose_errors.ErrInvalidPrivateKey)
 	}
 
 	primeMembers := []string{"p", "q", "dp", "dq", "qi"}
@@ -589,26 +588,30 @@ func extractBase64urlUInt(jwk map[string]any, name string) ([]byte, error) {
 // RFC 3447 section 3.1 makes n a product of primes, so an "n" of zero is
 // refused.
 func RSAPublicKeyFromJwk(jwk map[string]any) (*rsa.PublicKey, error) {
-	nBytes, err := KeyMember(jwk, "n", "an RSA jwk", jose_errors.ErrInvalidPublicKey, extractBase64urlUInt)
+	return readRSAPublicKey(jwk, jose_errors.ErrInvalidPublicKey)
+}
+
+func readRSAPublicKey(jwk map[string]any, class error) (*rsa.PublicKey, error) {
+	nBytes, err := KeyMember(jwk, "n", "an RSA jwk", class, extractBase64urlUInt)
 	if err != nil {
 		return nil, err
 	}
 
-	eBytes, err := KeyMember(jwk, "e", "an RSA jwk", jose_errors.ErrInvalidPublicKey, extractBase64urlUInt)
+	eBytes, err := KeyMember(jwk, "e", "an RSA jwk", class, extractBase64urlUInt)
 	if err != nil {
 		return nil, err
 	}
 
 	e := new(big.Int).SetBytes(eBytes)
 	if e.BitLen() > 31 {
-		return nil, fmt.Errorf("%wthe 'e' of an RSA jwk is an odd integer from 3 to 2^31-1", jose_errors.ErrInvalidPublicKey)
+		return nil, fmt.Errorf("%wthe 'e' of an RSA jwk is an odd integer from 3 to 2^31-1", class)
 	}
 
 	publicKey := &rsa.PublicKey{
 		N: new(big.Int).SetBytes(nBytes),
 		E: int(e.Int64()),
 	}
-	if err := checkRSAPublicKey(publicKey, jose_errors.ErrInvalidPublicKey); err != nil {
+	if err := checkRSAPublicKey(publicKey, class); err != nil {
 		return nil, err
 	}
 	return publicKey, nil

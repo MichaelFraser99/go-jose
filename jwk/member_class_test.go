@@ -68,6 +68,7 @@ func TestFromJwk_EveryRefusedMemberMatchesTheClassOfTheKeyRead(t *testing.T) {
 		{"Ed25519", privateJwkOf(edKey), []reader{private("kty", "crv", "x", "d"), public("kty", "crv", "x")}},
 		{"X25519", privateJwkOf(xKey), []reader{private("kty", "crv", "x", "d"), public("kty", "crv", "x")}},
 		{"AKP", privateJwkOf(mlKey), []reader{private("kty", "alg", "pub", "priv"), public("kty", "alg", "pub")}},
+		{"oct", privateJwkOf(make([]byte, 32)), []reader{private("kty", "k")}},
 	}
 	identifiers := map[string]bool{"kty": true, "crv": true, "alg": true}
 	faults := []struct {
@@ -79,6 +80,7 @@ func TestFromJwk_EveryRefusedMemberMatchesTheClassOfTheKeyRead(t *testing.T) {
 		{"absent", func(m map[string]any, name string) { delete(m, name) }, joseerror.ErrMissingClaim, false},
 		{"a number", func(m map[string]any, name string) { m[name] = 7 }, joseerror.ErrMalformedClaim, false},
 		{"an object", func(m map[string]any, name string) { m[name] = map[string]any{} }, joseerror.ErrMalformedClaim, false},
+		{"null", func(m map[string]any, name string) { m[name] = nil }, joseerror.ErrMalformedClaim, false},
 		{"not base64url", func(m map[string]any, name string) { m[name] = "!!!" }, joseerror.ErrMalformedClaim, true},
 		{"empty", func(m map[string]any, name string) { m[name] = "" }, nil, true},
 		{"another value", func(m map[string]any, name string) { m[name] = "AA" }, nil, true},
@@ -87,6 +89,9 @@ func TestFromJwk_EveryRefusedMemberMatchesTheClassOfTheKeyRead(t *testing.T) {
 		for _, r := range key.readers {
 			for _, member := range r.members {
 				for _, fault := range faults {
+					if key.name == "oct" && member == "k" && fault.name == "another value" {
+						continue
+					}
 					t.Run(key.name+"/"+r.name+"/"+member+" "+fault.name, func(t *testing.T) {
 						jwk := maps.Clone(key.jwk)
 						fault.apply(jwk, member)
@@ -98,10 +103,21 @@ func TestFromJwk_EveryRefusedMemberMatchesTheClassOfTheKeyRead(t *testing.T) {
 							if !errors.Is(err, joseerror.ErrUnsupportedAlgorithm) {
 								t.Errorf("[README Key sets] a %q this library does not read must be refused with ErrUnsupportedAlgorithm, got %v", member, err)
 							}
+							if errors.Is(err, joseerror.ErrInvalidPublicKey) || errors.Is(err, joseerror.ErrInvalidPrivateKey) {
+								t.Errorf("[README Key sets] a %q this library does not read is not a fault in the key, so it must not match a key class, got %v", member, err)
+							}
 							return
 						}
 						if !errors.Is(err, r.class) {
 							t.Errorf("[README Errors] %s must refuse a %s jwk whose %q is %s with %v, got %v", r.name, key.name, member, fault.name, r.class, err)
+						}
+						_, publicErr := PublicFromJwk(jwk)
+						wantPublic := r.name == "PrivateFromJwk" && publicErr != nil && jwk["kty"] != "oct"
+						if errors.Is(err, joseerror.ErrInvalidPublicKey) != (r.class == joseerror.ErrInvalidPublicKey || wantPublic) {
+							t.Errorf("[README Key sets] %s on a %s jwk whose %q is %s must match ErrInvalidPublicKey exactly when PublicFromJwk refuses that jwk (%v), got %v", r.name, key.name, member, fault.name, publicErr, err)
+						}
+						if r.name == "PublicFromJwk" && errors.Is(err, joseerror.ErrInvalidPrivateKey) {
+							t.Errorf("[README Key sets] PublicFromJwk must not refuse with ErrInvalidPrivateKey, got %v", err)
 						}
 						if fault.member != nil && !errors.Is(err, fault.member) {
 							t.Errorf("[RFC 7517 section 6] a %q that is %s must match %v, got %v", member, fault.name, fault.member, err)

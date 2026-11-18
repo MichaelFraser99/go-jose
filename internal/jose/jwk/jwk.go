@@ -82,8 +82,34 @@ func RetrieveKeySet(keySet *model.Jwks, kid *string, alg string, ignoreKeyUse, s
 }
 
 // PrivateFromJwk reads a private or symmetric key from its jwk. An "oct" jwk
-// (RFC 7518 section 6.4) is returned as a []byte.
+// (RFC 7518 section 6.4) is returned as a []byte. A refusal of a jwk other than
+// an "oct" jwk that PublicFromJwk also refuses matches ErrInvalidPublicKey as
+// well as ErrInvalidPrivateKey.
 func PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error) {
+	key, err := privateFromJwk(jwk)
+	if err == nil || errors.Is(err, joseerror.ErrUnsupportedAlgorithm) {
+		return key, err
+	}
+	if kty, _ := jwk["kty"].(string); kty == "oct" {
+		return nil, err
+	}
+	if _, publicErr := PublicFromJwk(jwk); publicErr != nil {
+		return nil, publicHalfRefused{err}
+	}
+	return nil, err
+}
+
+type publicHalfRefused struct {
+	err error
+}
+
+func (p publicHalfRefused) Error() string { return p.err.Error() }
+
+func (p publicHalfRefused) Unwrap() []error {
+	return []error{p.err, joseerror.ErrInvalidPublicKey}
+}
+
+func privateFromJwk(jwk map[string]any) (crypto.PrivateKey, error) {
 	if kty, present := jwk["kty"]; present {
 		ktyString, ok := kty.(string)
 		if !ok {
