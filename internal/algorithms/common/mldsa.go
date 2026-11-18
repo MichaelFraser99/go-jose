@@ -115,9 +115,13 @@ func JwkFromMLDSAPrivateKey(privateKey *mldsa.PrivateKey) (map[string]any, error
 }
 
 func mldsaParametersOfJwk(jwk map[string]any, class error) (mldsa.Parameters, error) {
-	alg, ok := jwk["alg"].(string)
+	raw, present := jwk["alg"]
+	if !present {
+		return mldsa.Parameters{}, fmt.Errorf("%w%wan AKP jwk must carry an 'alg' naming its algorithm", class, jose_errors.ErrMissingClaim)
+	}
+	alg, ok := raw.(string)
 	if !ok {
-		return mldsa.Parameters{}, fmt.Errorf("%wan AKP jwk must carry a string 'alg' naming its algorithm", class)
+		return mldsa.Parameters{}, fmt.Errorf("%w%wthe 'alg' of an AKP jwk must be a string", class, jose_errors.ErrMalformedClaim)
 	}
 	params, ok := mldsaParameterSets[alg]
 	if !ok {

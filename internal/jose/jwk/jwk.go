@@ -87,7 +87,7 @@ func PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error) {
 	if kty, present := jwk["kty"]; present {
 		ktyString, ok := kty.(string)
 		if !ok {
-			return nil, fmt.Errorf("%wthe 'kty' claim must be a string", joseerror.ErrInvalidPrivateKey)
+			return nil, fmt.Errorf("%w%wthe 'kty' claim must be a string", joseerror.ErrInvalidPrivateKey, joseerror.ErrMalformedClaim)
 		}
 		switch ktyString {
 		case "EC":
@@ -124,7 +124,7 @@ func PrivateFromJwk(jwk map[string]any) (crypto.PrivateKey, error) {
 			return nil, fmt.Errorf("%wthe 'kty' claim is not one of EC, RSA, OKP, AKP and oct", joseerror.ErrUnsupportedAlgorithm)
 		}
 	} else {
-		return nil, fmt.Errorf("%wa jwk must carry the REQUIRED 'kty' claim naming its key type", joseerror.ErrInvalidPrivateKey)
+		return nil, fmt.Errorf("%w%wa jwk must carry the REQUIRED 'kty' claim naming its key type", joseerror.ErrInvalidPrivateKey, joseerror.ErrMissingClaim)
 	}
 }
 
@@ -134,7 +134,7 @@ func PublicFromJwk(jwk map[string]any) (crypto.PublicKey, error) {
 	if kty, present := jwk["kty"]; present {
 		ktyString, ok := kty.(string)
 		if !ok {
-			return nil, fmt.Errorf("%wthe 'kty' claim must be a string", joseerror.ErrInvalidPublicKey)
+			return nil, fmt.Errorf("%w%wthe 'kty' claim must be a string", joseerror.ErrInvalidPublicKey, joseerror.ErrMalformedClaim)
 		}
 		switch ktyString {
 		case "EC":
@@ -167,7 +167,7 @@ func PublicFromJwk(jwk map[string]any) (crypto.PublicKey, error) {
 			return nil, fmt.Errorf("%wthe 'kty' claim is not one of EC, RSA, OKP and AKP", joseerror.ErrUnsupportedAlgorithm)
 		}
 	} else {
-		return nil, fmt.Errorf("%wa jwk must carry the REQUIRED 'kty' claim naming its key type", joseerror.ErrInvalidPublicKey)
+		return nil, fmt.Errorf("%w%wa jwk must carry the REQUIRED 'kty' claim naming its key type", joseerror.ErrInvalidPublicKey, joseerror.ErrMissingClaim)
 	}
 }
 
