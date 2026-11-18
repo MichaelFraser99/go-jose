@@ -349,11 +349,11 @@ type JWEOptions struct {
 // Retriever supplies the keys a token may be verified with. Each key it returns
 // that a validator of the token's alg accepts is tried, whatever the token's
 // "kid". A key no such validator accepts, such as a raw []byte or an HMAC
-// secret made for another algorithm, is skipped. If
-// the retriever returns no error and no key verifies the token, the error
-// matches ErrInvalidSignature, as it does for a forged token, unless more keys
-// were tried than JoseOptions.MaxKeysTried allows. To choose keys from a JWK Set
-// by "kid", set JoseOptions.KeySet instead.
+// secret made for another algorithm, is skipped. If the retriever returns no
+// error and no key verifies the token, the error matches ErrInvalidSignature,
+// as it does for a forged token, unless more keys were tried than
+// JoseOptions.MaxKeysTried allows. To choose keys from a JWK Set by "kid", set
+// JoseOptions.KeySet instead.
 //
 // A bare crypto.PublicKey carries no algorithm. An EC key is bound to one
 // algorithm by its curve, as RFC 7518 section 3.4 defines each ES algorithm over

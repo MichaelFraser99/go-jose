@@ -10,6 +10,7 @@ import (
 	"io"
 	"slices"
 
+	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/contentenc"
 	"github.com/MichaelFraser99/go-jose/joseerror"
 	"github.com/MichaelFraser99/go-jose/jwa"
@@ -37,11 +38,11 @@ func (k Key) clone() Key {
 }
 
 type Encrypter struct {
-	key Key
+	key *Key
 }
 
 type Decrypter struct {
-	key Key
+	key *Key
 }
 
 func checkKey(key Key, class error) error {
@@ -61,7 +62,8 @@ func NewEncrypter(key Key) (*Encrypter, error) {
 	if err := checkKey(key, joseerror.ErrInvalidPublicKey); err != nil {
 		return nil, err
 	}
-	return &Encrypter{key: key.clone()}, nil
+	cloned := key.clone()
+	return &Encrypter{key: &cloned}, nil
 }
 
 // NewDecrypter returns a Decrypter whose CEK is key.Key, for a JWE whose "enc"
@@ -70,11 +72,17 @@ func NewDecrypter(key Key) (*Decrypter, error) {
 	if err := checkKey(key, joseerror.ErrInvalidPrivateKey); err != nil {
 		return nil, err
 	}
-	return &Decrypter{key: key.clone()}, nil
+	cloned := key.clone()
+	return &Decrypter{key: &cloned}, nil
 }
 
 func (encrypter *Encrypter) Alg() jwa.Algorithm {
 	return jwa.Dir
+}
+
+// Format prints the algorithm of the encrypter, never its key, for every verb.
+func (encrypter Encrypter) Format(f fmt.State, _ rune) {
+	common.FormatKeyHolder(f, encrypter.Alg(), "encrypter")
 }
 
 // Public returns a copy of the Key, which GetDecrypter accepts.
@@ -94,6 +102,11 @@ func (encrypter *Encrypter) WrapKey(_ io.Reader, enc jwa.Encryption, header map[
 
 func (decrypter *Decrypter) Alg() jwa.Algorithm {
 	return jwa.Dir
+}
+
+// Format prints the algorithm of the decrypter, never its key, for every verb.
+func (decrypter Decrypter) Format(f fmt.State, _ rune) {
+	common.FormatKeyHolder(f, decrypter.Alg(), "decrypter")
 }
 
 // Public returns a copy of the Key.

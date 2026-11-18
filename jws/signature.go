@@ -33,8 +33,9 @@ var errSignWithEdDSA = fmt.Errorf("%wEdDSA is accepted only for verification: RF
 // Ed25519 key or an ML-DSA key. For HS256, HS384 and HS512 it signs with
 // opts.SecretKey, which is required and must be at least the hash output size
 // (RFC 7518 section 3.2). EdDSA is refused, as RFC 9864 section 4.1.2 deprecates
-// it: sign with Ed25519. A model.Signer gives no way to read its private key
-// back, so a generated key lasts only as long as the signer. To keep a key,
+// it: sign with Ed25519. Of a key it generates, the signer gives only the public
+// half, through Public, so a generated key lasts only as long as the signer. An
+// HMAC signer's Public returns the secret the caller passed. To keep a key,
 // generate it yourself, save it with jwk.PrivateJwk, and build the signer with
 // GetSignerFromPrivateKey or GetSignerFromJwk.
 func GetSigner(alg jwa.Algorithm, opts *model.Opts) (model.Signer, error) {
