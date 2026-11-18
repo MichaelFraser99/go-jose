@@ -985,7 +985,7 @@ To find the affected code, search it for `*ed25519.`. Also check each `==` and e
 These are new:
 
 - The `jwe` package, with `GetEncrypter`, `GetDecrypter`, `GetEncrypterFromJwk`, `GetDecrypterFromJwk`, `Encrypt`, `Decrypt`, `ParseHeader` and `DirectKey`. See [Encrypting and decrypting](#encrypting-and-decrypting).
-- `oct` keys in the `jwk` package: `PrivateFromJwk` reads one as a `[]byte`, and `PrivateJwk` writes one.
+- `oct` keys in the `jwk` package: `PrivateFromJwk` reads one as a `[]byte`, and `PrivateJwk` writes one. `PrivateJwk` also writes what `Public()` returns for a secret key, with an `alg` that names the algorithm the key was made for. v0.11.0 refused it.
 - `model.Encrypter`, `model.Decrypter` and `model.DecrypterOpts`.
 - `jwa.Encryption` with `jwa.GetEncryption`, and the `alg` constants `jwa.RSAOAEP` to `jwa.Dir` and `jwa.ECDHES` to `jwa.ECDHESA256KW`. The integer values of the existing `jwa.Algorithm` constants do not change.
 - `model.JWEOptions`, the options of `jwe.Decrypt`, `jwe.ParseHeader`, `jwe.GetEncrypterFromJwk`, `jwe.GetDecrypterFromJwk` and the JWE layer of `jwt.Validate`.
@@ -1039,7 +1039,7 @@ A JWE `alg` cannot sign. `jws.GetSigner`, `jws.GetSignerFromPrivateKey`, `jws.Ge
 
 Printing a signer, validator, encrypter or decrypter now shows its algorithm and role, never its key. In v0.11.0, `%v` on an HMAC signer or validator printed its secret, and `%v` on an Ed25519 signer printed its private key. What `Public()` returns for an HMAC signer or validator now prints as `secret key`, and `encoding/json`, `encoding/xml` and `encoding/gob` refuse to encode it. v0.11.0 encoded it. Encoding a struct that holds it now fails as a whole. If you printed or encoded one of these to read its key, use `jwk.PrivateJwk` on a key you hold instead.
 
-What `Public()` returns for an HMAC signer or validator is now bound to its algorithm, as RFC 8725 section 3.1 requires. `jws.GetValidator` refuses one made for another HMAC algorithm with `ErrInvalidPublicKey`. v0.11.0 accepted the `Public()` of an HS256 signer for an HS384 or HS512 validator when the secret was long enough. Build each validator from the signer of its own algorithm. `SecretKey.Equal` now also compares the algorithm, so two keys of the same bytes made for different algorithms are not equal.
+What `Public()` returns for an HMAC signer or validator is now bound to its algorithm, as RFC 8725 section 3.1 requires. `jws.GetValidator` refuses one made for another HMAC algorithm with `ErrInvalidPublicKey`. v0.11.0 accepted the `Public()` of an HS256 signer for an HS384 or HS512 validator when the secret was long enough. Build each validator from the signer of its own algorithm. A retriever is held to the same rule: an HS384 token checked against a retriever that returns only the `Public()` of an HS256 signer now fails with `ErrInvalidSignature`, where v0.11.0 verified it. Return the `Public()` of a signer of the token's algorithm. `SecretKey.Equal` now also compares the algorithm, so two keys of the same bytes made for different algorithms are not equal.
 
 ## Upgrading from 0.10.x
 
