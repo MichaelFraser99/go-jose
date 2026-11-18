@@ -24,7 +24,7 @@ var smallOrderYCoordinates = map[string]bool{
 }
 
 type Signer struct {
-	privateKey ed25519.PrivateKey
+	privateKey *ed25519.PrivateKey
 }
 
 type Validator struct {
@@ -37,7 +37,7 @@ func NewSigner() (*Signer, error) {
 		return nil, fmt.Errorf("%wfailed to generate key: %s", joseerror.ErrSigningError, err.Error())
 	}
 	return &Signer{
-		privateKey: privateKey,
+		privateKey: &privateKey,
 	}, nil
 }
 
@@ -61,7 +61,7 @@ func NewSignerFromPrivateKey(privateKey crypto.PrivateKey) (*Signer, error) {
 		return nil, fmt.Errorf("%wthe public half of an Ed25519 private key is not derived from its seed", joseerror.ErrInvalidPrivateKey)
 	}
 	return &Signer{
-		privateKey: derived,
+		privateKey: &derived,
 	}, nil
 }
 
@@ -105,6 +105,11 @@ func (signer *Signer) Alg() jwa.Algorithm {
 	return jwa.Ed25519
 }
 
+// Format prints the algorithm of the signer, never its key, for every verb.
+func (signer Signer) Format(f fmt.State, _ rune) {
+	common.FormatKeyHolder(f, signer.Alg(), "signer")
+}
+
 func (signer *Signer) Public() crypto.PublicKey {
 	return signer.privateKey.Public()
 }
@@ -119,7 +124,7 @@ func (signer *Signer) Sign(_ io.Reader, digest []byte, opts crypto.SignerOpts) (
 	if o, ok := opts.(*ed25519.Options); ok && o.Context != "" {
 		return nil, fmt.Errorf("%wEd25519 is pure EdDSA and has no context, which would make it Ed25519ctx", joseerror.ErrSigningError)
 	}
-	return ed25519.Sign(signer.privateKey, digest), nil
+	return ed25519.Sign(*signer.privateKey, digest), nil
 }
 
 func (validator *Validator) ValidateSignature(digest, signature []byte) (bool, error) {

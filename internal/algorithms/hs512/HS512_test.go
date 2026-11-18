@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"github.com/MichaelFraser99/go-jose/internal/algorithms/common"
 	"github.com/MichaelFraser99/go-jose/joseerror"
+	"github.com/MichaelFraser99/go-jose/jwa"
 	"sync"
 	"testing"
 )
@@ -113,7 +114,7 @@ func TestHS512_SignGeneratedSecret(t *testing.T) {
 
 	secretKey := hs512.Public().(common.SecretKey)
 
-	hs5122, err := NewSigner((*[]byte)(&secretKey))
+	hs5122, err := NewSigner(ptr(common.SecretBytes(secretKey)))
 	if err != nil {
 		t.Fatal("no error should be thrown:", err)
 	}
@@ -294,7 +295,7 @@ func TestSigner_DoesNotTakeItsKeyFromTheCallersSlice(t *testing.T) {
 			if !ok {
 				panic("Public did not return a common.SecretKey")
 			}
-			returned[0] = 'X'
+			common.SecretBytes(returned)[0] = 'X'
 		},
 	}
 
@@ -337,12 +338,12 @@ func TestValidator_DoesNotTakeItsKeyFromTheCallersSlice(t *testing.T) {
 		t.Fatalf("failed to sign: %v", err)
 	}
 
-	supplied := common.SecretKey(bytes.Clone(secret))
+	supplied := common.NewSecretKey(jwa.HS512, bytes.Clone(secret))
 	validator, err := NewValidator(supplied)
 	if err != nil {
 		t.Fatalf("failed to build the validator: %v", err)
 	}
-	supplied[0] = 'X'
+	common.SecretBytes(supplied)[0] = 'X'
 
 	valid, err := validator.ValidateSignature(input, signature)
 	if err != nil {
@@ -396,11 +397,14 @@ func TestNewValidator_RefusesASecretShorterThanTheHashOutput(t *testing.T) {
 		key       crypto.PublicKey
 		accept    bool
 	}{
-		"a secret of exactly the hash output":  {reference: "RFC 7518 3.2", key: common.SecretKey(bytes.Repeat([]byte("k"), 64)), accept: true},
-		"a secret longer than the hash output": {reference: "RFC 7518 3.2", key: common.SecretKey(bytes.Repeat([]byte("k"), 64*2)), accept: true},
-		"a secret one byte short":              {reference: "RFC 7518 3.2", key: common.SecretKey(bytes.Repeat([]byte("k"), 64-1))},
-		"an empty secret":                      {reference: "RFC 7518 3.2", key: common.SecretKey([]byte{})},
-		"a typed nil secret":                   {reference: "RFC 7518 3.2", key: common.SecretKey(nil)},
+		"a secret of exactly the hash output":  {reference: "RFC 7518 3.2", key: common.NewSecretKey(jwa.HS512, bytes.Repeat([]byte("k"), 64)), accept: true},
+		"a secret longer than the hash output": {reference: "RFC 7518 3.2", key: common.NewSecretKey(jwa.HS512, bytes.Repeat([]byte("k"), 64*2)), accept: true},
+		"a secret one byte short":              {reference: "RFC 7518 3.2", key: common.NewSecretKey(jwa.HS512, bytes.Repeat([]byte("k"), 64-1))},
+		"an empty secret":                      {reference: "RFC 7518 3.2", key: common.NewSecretKey(jwa.HS512, []byte{})},
+		"a typed nil secret":                   {reference: "RFC 7518 3.2", key: common.NewSecretKey(jwa.HS512, nil)},
+		"a secret made for HS256":              {reference: "RFC 8725 3.1", key: common.NewSecretKey(jwa.HS256, bytes.Repeat([]byte("k"), 64))},
+		"a secret made for A256KW":             {reference: "RFC 8725 3.1", key: common.NewSecretKey(jwa.A256KW, bytes.Repeat([]byte("k"), 64))},
+		"a secret bound to no algorithm":       {reference: "RFC 8725 3.1", key: common.SecretKey{}},
 		"a nil public key":                     {reference: "RFC 7517 4", key: nil},
 		"a key of the wrong type":              {reference: "RFC 7517 4", key: "not a secret key"},
 		"a raw byte slice, not a SecretKey":    {reference: "RFC 7517 4", key: bytes.Repeat([]byte("k"), 64)},
@@ -437,7 +441,9 @@ func TestNewSigner_AGeneratedSecretIsLongEnough(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected a common.SecretKey, got %T", signer.Public())
 	}
-	if len(secret) < 64 {
-		t.Errorf("[RFC 7518 3.2] a generated secret must be at least the SHA-512 output size of 64 bytes, got %d", len(secret))
+	if len(common.SecretBytes(secret)) < 64 {
+		t.Errorf("[RFC 7518 3.2] a generated secret must be at least the SHA-512 output size of 64 bytes, got %d", len(common.SecretBytes(secret)))
 	}
 }
+
+func ptr[T any](v T) *T { return &v }

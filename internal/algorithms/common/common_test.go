@@ -9,6 +9,8 @@ import (
 	"encoding/hex"
 	"hash"
 	"testing"
+
+	"github.com/MichaelFraser99/go-jose/jwa"
 )
 
 func TestProduceMac_TakesAHasherNothingHasWrittenTo(t *testing.T) {
@@ -71,17 +73,21 @@ func TestSecretKey_EqualIsReachableFromWhatPublicReturns(t *testing.T) {
 		other     crypto.PublicKey
 		equal     bool
 	}{
-		"the same bytes as a value":          {reference: "crypto.PublicKey", other: SecretKey(bytes.Clone(secret)), equal: true},
-		"the same bytes as a pointer":        {reference: "crypto.PublicKey", other: ptr(SecretKey(bytes.Clone(secret))), equal: true},
-		"different bytes":                    {reference: "crypto.PublicKey", other: SecretKey(bytes.Repeat([]byte("j"), 64))},
-		"a different length":                 {reference: "crypto.PublicKey", other: SecretKey(bytes.Repeat([]byte("k"), 63))},
-		"an empty secret":                    {reference: "crypto.PublicKey", other: SecretKey([]byte{})},
-		"something that is not a secret key": {reference: "crypto.PublicKey", other: "not a key"},
-		"a nil pointer to a secret key":      {reference: "crypto.PublicKey", other: (*SecretKey)(nil)},
-		"an untyped nil":                     {reference: "crypto.PublicKey", other: nil},
+		"the same bytes as a value":                   {reference: "crypto.PublicKey", other: NewSecretKey(jwa.HS512, bytes.Clone(secret)), equal: true},
+		"the same bytes as a pointer":                 {reference: "crypto.PublicKey", other: ptr(NewSecretKey(jwa.HS512, bytes.Clone(secret))), equal: true},
+		"different bytes":                             {reference: "crypto.PublicKey", other: NewSecretKey(jwa.HS512, bytes.Repeat([]byte("j"), 64))},
+		"a different length":                          {reference: "crypto.PublicKey", other: NewSecretKey(jwa.HS512, bytes.Repeat([]byte("k"), 63))},
+		"an empty secret":                             {reference: "crypto.PublicKey", other: NewSecretKey(jwa.HS512, []byte{})},
+		"the same bytes made for HS256":               {reference: "RFC 8725 3.1", other: NewSecretKey(jwa.HS256, bytes.Clone(secret))},
+		"the same bytes made for A256KW":              {reference: "RFC 8725 3.1", other: NewSecretKey(jwa.A256KW, bytes.Clone(secret))},
+		"the same bytes made for HS256, as a pointer": {reference: "RFC 8725 3.1", other: ptr(NewSecretKey(jwa.HS256, bytes.Clone(secret)))},
+		"the same bytes bound to nothing":             {reference: "RFC 8725 3.1", other: SecretKey{}},
+		"something that is not a secret key":          {reference: "crypto.PublicKey", other: "not a key"},
+		"a nil pointer to a secret key":               {reference: "crypto.PublicKey", other: (*SecretKey)(nil)},
+		"an untyped nil":                              {reference: "crypto.PublicKey", other: nil},
 	}
 
-	key := SecretKey(secret)
+	key := NewSecretKey(jwa.HS512, secret)
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			if got := key.Equal(tc.other); got != tc.equal {
@@ -92,13 +98,13 @@ func TestSecretKey_EqualIsReachableFromWhatPublicReturns(t *testing.T) {
 }
 
 func TestSecretKey_EqualIsInTheMethodSetOfTheValueTypeThatIsHandedOut(t *testing.T) {
-	var handedOut crypto.PublicKey = SecretKey(bytes.Repeat([]byte("k"), 64))
+	var handedOut crypto.PublicKey = NewSecretKey(jwa.HS512, bytes.Repeat([]byte("k"), 64))
 
 	comparer, ok := handedOut.(interface{ Equal(crypto.PublicKey) bool })
 	if !ok {
 		t.Fatal("Signer.Public and Validator.Public return a SecretKey value, so Equal must be in the method set of the value type, or a consumer cannot reach it at all")
 	}
-	if !comparer.Equal(SecretKey(bytes.Repeat([]byte("k"), 64))) {
+	if !comparer.Equal(NewSecretKey(jwa.HS512, bytes.Repeat([]byte("k"), 64))) {
 		t.Error("two secret keys of the same bytes must compare equal through the interface a consumer holds")
 	}
 }
