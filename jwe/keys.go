@@ -190,9 +190,10 @@ func GetEncrypter(alg jwa.Algorithm, key crypto.PublicKey) (model.Encrypter, err
 // *ecdsa.PrivateKey on P-256, P-384 or P-521, or an *ecdh.PrivateKey on one of
 // those curves or X25519, and a JWE whose "epk" is on another curve fails as
 // ErrDecryptionFailed (RFC 8725 section 3.4). For A128KW, A192KW, A256KW, the
-// AES GCM key wraps and dir, key is the shared key as GetEncrypter takes it. A
-// dir Decrypter decrypts only a JWE whose "enc" is the DirectKey's; any other
-// fails as ErrDecryptionFailed. For the PBES2 algorithms, key is a PasswordKey,
+// AES GCM key wraps and dir, key is the shared key as GetEncrypter takes it,
+// and a Public value made for another algorithm is refused with
+// ErrInvalidPrivateKey. A dir Decrypter decrypts only a JWE whose "enc" is the
+// DirectKey's; any other fails as ErrDecryptionFailed. For the PBES2 algorithms, key is a PasswordKey,
 // whose Count is ignored: each JWE names its own "p2c", which Decrypt bounds
 // with JWEOptions.MaxPBES2Count. The Decrypter's own Decrypt method runs as
 // many iterations as the header it is given names, so pass a PBES2 Decrypter
