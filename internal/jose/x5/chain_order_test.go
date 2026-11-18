@@ -41,7 +41,7 @@ func retrieveX5UServing(t *testing.T, body []byte, roots *x509.CertPool) ([]cryp
 		}
 	}))
 	defer server.Close()
-	return RetrieveX5U(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0), nil, nil, roots, nil)()
+	return RetrieveX5U(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0, nil), nil, nil, roots, nil)()
 }
 
 func intermediates(t *testing.T, root *issued, n int) []*issued {

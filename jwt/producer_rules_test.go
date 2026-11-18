@@ -199,6 +199,8 @@ func TestNew_RefusesAHeadThatBreaksAJwsProducerRule(t *testing.T) {
 		{name: "an x5t#S256 that is not base64url", head: map[string]any{"x5t#S256": "a+b/"}, want: joseerror.ErrMalformedClaim, clause: "RFC 7515 4.1.8"},
 		{name: "a jku over plain http", head: map[string]any{"jku": "http://example.com/jwks"}, want: joseerror.ErrMalformedClaim, clause: "RFC 7515 4.1.2"},
 		{name: "an x5u over plain http", head: map[string]any{"x5u": "http://example.com/chain.pem"}, want: joseerror.ErrMalformedClaim, clause: "RFC 7515 4.1.5"},
+		{name: "a jku with an empty host", head: map[string]any{"jku": "https:///jwks"}, want: joseerror.ErrMalformedClaim, clause: "RFC 9110 4.2.2"},
+		{name: "an x5u with only a port", head: map[string]any{"x5u": "https://:443/chain.pem"}, want: joseerror.ErrMalformedClaim, clause: "RFC 9110 4.2.2"},
 		{name: "an x5c that is a string", head: map[string]any{"x5c": "abc"}, want: joseerror.ErrMalformedClaim, clause: "RFC 7515 4.1.6"},
 		{name: "an x5c whose entry is not a DER certificate", head: map[string]any{"x5c": []string{"abc"}}, want: joseerror.ErrMalformedClaim, clause: "RFC 7515 4.1.6"},
 		{name: "a jwk that is a string", head: map[string]any{"jwk": "x"}, want: joseerror.ErrMalformedClaim, clause: "RFC 7515 4.1.3"},

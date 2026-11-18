@@ -191,7 +191,7 @@ func TestRetrieveJKU_ASelectionOfNoMemberReportsNoKeyIdentifierMatch(t *testing.
 			jwk, _ := p256Jwk(t, tc.member)
 			server := serveKeySet(t, jwk)
 
-			keys, err := RetrieveJKU(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0), tc.kid, "ES256", false, false)()
+			keys, err := RetrieveJKU(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0, nil), tc.kid, "ES256", false, false)()
 			if err == nil {
 				t.Fatalf("[%s] no member may be selected, got %d keys", tc.clause, len(keys))
 			}
@@ -213,7 +213,7 @@ func TestRetrieveJKU_ADocumentThatIsNotAJwkSetIsRefused(t *testing.T) {
 			}))
 			defer server.Close()
 
-			keys, err := RetrieveJKU(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0), nil, "ES256", false, false)()
+			keys, err := RetrieveJKU(server.URL, httputils.Fetcher(context.Background(), server.Client(), 0, nil), nil, "ES256", false, false)()
 			if err == nil {
 				t.Fatalf("[RFC 7517 5] a JWK Set MUST have a \"keys\" member holding an array, got %d keys", len(keys))
 			}
