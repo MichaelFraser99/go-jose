@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/MichaelFraser99/go-jose/joseerror"
@@ -75,6 +76,9 @@ func TestCheckOptions_RefusesArgumentsUnderWhichNoTokenCanPass(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if err := CheckOptions(tt.retriever, tt.decrypters, tt.opts, tt.jweOpts); !errors.Is(err, joseerror.ErrInvalidOptions) {
 				t.Errorf("[README Errors] no token can pass with %s, so CheckOptions must refuse it with ErrInvalidOptions, got %v", name, err)
+			}
+			if err := CheckOptions(tt.retriever, tt.decrypters, tt.opts, tt.jweOpts); strings.HasPrefix(name, "only HMAC") && (err == nil || !strings.Contains(err.Error(), "only HMAC algorithms")) {
+				t.Errorf("[README Errors] the refusal must name its cause, that only HMAC algorithms are allowed, got %v", err)
 			}
 			for _, token := range tt.tokens {
 				if validated, err := Validate(context.Background(), token, tt.retriever, tt.decrypters, tt.opts, tt.jweOpts); !errors.Is(err, joseerror.ErrInvalidOptions) || validated != nil {

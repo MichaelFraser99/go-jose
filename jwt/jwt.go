@@ -227,8 +227,9 @@ func CheckOptions(outOfBoundsPublicKey model.Retriever, decrypters []model.Decry
 	if opts != nil && opts.RequireEncryptedJWT && len(permitted) == 0 {
 		return fmt.Errorf("%wRequireEncryptedJWT is set and no decrypter implements a permitted alg, so no token can pass", joseerror.ErrInvalidOptions)
 	}
-	tokenKeys := opts != nil && (opts.KeySet != nil || opts.UseTokenProvidedKeys || opts.X509Roots != nil) && !onlyHMAC(opts.AllowedSigningAlgorithms)
-	if outOfBoundsPublicKey != nil || tokenKeys {
+	tokenKeySources := opts != nil && (opts.KeySet != nil || opts.UseTokenProvidedKeys || opts.X509Roots != nil)
+	hmacOnly := tokenKeySources && onlyHMAC(opts.AllowedSigningAlgorithms)
+	if outOfBoundsPublicKey != nil || tokenKeySources && !hmacOnly {
 		return nil
 	}
 	encryptOnly := (opts == nil || !opts.RequireSignedJWT) && slices.ContainsFunc(permitted, func(decrypter model.Decrypter) bool {
@@ -236,6 +237,9 @@ func CheckOptions(outOfBoundsPublicKey model.Retriever, decrypters []model.Decry
 	})
 	if encryptOnly {
 		return nil
+	}
+	if hmacOnly {
+		return fmt.Errorf("%wAllowedSigningAlgorithms names only HMAC algorithms, and KeySet, UseTokenProvidedKeys and X509Roots supply no HMAC key, so no signature can verify, and no encrypt-only JWT can pass; pass a retriever that returns an HMAC signer's Public", joseerror.ErrInvalidOptions)
 	}
 	return fmt.Errorf("%wno retriever or KeySet was given and no key the token names is allowed, so no signature can verify, and no encrypt-only JWT can pass; pass a retriever, or set KeySet, UseTokenProvidedKeys or X509Roots", joseerror.ErrInvalidOptions)
 }

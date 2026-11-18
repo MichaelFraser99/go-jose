@@ -230,30 +230,11 @@ func Decrypt(ctx context.Context, compactSerialization string, decrypters []mode
 	if err != nil {
 		return nil, nil, nil, err
 	}
-
-	var parts [4][]byte
-	for i, name := range []string{"encrypted key", "initialization vector", "ciphertext", "authentication tag"} {
-		parts[i], err = jsonutils.DecodeBase64url(components[i+1])
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("%werror decoding the %s: %v", joseerror.ErrMalformedToken, name, err)
-		}
-	}
-	encryptedKey, iv, ciphertext, tag := parts[0], parts[1], parts[2], parts[3]
-
-	size := contentenc.KeySize(enc)
-	shape, err := contentenc.New(enc, make([]byte, size))
+	encryptedKey, iv, ciphertext, tag, err := parseParts(components, alg, enc)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("%w%s", joseerror.ErrDecryptionFailed, err.Error())
+		return nil, nil, nil, err
 	}
-	if len(iv) != shape.NonceSize() {
-		return nil, nil, nil, fmt.Errorf("%w%s requires an initialization vector of %d octets, got %d", joseerror.ErrMalformedToken, enc, shape.NonceSize(), len(iv))
-	}
-	if len(tag) != shape.Overhead() {
-		return nil, nil, nil, fmt.Errorf("%w%s requires an authentication tag of %d octets, got %d", joseerror.ErrMalformedToken, enc, shape.Overhead(), len(tag))
-	}
-	if least, most := encryptedKeySize(alg, size); len(encryptedKey) < least || len(encryptedKey) > most {
-		return nil, nil, nil, fmt.Errorf("%wa %s JWE with %s has an encrypted key of %d to %d octets, got %d (RFC 7516 section 5.2 step 10)", joseerror.ErrMalformedToken, alg, enc, least, most, len(encryptedKey))
-	}
+	size := contentenc.KeySize(enc)
 
 	var candidates []model.Decrypter
 	for _, candidate := range decrypters {
@@ -322,11 +303,41 @@ func ParseHeader(compactSerialization string, opts *model.JWEOptions) (map[strin
 	if err := CheckOptions(nil, opts); err != nil {
 		return nil, err
 	}
-	_, protectedHeader, _, _, err := parseProtected(compactSerialization, opts)
+	components, protectedHeader, alg, enc, err := parseProtected(compactSerialization, opts)
 	if err != nil {
 		return nil, err
 	}
+	if _, _, _, _, err := parseParts(components, alg, enc); err != nil {
+		return nil, err
+	}
 	return protectedHeader, nil
+}
+
+func parseParts(components []string, alg jwa.Algorithm, enc jwa.Encryption) (encryptedKey, iv, ciphertext, tag []byte, err error) {
+	var parts [4][]byte
+	for i, name := range []string{"encrypted key", "initialization vector", "ciphertext", "authentication tag"} {
+		parts[i], err = jsonutils.DecodeBase64url(components[i+1])
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("%werror decoding the %s: %v", joseerror.ErrMalformedToken, name, err)
+		}
+	}
+	encryptedKey, iv, ciphertext, tag = parts[0], parts[1], parts[2], parts[3]
+
+	size := contentenc.KeySize(enc)
+	shape, err := contentenc.New(enc, make([]byte, size))
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("%w%s", joseerror.ErrDecryptionFailed, err.Error())
+	}
+	if len(iv) != shape.NonceSize() {
+		return nil, nil, nil, nil, fmt.Errorf("%w%s requires an initialization vector of %d octets, got %d", joseerror.ErrMalformedToken, enc, shape.NonceSize(), len(iv))
+	}
+	if len(tag) != shape.Overhead() {
+		return nil, nil, nil, nil, fmt.Errorf("%w%s requires an authentication tag of %d octets, got %d", joseerror.ErrMalformedToken, enc, shape.Overhead(), len(tag))
+	}
+	if least, most := encryptedKeySize(alg, size); len(encryptedKey) < least || len(encryptedKey) > most {
+		return nil, nil, nil, nil, fmt.Errorf("%wa %s JWE with %s has an encrypted key of %d to %d octets, got %d (RFC 7516 section 5.2 step 10)", joseerror.ErrMalformedToken, alg, enc, least, most, len(encryptedKey))
+	}
+	return encryptedKey, iv, ciphertext, tag, nil
 }
 
 func parseProtected(compactSerialization string, opts *model.JWEOptions) ([]string, map[string]any, jwa.Algorithm, jwa.Encryption, error) {
@@ -350,10 +361,10 @@ func parseProtected(compactSerialization string, opts *model.JWEOptions) ([]stri
 // MaxKeysTried allows (100 when unset), an allow-list naming an algorithm this
 // library does not implement for that layer, and an AcceptedTypes entry that is
 // not a media type name (RFC 6838 section 4.2). With
-// RequireRecommendedPBES2Count set, it also refuses a MaxPBES2Count below the
-// 1000 iterations RFC 7518 section 4.8.1.2 recommends, and one that n
-// decrypters of one PBES2 alg cannot each run 1000 iterations within, as no
-// PBES2 token could then pass. Decrypt calls it before reading the token, and
+// RequireRecommendedPBES2Count set and a PBES2 alg permitted, it also refuses a
+// MaxPBES2Count below the 1000 iterations RFC 7518 section 4.8.1.2 recommends,
+// and one that n decrypters of one permitted PBES2 alg cannot each run 1000
+// iterations within, as no PBES2 token could then pass. Decrypt calls it before reading the token, and
 // ParseHeader with no decrypters.
 func CheckOptions(decrypters []model.Decrypter, opts *model.JWEOptions) error {
 	maxKeysTried := defaultMaxKeysTried
@@ -382,12 +393,15 @@ func CheckOptions(decrypters []model.Decrypter, opts *model.JWEOptions) error {
 			return fmt.Errorf("%wAllowedContentEncryptionAlgorithms holds %s, which is not a content encryption algorithm this library implements", joseerror.ErrInvalidOptions, contentenc.Name(enc))
 		}
 	}
-	if opts.RequireRecommendedPBES2Count {
+	permitted := slices.DeleteFunc(slices.Clone(header.PasswordAlgorithms), func(alg jwa.Algorithm) bool {
+		return len(opts.AllowedKeyManagementAlgorithms) > 0 && !slices.Contains(opts.AllowedKeyManagementAlgorithms, alg)
+	})
+	if opts.RequireRecommendedPBES2Count && len(permitted) > 0 {
 		maximum := header.MaxPBES2Count(opts)
 		if maximum < pbes2.RecommendedCount {
 			return fmt.Errorf("%wRequireRecommendedPBES2Count needs a 'p2c' of at least %d, and MaxPBES2Count allows at most %d, so no PBES2 token can pass", joseerror.ErrInvalidOptions, pbes2.RecommendedCount, maximum)
 		}
-		for _, alg := range header.PasswordAlgorithms {
+		for _, alg := range permitted {
 			if n := perAlg[alg]; n > 0 && maximum/n < pbes2.RecommendedCount {
 				return fmt.Errorf("%wRequireRecommendedPBES2Count needs a 'p2c' of at least %d, and %d %s decrypters at that count would run more iterations than the %d MaxPBES2Count allows, so no %s token can pass", joseerror.ErrInvalidOptions, pbes2.RecommendedCount, n, alg, maximum, alg)
 			}

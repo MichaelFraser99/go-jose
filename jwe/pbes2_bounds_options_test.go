@@ -44,6 +44,8 @@ func TestCheckOptions_RefusesPBES2BoundsNoTokenCanMeet(t *testing.T) {
 		"two decrypters within a maximum of exactly 2000":  {decrypters: decrypters(2), opts: &model.JWEOptions{RequireRecommendedPBES2Count: true, MaxPBES2Count: 2000}},
 		"a maximum below 1000, without the recommendation": {decrypters: decrypters(1), opts: &model.JWEOptions{MaxPBES2Count: 999}, belowCount: true},
 		"the recommendation under the default maximum":     {decrypters: decrypters(3), opts: &model.JWEOptions{RequireRecommendedPBES2Count: true}},
+		"a maximum below 1000, with PBES2 not permitted":   {opts: &model.JWEOptions{RequireRecommendedPBES2Count: true, MaxPBES2Count: 999, AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.A256KW}}, belowCount: true},
+		"two decrypters of an alg not permitted":           {decrypters: decrypters(2), opts: &model.JWEOptions{RequireRecommendedPBES2Count: true, MaxPBES2Count: 1999, AllowedKeyManagementAlgorithms: []jwa.Algorithm{jwa.PBES2HS512A256KW}}, belowCount: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := CheckOptions(tt.decrypters, tt.opts)
